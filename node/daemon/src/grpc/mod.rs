@@ -1,10 +1,14 @@
 pub mod secrets;
 
+use futures::channel::mpsc::Sender;
 use tracing::info;
 
-use crate::{config::GrpcConfig, error::AppError};
+use crate::{config::GrpcConfig, error::AppError, network::SecretsMessage};
 
-pub async fn start_grpc_server(config: &GrpcConfig) -> Result<(), AppError> {
+pub async fn start_grpc_server(
+    config: &GrpcConfig,
+    secrets_sender: Sender<SecretsMessage>,
+) -> Result<(), AppError> {
     match config.mode.as_str() {
         "vsock" => {
             info!(
@@ -18,7 +22,7 @@ pub async fn start_grpc_server(config: &GrpcConfig) -> Result<(), AppError> {
             .map_err(|e| AppError::Service(format!("Failed to bind vsock: {}", e)))?;
             let incoming = listener.incoming();
             let svc = secrets::proto::secrets_server::SecretsServer::new(
-                secrets::SecretsService::default(),
+                secrets::SecretsService::new(secrets_sender.clone()),
             );
             tonic::transport::Server::builder()
                 .add_service(svc)
@@ -69,7 +73,7 @@ pub async fn start_grpc_server(config: &GrpcConfig) -> Result<(), AppError> {
                     .map_err(|e| AppError::Service(format!("Failed to bind UDS: {}", e)))?;
                 let incoming = tokio_stream::wrappers::UnixListenerStream::new(uds_listener);
                 let svc = secrets::proto::secrets_server::SecretsServer::new(
-                    secrets::SecretsService::default(),
+                    secrets::SecretsService::new(secrets_sender.clone()),
                 );
 
                 tonic::transport::Server::builder()

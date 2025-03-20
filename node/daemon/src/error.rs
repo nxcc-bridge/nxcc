@@ -24,6 +24,12 @@ impl From<libp2p::core::transport::TransportError<std::io::Error>> for AppError 
     }
 }
 
+impl From<libp2p::gossipsub::SubscriptionError> for AppError {
+    fn from(err: libp2p::gossipsub::SubscriptionError) -> Self {
+        Self::Network(format!("Gossipsub Subscription error: {}", err))
+    }
+}
+
 impl From<libp2p::core::multiaddr::Error> for AppError {
     fn from(err: libp2p::core::multiaddr::Error) -> Self {
         Self::Network(format!("Multiaddr error: {}", err))

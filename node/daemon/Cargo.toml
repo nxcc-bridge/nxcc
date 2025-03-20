@@ -8,12 +8,13 @@ anyhow = "1.0.97"
 clap = { version = "4.5.32", features = ["derive"] }
 figment = { version = "0.10.19", features = ["toml", "env"] }
 futures = "0.3.31"
-libp2p = { version = "0.55.0", features = ["tokio", "tcp", "noise", "yamux", "mdns", "identify", "macros", "ping", "kad"] }
+libp2p = { version = "0.55.0", features = ["tokio", "tcp", "noise", "yamux", "mdns", "identify", "macros", "ping", "kad", "gossipsub"] }
 prost = "0.13.5"
 rand = "0.9.0"
 serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.114"
 thiserror = "2.0.12"
-tokio = { version = "1.44.1", features = ["rt-multi-thread", "signal", "macros", "net"] }
+tokio = { version = "1.44.1", features = ["rt-multi-thread", "signal", "macros", "net", "sync"] }
 tokio-stream = "0.1.17"
 tokio-vsock = { version = "0.7.0", features = ["tonic012"] }
 tonic = { version = "0.12.3", features = ["transport"] }

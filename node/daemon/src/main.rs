@@ -5,10 +5,15 @@ mod identity;
 mod network;
 mod services;
 
+use futures::channel::mpsc;
 use tracing::{Level, info};
 use tracing_subscriber::EnvFilter;
 
-use crate::{config::Config, network::NetworkManager, services::ServiceManager};
+use crate::{
+    config::Config,
+    network::{NetworkManager, SecretsMessage},
+    services::ServiceManager,
+};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -47,20 +52,23 @@ async fn main() -> anyhow::Result<()> {
     let mut network = NetworkManager::new(local_key, config.clone()).await?;
     network.start().await?;
 
+    // Grab the secrets sender from the network
+    let secrets_sender = network
+        .secrets_sender
+        .clone()
+        .expect("Secrets sender missing");
+
     let _service_manager = ServiceManager::new(
         network
             .notifier_sender
             .clone()
             .expect("Notifier sender missing"),
-        network
-            .secrets_sender
-            .clone()
-            .expect("Secrets sender missing"),
+        secrets_sender.clone(),
     );
 
-    // let grpc_config = config.grpc.clone();
+    // Start the gRPC server
     tokio::spawn(async move {
-        if let Err(e) = grpc::start_grpc_server(&config.grpc).await {
+        if let Err(e) = grpc::start_grpc_server(&config.grpc, secrets_sender).await {
             tracing::error!("gRPC server error: {}", e);
         }
     });
