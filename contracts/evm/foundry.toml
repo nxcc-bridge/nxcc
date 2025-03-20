@@ -5,5 +5,9 @@ libs = ["dependencies"]
 
 [dependencies]
 forge-std = "1.9.6"
+"@openzeppelin-contracts" = "5.2.0"
 
-# See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
+[profile.release]
+optimizer = true
+optimizer_runs = 4294967295
+via_ir = true
