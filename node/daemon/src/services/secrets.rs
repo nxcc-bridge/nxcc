@@ -1,65 +1,78 @@
-use std::time::Duration;
-
+use ethers::types::{Address, H256};
 use futures::channel::mpsc;
-use tokio::{sync::oneshot, time::sleep};
-use tracing::info;
+use serde::{Deserialize, Serialize};
+use tokio::sync::oneshot;
+use tracing::{debug, info};
 
 use crate::{error::AppError, network::SecretsMessage};
 
-pub async fn start_service(mut sender: mpsc::Sender<SecretsMessage>) {
-    info!("Starting secrets service");
+pub async fn start_service(_sender: mpsc::Sender<SecretsMessage>) {
+    debug!("Starting secrets service");
 }
 
-#[derive(Debug, Clone)]
-pub struct EncryptedSecretData {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretIdentifier {
+    pub chain_id: u64,
+    pub identity_address: Address,
+    pub identity_id: H256,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchEncryptedSecretData {
+    pub chain_id: u64,
+    pub identity_address: Address,
+    pub identity_id: H256,
     pub data: Vec<u8>,
     pub metadata: String,
 }
 
-pub struct EncryptedSecrets {
-    pub secrets: Vec<EncryptedSecretData>,
+pub struct EncryptedSecretsBatch {
+    pub secrets: Vec<BatchEncryptedSecretData>,
 }
 
-/// Process a get_secret request by querying peers on the network
-pub async fn process_get_secret_request(
-    chain_id: String,
-    contract_address: String,
-    secret_id: String,
+pub async fn process_get_secrets_batch_request(
+    secrets: Vec<SecretIdentifier>,
     payload: Vec<u8>,
     sender: mpsc::Sender<SecretsMessage>,
-) -> Result<EncryptedSecrets, AppError> {
-    info!(
-        "Processing get_secret request: chain_id={}, contract_address={}, secret_id={}",
-        chain_id, contract_address, secret_id
+) -> Result<EncryptedSecretsBatch, AppError> {
+    debug!(
+        "Processing batch request for {} secret(s), payload size={}",
+        secrets.len(),
+        payload.len()
     );
 
-    // Create a channel for the response
-    let (response_sender, response_receiver) = oneshot::channel();
+    let (response_sender, response_receiver) =
+        oneshot::channel::<Result<Vec<BatchEncryptedSecretData>, AppError>>();
 
-    // For simplicity, use a fixed threshold
     let threshold = 2;
 
-    // Send the request to the network manager
-    if let Err(e) = sender.clone().try_send(SecretsMessage::GetSecret {
-        chain_id,
-        contract_address,
-        secret_id,
-        payload: payload.clone(),
+    debug!(
+        "Sending SecretsMessage::GetSecretsBatch with threshold={}",
+        threshold
+    );
+
+    sender.clone().try_send(SecretsMessage::GetSecretsBatch {
+        secrets,
+        payload,
         threshold,
         response_sender,
-    }) {
-        return Err(AppError::Service(format!(
-            "Failed to send request to network: {}",
-            e
-        )));
-    }
+    })?;
 
-    // Wait for the response
     match response_receiver.await {
-        Ok(result) => Ok(EncryptedSecrets { secrets: result? }),
-        Err(e) => Err(AppError::Service(format!(
-            "Failed to receive response: {}",
-            e
-        ))),
+        Ok(Ok(results)) => {
+            debug!("Got {} secrets back from network", results.len());
+            Ok(EncryptedSecretsBatch { secrets: results })
+        }
+        Ok(Err(e)) => {
+            debug!("Network responded with an error: {}", e);
+            Err(e)
+        }
+        Err(e) => {
+            debug!("Failed to receive batch response: {}", e);
+            Err(AppError::Service(format!(
+                "Failed to receive batch response: {}",
+                e
+            )))
+        }
     }
 }

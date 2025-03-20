@@ -5,15 +5,10 @@ mod identity;
 mod network;
 mod services;
 
-use futures::channel::mpsc;
 use tracing::{Level, info};
 use tracing_subscriber::EnvFilter;
 
-use crate::{
-    config::Config,
-    network::{NetworkManager, SecretsMessage},
-    services::ServiceManager,
-};
+use crate::{config::Config, network::NetworkManager, services::ServiceManager};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

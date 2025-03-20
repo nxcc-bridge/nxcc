@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use futures::channel::mpsc;
 use tokio::time::sleep;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use crate::network::NotifierMessage;
 
@@ -17,7 +17,7 @@ pub async fn start_service(mut sender: mpsc::Sender<NotifierMessage>) {
             counter += 1;
 
             let notification = format!("Periodic notification #{}", counter);
-            info!("Sending notification: {}", notification);
+            debug!("Sending notification: {}", notification);
 
             if let Err(e) = sender.try_send(NotifierMessage::Notification(notification)) {
                 error!("Failed to send notification: {}", e);

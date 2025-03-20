@@ -24,6 +24,12 @@ impl From<libp2p::core::transport::TransportError<std::io::Error>> for AppError 
     }
 }
 
+impl<T> From<futures::channel::mpsc::TrySendError<T>> for AppError {
+    fn from(err: futures::channel::mpsc::TrySendError<T>) -> Self {
+        Self::Network(format!("Send error: {}", err))
+    }
+}
+
 impl From<libp2p::gossipsub::SubscriptionError> for AppError {
     fn from(err: libp2p::gossipsub::SubscriptionError) -> Self {
         Self::Network(format!("Gossipsub Subscription error: {}", err))
