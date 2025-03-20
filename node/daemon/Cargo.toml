@@ -1,0 +1,24 @@
+[package]
+name = "service"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.97"
+clap = { version = "4.5.32", features = ["derive"] }
+figment = { version = "0.10.19", features = ["toml", "env"] }
+futures = "0.3.31"
+libp2p = { version = "0.55.0", features = ["tokio", "tcp", "noise", "yamux", "mdns", "identify", "macros", "ping", "kad"] }
+prost = "0.13.5"
+rand = "0.9.0"
+serde = { version = "1.0.219", features = ["derive"] }
+thiserror = "2.0.12"
+tokio = { version = "1.44.1", features = ["rt-multi-thread", "signal", "macros", "net"] }
+tokio-stream = "0.1.17"
+tokio-vsock = { version = "0.7.0", features = ["tonic012"] }
+tonic = { version = "0.12.3", features = ["transport"] }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+
+[build-dependencies]
+tonic-build = "0.12.3"

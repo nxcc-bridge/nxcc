@@ -1,0 +1,161 @@
+use std::path::PathBuf;
+
+use clap::Parser;
+use serde::{Deserialize, Serialize};
+
+/// Main configuration struct, shared by file/env/CLI
+#[derive(Parser, Debug, Clone, Serialize, Deserialize, Default)]
+#[command(author, version, about, long_about = None)]
+pub struct Config {
+    /// Path to a config file (TOML). Defaults to "config.toml" if not provided.
+    /// This field is skipped in serialization so we don't rewrite the same info into the file.
+    #[arg(short, long)]
+    #[serde(skip)]
+    pub config: Option<PathBuf>,
+
+    /// If provided, load or create a keypair at this path. Otherwise use ephemeral mode.
+    pub identity_path: Option<PathBuf>,
+
+    /// Enable verbose logging
+    #[arg(short, long, default_value_t = false)]
+    pub verbose: bool,
+
+    /// Network configuration
+    #[serde(default)]
+    #[clap(flatten)]
+    pub network: NetworkConfig,
+
+    #[serde(default)]
+    #[clap(flatten)]
+    pub grpc: GrpcConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, clap::Args)]
+pub struct NetworkConfig {
+    /// Comma-separated list of listen addresses.
+    /// Defaults to "/ip4/0.0.0.0/tcp/0".
+    #[clap(
+        long,
+        value_delimiter = ',',
+        default_value = "/ip4/0.0.0.0/tcp/0",
+        help = "Listen addresses for the node"
+    )]
+    #[serde(default = "default_listen_addresses")]
+    pub listen_addresses: Vec<String>,
+
+    /// Comma-separated list of bootstrap peers.
+    #[clap(
+        long,
+        value_delimiter = ',',
+        help = "Bootstrap peers for the network (comma-separated)"
+    )]
+    #[serde(default)]
+    pub bootstrap_peers: Vec<String>,
+
+    /// Enable automatic peer discovery.
+    /// Defaults to true.
+    #[clap(
+        long,
+        default_value_t = true,
+        help = "Enable automatic peer discovery (default: true)"
+    )]
+    #[serde(default = "default_enable_discovery")]
+    pub enable_discovery: bool,
+}
+
+impl Default for NetworkConfig {
+    fn default() -> Self {
+        Self {
+            listen_addresses: default_listen_addresses(),
+            bootstrap_peers: vec![],
+            enable_discovery: default_enable_discovery(),
+        }
+    }
+}
+
+fn default_listen_addresses() -> Vec<String> {
+    vec!["/ip4/0.0.0.0/tcp/0".to_string()]
+}
+
+fn default_enable_discovery() -> bool {
+    true
+}
+
+/// Configuration for the local gRPC interface.
+#[derive(Debug, Clone, Serialize, Deserialize, clap::Args)]
+pub struct GrpcConfig {
+    /// Mode for the local gRPC interface: "vsock" or "uds"
+    #[clap(long, default_value = "uds")]
+    #[serde(default = "default_grpc_mode")]
+    pub mode: String,
+
+    /// When using vsock: the vsock port to listen on
+    #[clap(long, default_value_t = 50051)]
+    #[serde(default = "default_vsock_port")]
+    pub vsock_port: u32,
+
+    /// When using vsock: the vsock CID (e.g. guest CID)
+    #[clap(long, default_value_t = 3)]
+    #[serde(default = "default_vsock_cid")]
+    pub vsock_cid: u32,
+
+    /// When using UDS: the path to the Unix Domain Socket
+    #[clap(long, default_value = "/tmp/daemon_grpc.sock")]
+    #[serde(default = "default_uds_path")]
+    pub uds_path: String,
+}
+
+impl Default for GrpcConfig {
+    fn default() -> Self {
+        Self {
+            mode: default_grpc_mode(),
+            vsock_port: default_vsock_port(),
+            vsock_cid: default_vsock_cid(),
+            uds_path: default_uds_path(),
+        }
+    }
+}
+
+fn default_grpc_mode() -> String {
+    "uds".to_string()
+}
+
+fn default_vsock_port() -> u32 {
+    50051
+}
+
+fn default_vsock_cid() -> u32 {
+    3
+}
+
+fn default_uds_path() -> String {
+    "/tmp/daemon_grpc.sock".to_string()
+}
+
+impl Config {
+    /// Load the `Config` from a combination of:
+    /// 1. A default struct,
+    /// 2. A TOML file (if found),
+    /// 3. Environment variables (prefixed with `P2P_`),
+    /// 4. CLI arguments (parsed by `clap`).
+    ///
+    /// Whichever comes last takes precedence.
+    pub fn load() -> Result<Self, figment::Error> {
+        use figment::{
+            Figment,
+            providers::{Env, Format, Serialized, Toml},
+        };
+
+        let cli = Config::parse();
+
+        // Fall back to "config.toml" if `--config` was not provided
+        let config_path = cli.config.clone().unwrap_or_else(|| "config.toml".into());
+
+        Figment::new()
+            .merge(Serialized::defaults(Config::default()))
+            .merge(Toml::file(config_path))
+            .merge(Env::prefixed("P2P_"))
+            .merge(Serialized::defaults(cli))
+            .extract()
+    }
+}
