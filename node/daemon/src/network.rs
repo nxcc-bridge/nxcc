@@ -5,7 +5,6 @@ use std::{
     time::Duration,
 };
 
-use ethers::types::{Address, H256};
 use futures::{StreamExt, channel::mpsc};
 use libp2p::{
     Multiaddr, Swarm,
@@ -307,7 +306,7 @@ impl NetworkManager {
                                     tokio::spawn(async move {
                                         tokio::time::sleep(Duration::from_secs(5)).await;
                                         let mut lock = pending_requests_clone.lock().await;
-                                        if let Some(mut req) = lock.remove(&request_id) {
+                                        if let Some(req) = lock.remove(&request_id) {
                                             if !req.responses.is_empty() {
                                                 info!("Time expired, but {} responses arrived for request_id={}; returning them", req.responses.len(), request_id);
                                                 let _ = req.response_sender.send(Ok(req.responses));

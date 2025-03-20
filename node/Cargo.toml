@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "interface",
+    "daemon",
+    "enclave",
+]
+resolver = "3"

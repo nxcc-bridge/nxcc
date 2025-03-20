@@ -1,6 +1,7 @@
 pub mod secrets;
 
 use futures::channel::mpsc::Sender;
+use interface::proto::daemon::secrets_server::SecretsServer;
 use tracing::info;
 
 use crate::{config::GrpcConfig, error::AppError, network::SecretsMessage};
@@ -21,11 +22,11 @@ pub async fn start_grpc_server(
             ))
             .map_err(|e| AppError::Service(format!("Failed to bind vsock: {}", e)))?;
             let incoming = listener.incoming();
-            let svc = secrets::proto::secrets_server::SecretsServer::new(
-                secrets::SecretsService::new(secrets_sender.clone()),
-            );
+
             tonic::transport::Server::builder()
-                .add_service(svc)
+                .add_service(SecretsServer::new(secrets::SecretsService::new(
+                    secrets_sender.clone(),
+                )))
                 .serve_with_incoming(incoming)
                 .await
                 .map_err(|e| AppError::Service(format!("gRPC server error: {}", e)))?;
@@ -72,9 +73,7 @@ pub async fn start_grpc_server(
                 let uds_listener = UnixListener::bind(uds_path)
                     .map_err(|e| AppError::Service(format!("Failed to bind UDS: {}", e)))?;
                 let incoming = tokio_stream::wrappers::UnixListenerStream::new(uds_listener);
-                let svc = secrets::proto::secrets_server::SecretsServer::new(
-                    secrets::SecretsService::new(secrets_sender.clone()),
-                );
+                let svc = SecretsServer::new(secrets::SecretsService::new(secrets_sender.clone()));
 
                 tonic::transport::Server::builder()
                     .add_service(svc)

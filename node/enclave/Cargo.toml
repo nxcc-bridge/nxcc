@@ -1,0 +1,16 @@
+[package]
+name = "enclave"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+futures = "0.3"
+interface = { path = "../interface" }
+tokio = { version = "1.44.1", features = ["rt-multi-thread", "macros", "net"] }
+tokio-vsock = { version = "0.7.0", features = ["tonic012"] }
+tonic = { version = "0.12.3", features = ["transport"] }
+tracing = "0.1.41"
+tokio-stream = "0.1.17"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }

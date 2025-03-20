@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package daemon;
+
+// Daemon notification service.
+service Daemon {
+  // Broadcast a notification on the p2p network.
+  rpc BroadcastNotification (BroadcastRequest) returns (BroadcastResponse);
+}
+
+message BroadcastRequest {
+  string message = 1;
+}
+
+message BroadcastResponse {
+  bool success = 1;
+}
+
+// Secrets service for debugging and testing.
+service Secrets {
+  // Retrieve one or more secrets (with attached metadata).
+  rpc GetSecrets (GetSecretsRequest) returns (GetSecretsResponse);
+}
+
+message SecretIdentifier {
+  uint64 chain_id = 1;
+  string identity_address = 2;
+  string identity_id = 3;
+}
+
+message GetSecretsRequest {
+  repeated SecretIdentifier secrets = 1;
+  // An opaque payload; it may contain additional verification data.
+  bytes payload = 2;
+}
+
+message EncryptedSecret {
+  bytes data = 1;
+  // Metadata may be large; using bytes to allow binary blobs.
+  bytes metadata = 2;
+  uint64 chain_id = 3;
+  string identity_address = 4;
+  string identity_id = 5;
+}
+
+message GetSecretsResponse {
+  repeated EncryptedSecret secrets = 1;
+}

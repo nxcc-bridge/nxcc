@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package enclave;
+
+service Secrets {
+  rpc GetSecrets (GetSecretsRequest) returns (GetSecretsResponse);
+}
+
+service Runner {
+  rpc RunWorker (RunWorkerRequest) returns (RunWorkerResponse);
+  rpc DeliverEvent (DeliverEventRequest) returns (DeliverEventResponse);
+}
+
+message GetSecretsRequest {
+  repeated SecretIdentifier identifiers = 1;
+}
+
+// “metadata” can be large, and we expect to add more fields over time.
+// Use repeated or nested messages for future extension if desired.
+message SecretIdentifier {
+  uint64 chain_id = 1;
+  string identity_address = 2;
+  string identity_id = 3;
+  bytes extra_data = 4;
+}
+
+message GetSecretsResponse {
+  repeated EncryptedSecret secrets = 1;
+}
+
+message EncryptedSecret {
+  bytes data = 1;
+  bytes metadata = 2;
+  uint64 chain_id = 3;
+  string identity_address = 4;
+  string identity_id = 5;
+}
+
+// RunWorker runs a worker, given a binary and other relevant info.
+message RunWorkerRequest {
+  bytes worker_binary = 1;
+  // Additional fields (policies, proofs, etc.) can be added later.
+}
+
+message RunWorkerResponse {
+  bool accepted = 1;
+}
+
+// Deliver an event to an existing worker.
+message DeliverEventRequest {
+  string worker_id = 1;
+  bytes event_payload = 2;
+}
+
+message DeliverEventResponse {
+  bool delivered = 1;
+}

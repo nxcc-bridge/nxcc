@@ -2,7 +2,7 @@ use ethers::types::{Address, H256};
 use futures::channel::mpsc;
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
-use tracing::{debug, info};
+use tracing::debug;
 
 use crate::{error::AppError, network::SecretsMessage};
 

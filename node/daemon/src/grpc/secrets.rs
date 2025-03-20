@@ -1,15 +1,15 @@
 use ethers::types::{Address, H256};
+pub use interface::proto::daemon::{
+    EncryptedSecret, GetSecretsRequest, GetSecretsResponse,
+    secrets_server::Secrets,
+};
 use tonic::{Request, Response, Status};
-use tracing::{debug, info};
+use tracing::debug;
 
 use crate::{network::SecretsMessage, services::secrets as internal_secrets};
 
-pub mod proto {
-    tonic::include_proto!("secrets");
-}
-
 pub struct SecretsService {
-    pub secrets_sender: futures::channel::mpsc::Sender<SecretsMessage>,
+    secrets_sender: futures::channel::mpsc::Sender<SecretsMessage>,
 }
 
 impl SecretsService {
@@ -19,15 +19,15 @@ impl SecretsService {
 }
 
 #[tonic::async_trait]
-impl proto::secrets_server::Secrets for SecretsService {
-    async fn get_secrets_batch(
+impl Secrets for SecretsService {
+    async fn get_secrets(
         &self,
-        request: Request<proto::GetSecretsBatchRequest>,
-    ) -> Result<Response<proto::GetSecretsBatchResponse>, Status> {
+        request: Request<GetSecretsRequest>,
+    ) -> Result<Response<GetSecretsResponse>, Status> {
         let req = request.into_inner();
 
         debug!(
-            "Received gRPC call to GetSecretsBatch with {} secrets",
+            "Received gRPC call to GetSecrets with {} secret(s)",
             req.secrets.len()
         );
 
@@ -49,31 +49,29 @@ impl proto::secrets_server::Secrets for SecretsService {
             });
         }
 
+        // Reuse the same internal function that processes the batch request.
         let internal_resp = internal_secrets::process_get_secrets_batch_request(
             parsed_identifiers,
             req.payload,
             self.secrets_sender.clone(),
         )
         .await
-        .map_err(|e| Status::internal(format!("Error processing batch request: {}", e)))?;
+        .map_err(|e| Status::internal(format!("Error processing request: {}", e)))?;
 
-        debug!(
-            "Returning {} secrets in GetSecretsBatch response",
-            internal_resp.secrets.len()
-        );
-
-        let mut grpc_secrets = Vec::with_capacity(internal_resp.secrets.len());
-        for s in internal_resp.secrets {
-            grpc_secrets.push(proto::EncryptedSecret {
+        // Map internal secret data to the gRPC response.
+        let grpc_secrets = internal_resp
+            .secrets
+            .into_iter()
+            .map(|s| EncryptedSecret {
                 data: s.data,
-                metadata: s.metadata,
+                metadata: s.metadata.into(),
                 chain_id: s.chain_id,
                 identity_address: format!("{:#x}", s.identity_address),
                 identity_id: format!("{:#x}", s.identity_id),
-            });
-        }
+            })
+            .collect();
 
-        let response = proto::GetSecretsBatchResponse {
+        let response = GetSecretsResponse {
             secrets: grpc_secrets,
         };
 
