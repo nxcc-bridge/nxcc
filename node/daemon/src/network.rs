@@ -135,13 +135,53 @@ impl NetworkManager {
     }
 
     pub async fn start(&mut self) -> Result<(), AppError> {
-        let (notifier_tx, mut notifier_rx) = mpsc::channel::<NotifierMessage>(64);
-        let (secrets_tx, mut secrets_rx) = mpsc::channel::<SecretsMessage>(64);
+        let (notifier_tx, notifier_rx) = mpsc::channel::<NotifierMessage>(64);
+        let (secrets_tx, secrets_rx) = mpsc::channel::<SecretsMessage>(64);
 
         self.notifier_sender = Some(notifier_tx);
         self.secrets_sender = Some(secrets_tx);
 
         let peer_id = self.local_key.public().to_peer_id();
+
+        // Build the swarm with all behaviors
+        let mut swarm = self.build_swarm(peer_id)?;
+
+        // Listen on the configured addresses
+        for addr_str in &self.config.network.listen_addresses {
+            let addr: Multiaddr = addr_str.parse()?;
+            match swarm.listen_on(addr.clone()) {
+                Ok(_) => info!("Listening on {}", addr),
+                Err(e) => warn!("Failed to listen on {addr}: {e}"),
+            }
+        }
+
+        // Always dial any configured bootstrap peers (if any)
+        for peer_addr in &self.config.network.bootstrap_peers {
+            self.add_peer(&mut swarm, peer_addr).await?;
+        }
+
+        let secrets_service = Arc::clone(&self.secrets_service);
+
+        // Subscribe to a global "secrets" topic for gossip
+        let secrets_topic = gossipsub::IdentTopic::new("secrets");
+
+        // Run swarm in a background task
+        tokio::spawn(async move {
+            run_network_loop(
+                swarm,
+                notifier_rx,
+                secrets_rx,
+                secrets_service,
+                secrets_topic,
+            )
+            .await;
+        });
+
+        Ok(())
+    }
+
+    fn build_swarm(&self, peer_id: libp2p::PeerId) -> Result<Swarm<AppBehaviour>, AppError> {
+        // Configure message ID function for Gossipsub
         let message_id_fn = |message: &gossipsub::Message| {
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
             message.data.hash(&mut hasher);
@@ -198,7 +238,7 @@ impl NetworkManager {
         behaviour.gossipsub.subscribe(&secrets_topic)?;
 
         // Build swarm
-        let mut swarm = libp2p::SwarmBuilder::with_existing_identity(self.local_key.clone())
+        let swarm = libp2p::SwarmBuilder::with_existing_identity(self.local_key.clone())
             .with_tokio()
             .with_tcp(
                 tcp::Config::default(),
@@ -210,208 +250,7 @@ impl NetworkManager {
             .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
             .build();
 
-        // Listen on the configured addresses
-        for addr_str in &self.config.network.listen_addresses {
-            let addr: Multiaddr = addr_str.parse()?;
-            match swarm.listen_on(addr.clone()) {
-                Ok(_) => info!("Listening on {}", addr),
-                Err(e) => warn!("Failed to listen on {addr}: {e}"),
-            }
-        }
-
-        // Always dial any configured bootstrap peers (if any)
-        for peer_addr in &self.config.network.bootstrap_peers {
-            self.add_peer(&mut swarm, peer_addr).await?;
-        }
-
-        let secrets_service = Arc::clone(&self.secrets_service);
-        let topic_clone = secrets_topic.clone();
-
-        // Run swarm in a background task
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                                    // --- Swarm event handler ---
-                                    event = swarm.select_next_some() => {
-                                        match event {
-                                            SwarmEvent::Behaviour(app_event) => {
-                                                match app_event {
-                                                    AppEvent::Mdns(mdns::Event::Discovered(list)) => {
-                                                        for (discovered_peer, addr) in list {
-                                                            info!("mDNS discovered peer {discovered_peer} at {addr}");
-                                                            swarm.behaviour_mut().kad.add_address(&discovered_peer, addr.clone());
-                                                            let _ = swarm.dial(addr);
-                                                        }
-                                                    }
-                                                    AppEvent::Mdns(mdns::Event::Expired(list)) => {
-                                                        for (expired_peer, addr) in list {
-                                                            info!("mDNS expired peer {expired_peer} at {addr}");
-                                                            swarm.behaviour_mut().kad.remove_address(&expired_peer, &addr);
-                                                        }
-                                                    }
-                                                    AppEvent::Gossipsub(gossipsub::Event::Subscribed { peer_id, topic }) => {
-                                                        debug!("Peer {peer_id} subscribed to topic {topic}");
-                                                    },
-                                                    AppEvent::Gossipsub(gossipsub::Event::Unsubscribed { peer_id, topic }) => {
-                                                        debug!("Peer {peer_id} unsubscribed from topic {topic}");
-                                                    },
-                                                    AppEvent::Gossipsub(gossipsub::Event::Message {
-                                                        propagation_source,
-                                                        message_id: _,
-                                                        message,
-                                                    }) => {
-                                                        if let Ok(msg_str) = String::from_utf8(message.data.clone()) {
-                                                            if let Ok(msg) = serde_json::from_str::<GossipMessage>(&msg_str) {
-                                                                match msg {
-                                                                    GossipMessage::SecretBatchRequest { request_id, items } => {
-                                                                        info!("Received SecretBatchRequest from peer={propagation_source} \
-                                                                            with request_id={request_id}, {} item(s)", items.len());
-                                                                        let found = secrets_service
-                                                                            .handle_incoming_secret_batch_request(request_id, items)
-                                                                            .await;
-                                                                        if !found.is_empty() {
-                                                                            info!("Found {} matching secret(s); sending SecretBatchResponse", found.len());
-                                                                            let response = GossipMessage::SecretBatchResponse {
-                                                                                request_id,
-                                                                                secrets: found,
-                                                                            };
-                                                                            if let Ok(payload) = serde_json::to_string(&response) {
-                                                                                let _ = swarm.behaviour_mut()
-                                                                                    .gossipsub
-                                                                                    .publish(topic_clone.clone(), payload.as_bytes());
-                                                                            }
-                                                                        } else {
-                                                                            debug!("No secrets found for request_id={request_id}");
-                                                                        }
-                                                                    }
-                                                                    GossipMessage::SecretBatchResponse { request_id, secrets } => {
-                                                                        info!("Received SecretBatchResponse for request_id={request_id} \
-                                                                            with {} secrets", secrets.len());
-                                                                        secrets_service
-                                                                            .handle_incoming_secret_batch_response(request_id, secrets)
-                                                                            .await;
-                                                                    }
-                                                                    GossipMessage::Notification { content, timestamp } => {
-                                                                        let now = std::time::SystemTime::now()
-                                                                            .duration_since(std::time::UNIX_EPOCH)
-                                                                            .unwrap_or_default()
-                                                                            .as_secs();
-
-                                                                        info!("Received gossip notification from peer={}: '{}' (sent {} seconds ago)",
-                                                                            propagation_source,
-                                                                            content,
-                                                                            now.saturating_sub(timestamp));
-                                                                    }
-                                                                }
-                                                            } else {
-                                                                debug!("Ignoring invalid gossip message (JSON parse failed)");
-                                                            }
-                                                        } else {
-                                                            debug!("Ignoring gossip message (UTF-8 decode failed)");
-                                                        }
-                                                    }
-                                                    AppEvent::Identify(identify::Event::Received { peer_id, info, .. }) => {
-                                                        debug!("Identify info from peer {peer_id}: {:?}", info);
-                                                    }
-                                                    AppEvent::Ping(ping_event) => {
-                                                        debug!("Ping event: {:?}", ping_event);
-                                                    }
-                                                    AppEvent::Kademlia(kad_event) => {
-                                                        debug!("Kademlia event: {:?}", kad_event);
-                                                    }
-                                                    e => {
-                                                        debug!("Unhandled event: {e:?}");
-                                                    }
-                                                }
-                                            }
-                                            SwarmEvent::NewListenAddr { address, .. } => {
-                                                info!("New listener on {address}");
-                                            }
-                                            SwarmEvent::ConnectionEstablished { peer_id, .. } => {
-                                                info!("Connection established with {peer_id}");
-                                            }
-                                            SwarmEvent::ConnectionClosed { peer_id, .. } => {
-                                                info!("Connection closed with {peer_id}");
-                                            }
-                                            _ => {}
-                                        }
-                                    },
-
-                                    // --- Notifier channel handler ---
-                                    msg = notifier_rx.next() => {
-                                        if let Some(msg) = msg {
-                                            match msg {
-                                                NotifierMessage::Notification(content) => {
-                                                    info!("Publishing notification to network: {content}");
-                                                    // Create a gossip message for the notification
-                                                    let gossip = GossipMessage::Notification {
-                                                        content: content.clone(),
-                                                        timestamp: std::time::SystemTime::now()
-                                                            .duration_since(std::time::UNIX_EPOCH)
-                                                            .unwrap_or_default()
-                                                            .as_secs(),
-                                                    };
-
-                                                    if let Ok(json) = serde_json::to_string(&gossip) {
-                                                        match swarm.behaviour_mut()
-                                                            .gossipsub
-                                                            .publish(topic_clone.clone(), json.as_bytes()) {
-                                                                Ok(_) => debug!("Successfully published notification to gossip network"),
-                                                                Err(e) => warn!("Failed to publish notification: {}", e),
-                                                            }
-                                                    }
-                }
-                                                NotifierMessage::Response(content) => {
-                                                    info!("NotifierResponse: {content}");
-                                                }
-                                            }
-                                        }
-                                    },
-
-                                    // --- Secrets channel handler ---
-                                    msg = secrets_rx.next() => {
-                                        if let Some(msg) = msg {
-                                            match msg {
-                                                SecretsMessage::PublishSecretsRequest {
-                                                    request_id,
-                                                    secret_ids
-                                                } => {
-                                                    let gossip = GossipMessage::SecretBatchRequest {
-                                                        request_id,
-                                                        items: secret_ids,
-                                                    };
-                                                    if let Ok(json) = serde_json::to_string(&gossip) {
-                                                        let _ = swarm.behaviour_mut()
-                                                            .gossipsub
-                                                            .publish(topic_clone.clone(), json.as_bytes());
-                                                    } else {
-                                                        debug!("Failed to serialize secret batch request");
-                                                    }
-                                                }
-                                                SecretsMessage::PublishSecretsResponse {
-                                                    request_id,
-                                                    secrets
-                                                } => {
-                                                    let gossip = GossipMessage::SecretBatchResponse {
-                                                        request_id,
-                                                        secrets,
-                                                    };
-                                                    if let Ok(json) = serde_json::to_string(&gossip) {
-                                                        let _ = swarm.behaviour_mut()
-                                                            .gossipsub
-                                                            .publish(topic_clone.clone(), json.as_bytes());
-                                                    } else {
-                                                        debug!("Failed to serialize secret batch response");
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    },
-                                }
-            }
-        });
-
-        Ok(())
+        Ok(swarm)
     }
 
     /// Attempts to parse a Multiaddr + PeerId from `peer_addr` and dial it.
@@ -431,5 +270,307 @@ impl NetworkManager {
             warn!("Peer address {peer_addr} is missing /p2p/ segment with peer ID");
         }
         Ok(())
+    }
+}
+
+async fn run_network_loop(
+    mut swarm: Swarm<AppBehaviour>,
+    mut notifier_rx: mpsc::Receiver<NotifierMessage>,
+    mut secrets_rx: mpsc::Receiver<SecretsMessage>,
+    secrets_service: Arc<SecretsService>,
+    topic: gossipsub::IdentTopic,
+) {
+    loop {
+        tokio::select! {
+            // --- Swarm event handler ---
+            event = swarm.select_next_some() => {
+                handle_swarm_event(event, &mut swarm, &topic, &secrets_service).await;
+            },
+
+            // --- Notifier channel handler ---
+            msg = notifier_rx.next() => {
+                if let Some(msg) = msg {
+                    handle_notifier_message(msg, &mut swarm, &topic).await;
+                }
+            },
+
+            // --- Secrets channel handler ---
+            msg = secrets_rx.next() => {
+                if let Some(msg) = msg {
+                    handle_secrets_message(msg, &mut swarm, &topic).await;
+                }
+            },
+        }
+    }
+}
+
+async fn handle_swarm_event(
+    event: SwarmEvent<AppEvent>,
+    swarm: &mut Swarm<AppBehaviour>,
+    topic: &gossipsub::IdentTopic,
+    secrets_service: &Arc<SecretsService>,
+) {
+    match event {
+        SwarmEvent::Behaviour(app_event) => match app_event {
+            AppEvent::Mdns(mdns_event) => handle_mdns_event(mdns_event, swarm),
+            AppEvent::Gossipsub(gossipsub_event) => {
+                handle_gossipsub_event(gossipsub_event, swarm, topic, secrets_service).await
+            }
+            AppEvent::Identify(identify_event) => handle_identify_event(identify_event),
+            AppEvent::Ping(ping_event) => handle_ping_event(ping_event),
+            AppEvent::Kademlia(kad_event) => handle_kademlia_event(kad_event),
+            e => {
+                debug!("Unhandled event: {e:?}");
+            }
+        },
+        SwarmEvent::NewListenAddr { address, .. } => {
+            info!("New listener on {address}");
+        }
+        SwarmEvent::ConnectionEstablished { peer_id, .. } => {
+            info!("Connection established with {peer_id}");
+        }
+        SwarmEvent::ConnectionClosed { peer_id, .. } => {
+            info!("Connection closed with {peer_id}");
+        }
+        _ => {}
+    }
+}
+
+fn handle_mdns_event(event: mdns::Event, swarm: &mut Swarm<AppBehaviour>) {
+    match event {
+        mdns::Event::Discovered(list) => {
+            for (discovered_peer, addr) in list {
+                info!("mDNS discovered peer {discovered_peer} at {addr}");
+                swarm
+                    .behaviour_mut()
+                    .kad
+                    .add_address(&discovered_peer, addr.clone());
+                let _ = swarm.dial(addr);
+            }
+        }
+        mdns::Event::Expired(list) => {
+            for (expired_peer, addr) in list {
+                info!("mDNS expired peer {expired_peer} at {addr}");
+                swarm
+                    .behaviour_mut()
+                    .kad
+                    .remove_address(&expired_peer, &addr);
+            }
+        }
+    }
+}
+
+async fn handle_gossipsub_event(
+    event: gossipsub::Event,
+    swarm: &mut Swarm<AppBehaviour>,
+    topic: &gossipsub::IdentTopic,
+    secrets_service: &Arc<SecretsService>,
+) {
+    match event {
+        gossipsub::Event::Subscribed { peer_id, topic } => {
+            debug!("Peer {peer_id} subscribed to topic {topic}");
+        }
+        gossipsub::Event::Unsubscribed { peer_id, topic } => {
+            debug!("Peer {peer_id} unsubscribed from topic {topic}");
+        }
+        gossipsub::Event::Message {
+            propagation_source,
+            message_id: _,
+            message,
+        } => {
+            handle_gossip_message(message, propagation_source, swarm, topic, secrets_service).await;
+        }
+        e => {
+            debug!("unhandled gossip message received: {e:?}");
+        }
+    }
+}
+
+async fn handle_gossip_message(
+    message: gossipsub::Message,
+    propagation_source: libp2p::PeerId,
+    swarm: &mut Swarm<AppBehaviour>,
+    topic: &gossipsub::IdentTopic,
+    secrets_service: &Arc<SecretsService>,
+) {
+    if let Ok(msg_str) = String::from_utf8(message.data.clone()) {
+        if let Ok(msg) = serde_json::from_str::<GossipMessage>(&msg_str) {
+            match msg {
+                GossipMessage::SecretBatchRequest { request_id, items } => {
+                    handle_secret_batch_request(
+                        request_id,
+                        items,
+                        propagation_source,
+                        swarm,
+                        topic,
+                        secrets_service,
+                    )
+                    .await;
+                }
+                GossipMessage::SecretBatchResponse {
+                    request_id,
+                    secrets,
+                } => {
+                    info!(
+                        "Received SecretBatchResponse for request_id={request_id} with {} secrets",
+                        secrets.len()
+                    );
+                    secrets_service
+                        .handle_incoming_secret_batch_response(request_id, secrets)
+                        .await;
+                }
+                GossipMessage::Notification { content, timestamp } => {
+                    handle_notification(content, timestamp, propagation_source);
+                }
+            }
+        } else {
+            debug!("Ignoring invalid gossip message (JSON parse failed)");
+        }
+    } else {
+        debug!("Ignoring gossip message (UTF-8 decode failed)");
+    }
+}
+
+async fn handle_secret_batch_request(
+    request_id: u64,
+    items: Vec<SecretId>,
+    propagation_source: libp2p::PeerId,
+    swarm: &mut Swarm<AppBehaviour>,
+    topic: &gossipsub::IdentTopic,
+    secrets_service: &Arc<SecretsService>,
+) {
+    info!(
+        "Received SecretBatchRequest from peer={propagation_source} with request_id={request_id}, \
+         {} item(s)",
+        items.len()
+    );
+
+    let found = secrets_service
+        .handle_incoming_secret_batch_request(request_id, items)
+        .await;
+
+    if !found.is_empty() {
+        info!(
+            "Found {} matching secret(s); sending SecretBatchResponse",
+            found.len()
+        );
+        let response = GossipMessage::SecretBatchResponse {
+            request_id,
+            secrets: found,
+        };
+
+        if let Ok(payload) = serde_json::to_string(&response) {
+            let _ = swarm
+                .behaviour_mut()
+                .gossipsub
+                .publish(topic.clone(), payload.as_bytes());
+        }
+    } else {
+        debug!("No secrets found for request_id={request_id}");
+    }
+}
+
+fn handle_notification(content: String, timestamp: u64, propagation_source: libp2p::PeerId) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    info!(
+        "Received gossip notification from peer={}: '{}' (sent {} seconds ago)",
+        propagation_source,
+        content,
+        now.saturating_sub(timestamp)
+    );
+}
+
+fn handle_identify_event(event: identify::Event) {
+    if let identify::Event::Received { peer_id, info, .. } = event {
+        debug!("Identify info from peer {peer_id}: {:?}", info);
+    }
+}
+
+fn handle_ping_event(event: ping::Event) {
+    debug!("Ping event: {:?}", event);
+}
+
+fn handle_kademlia_event(event: kad::Event) {
+    debug!("Kademlia event: {:?}", event);
+}
+
+async fn handle_notifier_message(
+    msg: NotifierMessage,
+    swarm: &mut Swarm<AppBehaviour>,
+    topic: &gossipsub::IdentTopic,
+) {
+    match msg {
+        NotifierMessage::Notification(content) => {
+            info!("Publishing notification to network: {content}");
+            // Create a gossip message for the notification
+            let gossip = GossipMessage::Notification {
+                content: content.clone(),
+                timestamp: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+            };
+
+            if let Ok(json) = serde_json::to_string(&gossip) {
+                match swarm
+                    .behaviour_mut()
+                    .gossipsub
+                    .publish(topic.clone(), json.as_bytes())
+                {
+                    Ok(_) => debug!("Successfully published notification to gossip network"),
+                    Err(e) => warn!("Failed to publish notification: {}", e),
+                }
+            }
+        }
+        NotifierMessage::Response(content) => {
+            info!("NotifierResponse: {content}");
+        }
+    }
+}
+
+async fn handle_secrets_message(
+    msg: SecretsMessage,
+    swarm: &mut Swarm<AppBehaviour>,
+    topic: &gossipsub::IdentTopic,
+) {
+    match msg {
+        SecretsMessage::PublishSecretsRequest {
+            request_id,
+            secret_ids,
+        } => {
+            let gossip = GossipMessage::SecretBatchRequest {
+                request_id,
+                items: secret_ids,
+            };
+            if let Ok(json) = serde_json::to_string(&gossip) {
+                let _ = swarm
+                    .behaviour_mut()
+                    .gossipsub
+                    .publish(topic.clone(), json.as_bytes());
+            } else {
+                debug!("Failed to serialize secret batch request");
+            }
+        }
+        SecretsMessage::PublishSecretsResponse {
+            request_id,
+            secrets,
+        } => {
+            let gossip = GossipMessage::SecretBatchResponse {
+                request_id,
+                secrets,
+            };
+            if let Ok(json) = serde_json::to_string(&gossip) {
+                let _ = swarm
+                    .behaviour_mut()
+                    .gossipsub
+                    .publish(topic.clone(), json.as_bytes());
+            } else {
+                debug!("Failed to serialize secret batch response");
+            }
+        }
     }
 }
