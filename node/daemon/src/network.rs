@@ -14,7 +14,7 @@ use libp2p::{
     tcp, yamux,
 };
 use serde::{Deserialize, Serialize};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::{
     config::Config,
@@ -394,8 +394,8 @@ async fn handle_gossip_message(
     secrets_service: &Arc<SecretsService>,
 ) {
     if let Ok(msg_str) = String::from_utf8(message.data.clone()) {
-        if let Ok(msg) = serde_json::from_str::<GossipMessage>(&msg_str) {
-            match msg {
+        match serde_json::from_str::<GossipMessage>(&msg_str) {
+            Ok(msg) => match msg {
                 GossipMessage::SecretBatchRequest {
                     request_id,
                     secret_requests,
@@ -428,12 +428,17 @@ async fn handle_gossip_message(
                 GossipMessage::Notification { content, timestamp } => {
                     handle_notification(content, timestamp, propagation_source);
                 }
+            },
+            Err(e) => {
+                debug!(
+                    "Ignoring invalid gossip message: JSON parse failed: {e:?} ({})",
+                    &msg_str[..msg_str.len().min(100)]
+                );
+                trace!("The message: {msg_str}");
             }
-        } else {
-            debug!("Ignoring invalid gossip message (JSON parse failed)");
         }
     } else {
-        debug!("Ignoring gossip message (UTF-8 decode failed)");
+        debug!("Ignoring gossip message: UTF-8 decode failed");
     }
 }
 
@@ -549,18 +554,34 @@ async fn handle_secrets_message(
             secret_requests,
             requester_info,
         } => {
+            debug!(
+                "Publishing secret batch request {request_id}: {} items",
+                secret_requests.len()
+            );
+
             let gossip = GossipMessage::SecretBatchRequest {
                 request_id,
                 secret_requests,
                 requester_info,
             };
-            if let Ok(json) = serde_json::to_string(&gossip) {
-                let _ = swarm
-                    .behaviour_mut()
-                    .gossipsub
-                    .publish(topic.clone(), json.as_bytes());
-            } else {
-                debug!("Failed to serialize secret batch request");
+
+            match serde_json::to_string(&gossip) {
+                Ok(json) => {
+                    debug!("Successfully serialized request {request_id}");
+                    match swarm
+                        .behaviour_mut()
+                        .gossipsub
+                        .publish(topic.clone(), json.as_bytes())
+                    {
+                        Ok(_) => {
+                            debug!("Successfully published request {request_id} to gossip network")
+                        }
+                        Err(e) => warn!("Failed to publish request {request_id}: {e:?}"),
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to serialize secret batch request {request_id}: {e}",);
+                }
             }
         }
         SecretsMessage::PublishSecretsResponse {
@@ -568,18 +589,33 @@ async fn handle_secrets_message(
             remaining_requests,
             secrets_box,
         } => {
+            debug!(
+                "Publishing secret batch response {request_id}: {} remaining items",
+                remaining_requests.len()
+            );
+
             let gossip = GossipMessage::SecretBatchResponse {
                 request_id,
                 remaining_requests,
                 secrets_box,
             };
-            if let Ok(json) = serde_json::to_string(&gossip) {
-                let _ = swarm
-                    .behaviour_mut()
-                    .gossipsub
-                    .publish(topic.clone(), json.as_bytes());
-            } else {
-                debug!("Failed to serialize secret batch response");
+
+            match serde_json::to_string(&gossip) {
+                Ok(json) => {
+                    match swarm
+                        .behaviour_mut()
+                        .gossipsub
+                        .publish(topic.clone(), json.as_bytes())
+                    {
+                        Ok(_) => {
+                            debug!("Successfully published response {request_id} to gossip network",)
+                        }
+                        Err(e) => warn!("Failed to publish response {request_id}: {e}"),
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to serialize secret batch response {request_id}: {e}",);
+                }
             }
         }
     }

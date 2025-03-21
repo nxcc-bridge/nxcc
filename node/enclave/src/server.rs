@@ -19,7 +19,7 @@ pub async fn start_grpc_server(config: &EnclaveConfig) -> Result<(), Box<dyn std
 
             Server::builder()
                 .add_service(SecretsServer::new(SecretsService::default()))
-                .add_service(RunnerServer::new(RunnerService::default()))
+                .add_service(RunnerServer::new(RunnerService))
                 .serve_with_incoming(listener.incoming())
                 .await?;
         }
@@ -41,7 +41,7 @@ pub async fn start_grpc_server(config: &EnclaveConfig) -> Result<(), Box<dyn std
 
                 Server::builder()
                     .add_service(SecretsServer::new(SecretsService::default()))
-                    .add_service(RunnerServer::new(RunnerService::default()))
+                    .add_service(RunnerServer::new(RunnerService))
                     .serve_with_incoming(incoming)
                     .await?;
             }

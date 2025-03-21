@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use ethers::types::{Address, H256};
+use ethers::types::{Address, U256};
 use interface::proto::daemon::{
     GetSecretsRequest, GetSecretsResponse, SecretIdentifier, SecretRequest as ProtoSecretRequest,
     SecretRequestList, SecretsBox as ProtoSecretsBox, secrets_server::Secrets,
@@ -54,8 +54,8 @@ impl Secrets for SecretsDebugGrpc {
 
             let ident = id_proto
                 .identity_id
-                .parse::<H256>()
-                .map_err(|_| Status::invalid_argument("Invalid identity_id"))?;
+                .parse::<U256>()
+                .map_err(|e| Status::invalid_argument(format!("Invalid identity_id: {e}")))?;
 
             let id = SecretId {
                 chain_id: id_proto.chain_id,

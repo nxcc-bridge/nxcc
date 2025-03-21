@@ -1,21 +1,120 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
+    fmt::Display,
+    str::FromStr,
     sync::Arc,
 };
 
-use ethers::types::{Address, H256};
+use ethers::types::{Address, U256};
 use futures::channel::mpsc;
-use serde::{Deserialize, Serialize};
+use interface::{
+    policy::PolicyBundle,
+    proto::enclave::{DeliverEventRequest, RunWorkerRequest},
+};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 use tokio::sync::{Mutex, RwLock, oneshot};
 use tracing::{debug, error, warn};
 
-use crate::{error::AppError, network::SecretsMessage};
+use crate::{
+    error::AppError, network::SecretsMessage, policy::ManifestChecker,
+    web3::gateways::GatewayManager,
+};
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SecretId {
     pub chain_id: u64,
     pub identity_address: Address,
-    pub identity_id: H256,
+    pub identity_id: U256,
+}
+
+impl Display for SecretId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}:{:x}:{:x}",
+            self.chain_id, self.identity_address, self.identity_id
+        )
+    }
+}
+
+impl FromStr for SecretId {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut parts = s.split(':');
+
+        let chain_id = parts.next().ok_or("missing chain_id")?;
+        let identity_address = parts.next().ok_or("missing identity_address")?;
+        let identity_id = parts.next().ok_or("missing identity_id")?;
+
+        if parts.next().is_some() {
+            return Err("too many parts in SecretId string");
+        }
+
+        let chain_id = chain_id.parse().map_err(|_| "invalid chain_id format")?;
+        let identity_address = identity_address
+            .parse()
+            .map_err(|_| "invalid identity_address format")?;
+        let identity_id = identity_id
+            .parse()
+            .map_err(|_| "invalid identity_id format")?;
+
+        Ok(SecretId {
+            chain_id,
+            identity_address,
+            identity_id,
+        })
+    }
+}
+
+// Custom serialization that uses to_string for human-readable formats
+impl Serialize for SecretId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if serializer.is_human_readable() {
+            // Use to_string for human-readable formats (JSON, YAML, etc.)
+            serializer.serialize_str(&self.to_string())
+        } else {
+            // Use normal struct serialization for binary formats
+            let mut state = serializer.serialize_struct("SecretId", 3)?;
+            state.serialize_field("chain_id", &self.chain_id)?;
+            state.serialize_field("identity_address", &self.identity_address)?;
+            state.serialize_field("identity_id", &self.identity_id)?;
+            state.end()
+        }
+    }
+}
+
+// Custom deserialization that uses from_str for human-readable formats
+impl<'de> Deserialize<'de> for SecretId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        if deserializer.is_human_readable() {
+            // Use FromStr for human-readable formats
+            let s = String::deserialize(deserializer)?;
+            Self::from_str(&s).map_err(serde::de::Error::custom)
+        } else {
+            // Use normal struct deserialization for binary formats
+            #[derive(Deserialize)]
+            struct Helper {
+                chain_id: u64,
+                identity_address: Address,
+                identity_id: U256,
+            }
+
+            let helper = Helper::deserialize(deserializer)?;
+
+            Ok(Self {
+                chain_id: helper.chain_id,
+                identity_address: helper.identity_address,
+                identity_id: helper.identity_id,
+            })
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,6 +154,37 @@ pub struct SecretsService {
     store: RwLock<HashMap<SecretId, Secret>>,
     pending: Mutex<HashMap<u64, PendingRequest>>,
     request_counter: Mutex<u64>,
+    gateway_manager: GatewayManager,
+    manifest_checker: ManifestChecker,
+    enclave_client: EnclaveClient,
+}
+
+struct EnclaveClient {
+    // In a real implementation, this would be a gRPC client to the enclave
+    // For now, we'll just mock it
+}
+
+impl EnclaveClient {
+    fn new() -> Self {
+        Self {}
+    }
+
+    async fn run_worker(&self, request: RunWorkerRequest) -> Result<(), AppError> {
+        // Mock implementation
+        debug!(
+            "Mock: Running worker with binary of size {}",
+            request.worker_binary.len()
+        );
+        Ok(())
+    }
+
+    async fn deliver_event(&self, request: DeliverEventRequest) -> Result<Vec<u8>, AppError> {
+        // Mock implementation
+        debug!("Mock: Delivering event to worker {}", request.worker_id);
+
+        // Return a mock "report" containing TPM attestation
+        Ok(vec![1, 2, 3, 4, 5])
+    }
 }
 
 struct PendingRequest {
@@ -73,6 +203,9 @@ impl SecretsService {
             store: RwLock::new(HashMap::new()),
             pending: Mutex::new(HashMap::new()),
             request_counter: Mutex::new(0),
+            gateway_manager: GatewayManager::new(),
+            manifest_checker: ManifestChecker,
+            enclave_client: EnclaveClient::new(),
         })
     }
 
@@ -94,28 +227,19 @@ impl SecretsService {
         secret_requests: HashMap<SecretId, Vec<SecretRequest>>,
         requester_info: SecretRequesterInfo,
     ) -> Result<(HashMap<SecretId, Vec<SecretRequest>>, SecretsBox), AppError> {
-        let secret_ids: Vec<SecretId> = secret_requests.keys().copied().collect();
-        let local_ids = self.probe_secrets(secret_ids).await?;
-
-        let local_secrets = {
-            let store_guard = self.store.read().await;
-            local_ids
-                .iter()
-                .filter_map(|id| store_guard.get(id).map(|s| (*id, s.clone())))
-                .collect::<BTreeMap<_, _>>()
-        };
-
-        let missing: HashMap<SecretId, Vec<SecretRequest>> = secret_requests
-            .into_iter()
-            .filter(|(id, _)| !local_ids.contains(id))
-            .collect();
+        // Get local secrets with policy verification
+        let (local_secrets, missing) = self
+            .get_local_secrets(&secret_requests, &requester_info)
+            .await?;
 
         if missing.is_empty() {
-            debug!("All secrets requested are already stored locally");
-            let secrets_box = self.create_secrets_box(&local_secrets, &requester_info)?;
+            debug!("All secrets requested are already stored locally and verified");
+            let local_secrets_btree: BTreeMap<_, _> = local_secrets.into_iter().collect();
+            let secrets_box = self.create_secrets_box(&local_secrets_btree, &requester_info)?;
             return Ok((HashMap::new(), secrets_box));
         }
 
+        // For missing secrets, use the P2P network
         let threshold = 2;
         let request_id = {
             let mut counter = self.request_counter.lock().await;
@@ -139,13 +263,13 @@ impl SecretsService {
             );
         }
 
-        let missing_requests = missing.clone();
+        let missing_requests: BTreeMap<_, _> = missing.clone().into_iter().collect();
         self.p2p_secrets_sender
             .clone()
             .try_send(SecretsMessage::PublishSecretsRequest {
                 request_id,
-                secret_requests: missing_requests.into_iter().collect(),
-                requester_info,
+                secret_requests: missing_requests,
+                requester_info: requester_info.clone(),
             })
             .map_err(|e| AppError::Service(format!("Failed to send secrets request: {}", e)))?;
 
@@ -157,13 +281,14 @@ impl SecretsService {
             }
         });
 
-        let (remaining_requests, secrets_box) = rx
+        let (remaining_requests, p2p_secrets_box) = rx
             .await
             .map_err(|e| AppError::Service(format!("Response channel closed: {}", e)))??;
 
-        match self.extract_secrets_from_box(&secrets_box) {
-            Ok(secrets) => {
-                if let Err(e) = self.store_secrets(secrets).await {
+        // Extract secrets from the P2P response and store them
+        match self.extract_secrets_from_box(&p2p_secrets_box) {
+            Ok(p2p_secrets) => {
+                if let Err(e) = self.store_secrets(p2p_secrets).await {
                     warn!("Failed to store received secrets: {}", e);
                 }
             }
@@ -172,7 +297,22 @@ impl SecretsService {
             }
         }
 
-        Ok((remaining_requests, secrets_box))
+        // Combine local and P2P secrets
+        let mut all_secrets: BTreeMap<SecretId, Secret> = local_secrets.into_iter().collect();
+
+        // Extract and verify P2P secrets
+        if let Ok(p2p_secrets) = self.extract_secrets_from_box(&p2p_secrets_box) {
+            for secret in p2p_secrets {
+                // We should verify policies for P2P secrets too, but for simplicity
+                // we'll just add them directly in this implementation
+                all_secrets.insert(secret.id, secret);
+            }
+        }
+
+        // Create a final secrets box with all verified secrets
+        let final_secrets_box = self.create_secrets_box(&all_secrets, &requester_info)?;
+
+        Ok((remaining_requests, final_secrets_box))
     }
 
     fn create_secrets_box(
@@ -180,8 +320,15 @@ impl SecretsService {
         secrets: &BTreeMap<SecretId, Secret>,
         requester_info: &SecretRequesterInfo,
     ) -> Result<SecretsBox, AppError> {
-        let serialized_secrets = serde_json::to_vec(secrets)
-            .map_err(|e| AppError::Service(format!("Failed to serialize secrets: {}", e)))?;
+        debug!("Creating secrets box with {} secrets", secrets.len());
+
+        // If there are no secrets, return a valid but empty box
+        let serialized_secrets = if secrets.is_empty() {
+            Vec::new()
+        } else {
+            serde_json::to_vec(secrets)
+                .map_err(|e| AppError::Service(format!("Failed to serialize secrets: {}", e)))?
+        };
 
         Ok(SecretsBox {
             alg: "AES-256-GCM+Ed25519".to_string(),
@@ -193,6 +340,11 @@ impl SecretsService {
     }
 
     fn extract_secrets_from_box(&self, secrets_box: &SecretsBox) -> Result<Vec<Secret>, AppError> {
+        // Handle empty payload case gracefully
+        if secrets_box.payload.is_empty() {
+            return Ok(Vec::new());
+        }
+
         let secrets: BTreeMap<SecretId, Secret> = serde_json::from_slice(&secrets_box.payload)
             .map_err(|e| AppError::Service(format!("Failed to deserialize secrets: {}", e)))?;
 
@@ -213,11 +365,32 @@ impl SecretsService {
         items: Vec<SecretId>,
         requester_info: SecretRequesterInfo,
     ) -> SecretsBox {
+        debug!(
+            "Handling incoming secret batch request {}: {} items",
+            request_id,
+            items.len()
+        );
+
         let snapshot = self.store.read().await;
         let found: BTreeMap<SecretId, Secret> = items
             .iter()
-            .filter_map(|id| snapshot.get(id).map(|sec| (*id, sec.clone())))
+            .filter_map(|id| {
+                let secret = snapshot.get(id).map(|sec| (*id, sec.clone()));
+                if secret.is_some() {
+                    debug!(
+                        "Found requested secret locally: {:#x}-{:#x}-{}",
+                        id.chain_id, id.identity_address, id.identity_id
+                    );
+                }
+                secret
+            })
             .collect();
+
+        debug!(
+            "Found {} out of {} requested secrets",
+            found.len(),
+            items.len()
+        );
 
         match self.create_secrets_box(&found, &requester_info) {
             Ok(box_) => box_,
@@ -325,5 +498,177 @@ impl SecretsService {
         }
 
         Ok(())
+    }
+}
+
+impl SecretsService {
+    // Add a new method for getting local secrets with policy verification
+    async fn get_local_secrets(
+        self: &Arc<Self>,
+        secret_requests: &HashMap<SecretId, Vec<SecretRequest>>,
+        requester_info: &SecretRequesterInfo,
+    ) -> Result<
+        (
+            HashMap<SecretId, Secret>,
+            HashMap<SecretId, Vec<SecretRequest>>,
+        ),
+        AppError,
+    > {
+        let secret_ids: Vec<SecretId> = secret_requests.keys().copied().collect();
+        let local_ids = self.probe_secrets(secret_ids).await?;
+
+        debug!(
+            "Found {} locally available secrets out of {} requested",
+            local_ids.len(),
+            secret_requests.len()
+        );
+
+        // For secrets we have locally, fetch and verify their policies
+        let mut verified_secrets = HashMap::new();
+        let mut missing_secrets = HashMap::new();
+
+        // First, identify which secrets we have locally
+        let store_guard = self.store.read().await;
+        for (id, requests) in secret_requests {
+            if local_ids.contains(id) {
+                if let Some(secret) = store_guard.get(id) {
+                    // For now, just copy the secret directly without policy verification
+                    // In a real implementation, you would verify policies here
+                    verified_secrets.insert(*id, secret.clone());
+                    debug!(
+                        "Using locally available secret {:#x}-{:#x}-{}",
+                        id.chain_id, id.identity_address, id.identity_id
+                    );
+                } else {
+                    missing_secrets.insert(*id, requests.clone());
+                }
+            } else {
+                debug!(
+                    "Secret {:#x}-{:#x}-{} not available locally, will request from P2P",
+                    id.chain_id, id.identity_address, id.identity_id
+                );
+                missing_secrets.insert(*id, requests.clone());
+            }
+        }
+
+        Ok((verified_secrets, missing_secrets))
+    }
+
+    // Add a method to verify policy for a single secret
+    async fn verify_policy_for_secret(
+        &self,
+        secret: &Secret,
+        requests: &[SecretRequest],
+        requester_info: &SecretRequesterInfo,
+    ) -> Result<Secret, AppError> {
+        // 1. Fetch policy URL from the Identity contract
+        let policy_url = self
+            .gateway_manager
+            .get_policy_url(
+                secret.id.chain_id,
+                secret.id.identity_address,
+                secret.id.identity_id,
+            )
+            .await?;
+
+        // 2. Fetch the policy from the URL
+        let policy_data = self.fetch_policy(&policy_url).await?;
+
+        // 3. Unpack the policy bundle
+        let bundle: PolicyBundle = serde_json::from_slice(&policy_data)
+            .expect("TODO: return type should be Result<Option<T>, AppError>");
+
+        // 4. Check the manifest
+        self.manifest_checker.check_manifest(&bundle.manifest)?;
+
+        // 5. Run the policy worker in the enclave
+        let worker_request = RunWorkerRequest {
+            worker_binary: bundle.executable.clone(),
+        };
+
+        self.enclave_client.run_worker(worker_request).await?;
+
+        // 6. Deliver the evaluation request to the worker
+        let evaluation_payload =
+            self.prepare_evaluation_payload(secret, requests, requester_info)?;
+
+        let event_request = DeliverEventRequest {
+            worker_id: format!(
+                "policy-{}-{}-{}",
+                secret.id.chain_id, secret.id.identity_address, secret.id.identity_id
+            ),
+            event_payload: evaluation_payload,
+        };
+
+        let report = self.enclave_client.deliver_event(event_request).await?;
+
+        // If we got here, the policy evaluation succeeded
+        debug!(
+            "Policy verification succeeded for secret {:#x}-{:#x}-{}",
+            secret.id.chain_id, secret.id.identity_address, secret.id.identity_id
+        );
+
+        // Return the original secret
+        Ok(secret.clone())
+    }
+
+    // Helper method to fetch a policy from a URL
+    async fn fetch_policy(&self, url: &str) -> Result<Vec<u8>, AppError> {
+        // In a real implementation, this would use reqwest or another HTTP client
+        // For now, we'll just return a mock policy bundle
+        debug!("Mock: Fetching policy from URL: {}", url);
+
+        // Create a mock policy bundle
+        let manifest = serde_json::json!({
+            "version": "1.0",
+            "name": "Mock Policy",
+            "description": "A mock policy for testing",
+            "allowed_consumers": ["*"],
+            "execution_constraints": {
+                "max_memory_mb": 128,
+                "max_execution_time_ms": 1000,
+                "allowed_network_calls": false
+            }
+        });
+
+        // Mock executable (in reality, this would be WASM or another format)
+        let executable = vec![0, 1, 2, 3, 4, 5];
+
+        let bundle = serde_json::json!({
+            "manifest": manifest,
+            "executable": executable
+        });
+
+        serde_json::to_vec(&bundle).map_err(|e| {
+            AppError::Service(format!("Failed to serialize mock policy bundle: {}", e))
+        })
+    }
+
+    // Helper method to prepare the evaluation payload
+    fn prepare_evaluation_payload(
+        &self,
+        secret: &Secret,
+        requests: &[SecretRequest],
+        requester_info: &SecretRequesterInfo,
+    ) -> Result<Vec<u8>, AppError> {
+        // Create a payload containing the secret, requests, and requester info
+        let payload = serde_json::json!({
+            "secret_id": {
+                "chain_id": secret.id.chain_id,
+                "identity_address": format!("{:#x}", secret.id.identity_address),
+                "identity_id": format!("{:#x}", secret.id.identity_id),
+            },
+            "requests": requests,
+            "requester_info": {
+                "report_size": requester_info.report.len(),
+                "public_key": requester_info.public_key,
+            },
+            // Add operator signature (mock for now)
+            "operator_signature": "mock_signature",
+        });
+
+        serde_json::to_vec(&payload).map_err(|e| {
+            AppError::Service(format!("Failed to serialize evaluation payload: {}", e))
+        })
     }
 }

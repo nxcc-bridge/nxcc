@@ -3,7 +3,9 @@ mod error;
 mod grpc;
 mod identity;
 mod network;
+mod policy;
 mod services;
+mod web3;
 
 use tracing::{Level, info};
 use tracing_subscriber::{EnvFilter, fmt::Subscriber};
