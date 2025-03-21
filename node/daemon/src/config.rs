@@ -33,7 +33,7 @@ pub struct Config {
 #[derive(Debug, Clone, Serialize, Deserialize, clap::Args)]
 pub struct NetworkConfig {
     /// Comma-separated list of listen addresses.
-    /// Defaults to "/ip4/0.0.0.0/tcp/0".
+    /// Defaults to "/ip4/0.0.0.0/tcp/0" (random free port).
     #[clap(
         long,
         value_delimiter = ',',
@@ -52,7 +52,7 @@ pub struct NetworkConfig {
     #[serde(default)]
     pub bootstrap_peers: Vec<String>,
 
-    /// Enable automatic peer discovery.
+    /// Enable automatic peer discovery via mDNS.
     /// Defaults to true.
     #[clap(
         long,
@@ -133,13 +133,11 @@ fn default_uds_path() -> String {
 }
 
 impl Config {
-    /// Load the `Config` from a combination of:
+    /// Load from a combination of:
     /// 1. A default struct,
     /// 2. A TOML file (if found),
     /// 3. Environment variables (prefixed with `P2P_`),
     /// 4. CLI arguments (parsed by `clap`).
-    ///
-    /// Whichever comes last takes precedence.
     pub fn load() -> Result<Self, figment::Error> {
         use figment::{
             Figment,

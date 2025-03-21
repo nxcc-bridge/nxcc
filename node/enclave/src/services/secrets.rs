@@ -1,8 +1,7 @@
 use tonic::{Request, Response, Status};
 
 use interface::proto::enclave::{
-    EncryptedSecret, GetSecretsRequest,
-    GetSecretsResponse, secrets_server::Secrets,
+    EncryptedSecret, GetSecretsRequest, GetSecretsResponse, secrets_server::Secrets,
 };
 
 #[derive(Default)]

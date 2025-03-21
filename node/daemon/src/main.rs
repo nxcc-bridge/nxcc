@@ -6,69 +6,80 @@ mod network;
 mod services;
 
 use tracing::{Level, info};
-use tracing_subscriber::EnvFilter;
+use tracing_subscriber::{EnvFilter, fmt::Subscriber};
 
-use crate::{config::Config, network::NetworkManager, services::ServiceManager};
+use crate::{
+    config::Config,
+    identity::{create_ephemeral_identity, get_or_create_identity},
+    network::NetworkManager,
+    services::{ServiceManager, secrets::SecretsService},
+};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // ----- 1. Load config -----
     let config = Config::load()?;
-
     let log_level = if config.verbose {
         Level::DEBUG
     } else {
         Level::INFO
     };
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::builder()
-                .with_default_directive(log_level.into())
-                .from_env()
-                .unwrap(),
-        )
-        .init();
+    // ----- 2. Initialize logging -----
+    // By default, let's raise libp2p_mdns to WARN to reduce "No route to host" spam
+    let base_filter = format!("{}={},libp2p_mdns=warn", env!("CARGO_PKG_NAME"), log_level);
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(base_filter));
+    let subscriber = Subscriber::builder().with_env_filter(env_filter).finish();
+    tracing::subscriber::set_global_default(subscriber)?;
 
-    info!("Starting P2P service...");
+    info!("Starting daemon...");
 
-    let identity_path = config.identity_path.clone();
-
-    let local_key = match identity_path {
-        Some(path) => identity::get_or_create_identity(&path)?,
-        None => {
-            info!("No identity path specified; using ephemeral identity.");
-            identity::create_ephemeral_identity()
-        }
+    // ----- 3. Load or create identity key -----
+    let local_key = match &config.identity_path {
+        Some(path) => get_or_create_identity(path)?,
+        None => create_ephemeral_identity(),
     };
 
     let local_peer_id = local_key.public().to_peer_id();
-    info!("Local peer id: {}", local_peer_id);
+    info!("Local peer id: {local_peer_id}");
 
-    let mut network = NetworkManager::new(local_key, config.clone()).await?;
+    // ----- 4. Create the network manager first -----
+    // Create a temporary SecretsService with a dummy channel that will be replaced
+    let (dummy_tx, _) = futures::channel::mpsc::channel(1);
+    let temp_secrets_service = SecretsService::new(dummy_tx);
+
+    let mut network = NetworkManager::new(local_key, config.clone(), temp_secrets_service).await?;
     network.start().await?;
 
-    // Grab the secrets sender from the network
-    let secrets_sender = network
+    // ----- 5. Now create the real services with the actual network channels -----
+    let notifier_tx = network
+        .notifier_sender
+        .clone()
+        .expect("No notifier_sender available");
+    let secrets_tx = network
         .secrets_sender
         .clone()
-        .expect("Secrets sender missing");
+        .expect("No secrets_sender available");
 
-    let _service_manager = ServiceManager::new(
-        network
-            .notifier_sender
-            .clone()
-            .expect("Notifier sender missing"),
-        secrets_sender.clone(),
-    );
+    let service_manager = ServiceManager::new(notifier_tx, secrets_tx);
+    let secrets_service = service_manager.secrets_service();
 
-    // Start the gRPC server
-    tokio::spawn(async move {
-        if let Err(e) = grpc::start_grpc_server(&config.grpc, secrets_sender).await {
-            tracing::error!("gRPC server error: {}", e);
-        }
-    });
+    // Update the network manager with the real secrets service
+    network.secrets_service = secrets_service.clone();
 
+    // ----- 6. Start gRPC server in background task -----
+    {
+        let grpc_config = config.grpc.clone();
+        tokio::spawn(async move {
+            if let Err(e) = crate::grpc::start_grpc_server(&grpc_config, secrets_service).await {
+                tracing::error!("gRPC server error: {e}");
+            }
+        });
+    }
+
+    // ----- 7. Wait for Ctrl-C -----
     tokio::signal::ctrl_c().await?;
-    info!("Shutting down...");
+    info!("Shutting down");
     Ok(())
 }

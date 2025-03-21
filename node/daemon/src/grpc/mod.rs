@@ -1,14 +1,17 @@
 pub mod secrets;
 
-use futures::channel::mpsc::Sender;
 use interface::proto::daemon::secrets_server::SecretsServer;
+use tonic::transport::Server;
 use tracing::info;
 
-use crate::{config::GrpcConfig, error::AppError, network::SecretsMessage};
+use crate::{
+    config::GrpcConfig, error::AppError, grpc::secrets::SecretsDebugGrpc,
+    services::secrets::SecretsService,
+};
 
 pub async fn start_grpc_server(
     config: &GrpcConfig,
-    secrets_sender: Sender<SecretsMessage>,
+    secrets_service: std::sync::Arc<SecretsService>,
 ) -> Result<(), AppError> {
     match config.mode.as_str() {
         "vsock" => {
@@ -23,10 +26,8 @@ pub async fn start_grpc_server(
             .map_err(|e| AppError::Service(format!("Failed to bind vsock: {}", e)))?;
             let incoming = listener.incoming();
 
-            tonic::transport::Server::builder()
-                .add_service(SecretsServer::new(secrets::SecretsService::new(
-                    secrets_sender.clone(),
-                )))
+            Server::builder()
+                .add_service(SecretsServer::new(SecretsDebugGrpc::new(secrets_service)))
                 .serve_with_incoming(incoming)
                 .await
                 .map_err(|e| AppError::Service(format!("gRPC server error: {}", e)))?;
@@ -38,20 +39,18 @@ pub async fn start_grpc_server(
                 use std::{io::ErrorKind, path::Path};
 
                 use tokio::net::{UnixListener, UnixStream};
+                use tokio_stream::wrappers::UnixListenerStream;
 
                 let uds_path = &config.uds_path;
                 if Path::new(uds_path).exists() {
-                    // Try to connect to see if a server is running.
                     match UnixStream::connect(uds_path).await {
                         Ok(_) => {
-                            // Connection succeeded, so another server is using the socket.
                             return Err(AppError::Service(format!(
                                 "UDS at {} is already in use by a running server.",
                                 uds_path
                             )));
                         }
                         Err(e) => {
-                            // If the error indicates no server is listening, assume it's stale.
                             if e.kind() == ErrorKind::ConnectionRefused {
                                 std::fs::remove_file(uds_path).map_err(|e| {
                                     AppError::Service(format!(
@@ -60,7 +59,6 @@ pub async fn start_grpc_server(
                                     ))
                                 })?;
                             } else {
-                                // For any other error, propagate it.
                                 return Err(AppError::Service(format!(
                                     "Error checking existing UDS at {}: {}",
                                     uds_path, e
@@ -72,10 +70,10 @@ pub async fn start_grpc_server(
 
                 let uds_listener = UnixListener::bind(uds_path)
                     .map_err(|e| AppError::Service(format!("Failed to bind UDS: {}", e)))?;
-                let incoming = tokio_stream::wrappers::UnixListenerStream::new(uds_listener);
-                let svc = SecretsServer::new(secrets::SecretsService::new(secrets_sender.clone()));
+                let incoming = UnixListenerStream::new(uds_listener);
+                let svc = SecretsServer::new(SecretsDebugGrpc::new(secrets_service));
 
-                tonic::transport::Server::builder()
+                Server::builder()
                     .add_service(svc)
                     .serve_with_incoming_shutdown(incoming, async {
                         tokio::signal::ctrl_c()
@@ -85,7 +83,6 @@ pub async fn start_grpc_server(
                     .await
                     .map_err(|e| AppError::Service(format!("gRPC server error: {}", e)))?;
 
-                // Cleanup: remove the UDS file after the server shuts down.
                 if let Err(e) = std::fs::remove_file(uds_path) {
                     tracing::warn!("Failed to remove UDS file on shutdown: {}", e);
                 }

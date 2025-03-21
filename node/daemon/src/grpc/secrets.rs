@@ -1,78 +1,79 @@
+use std::sync::Arc;
+
 use ethers::types::{Address, H256};
-pub use interface::proto::daemon::{
-    EncryptedSecret, GetSecretsRequest, GetSecretsResponse,
-    secrets_server::Secrets,
+use interface::proto::daemon::{
+    EncryptedSecret, GetSecretsRequest, GetSecretsResponse, secrets_server::Secrets,
 };
 use tonic::{Request, Response, Status};
 use tracing::debug;
 
-use crate::{network::SecretsMessage, services::secrets as internal_secrets};
+use crate::{
+    error::AppError,
+    services::secrets::{Secret, SecretId, SecretsService},
+};
 
-pub struct SecretsService {
-    secrets_sender: futures::channel::mpsc::Sender<SecretsMessage>,
+pub struct SecretsDebugGrpc {
+    secrets_service: Arc<SecretsService>,
 }
 
-impl SecretsService {
-    pub fn new(secrets_sender: futures::channel::mpsc::Sender<SecretsMessage>) -> Self {
-        Self { secrets_sender }
+impl SecretsDebugGrpc {
+    pub fn new(secrets_service: Arc<SecretsService>) -> Self {
+        Self { secrets_service }
+    }
+}
+
+impl SecretsDebugGrpc {
+    async fn transform_and_get(
+        &self,
+        secret_ids: Vec<SecretId>,
+        payload: Vec<u8>,
+    ) -> Result<Vec<Secret>, AppError> {
+        self.secrets_service.get_secrets(secret_ids, payload).await
     }
 }
 
 #[tonic::async_trait]
-impl Secrets for SecretsService {
+impl Secrets for SecretsDebugGrpc {
     async fn get_secrets(
         &self,
         request: Request<GetSecretsRequest>,
     ) -> Result<Response<GetSecretsResponse>, Status> {
         let req = request.into_inner();
+        debug!("Received gRPC get_secrets with {} items", req.secrets.len());
 
-        debug!(
-            "Received gRPC call to GetSecrets with {} secret(s)",
-            req.secrets.len()
-        );
-
-        let mut parsed_identifiers = Vec::with_capacity(req.secrets.len());
+        let mut ids = Vec::with_capacity(req.secrets.len());
         for sid in req.secrets {
-            let chain_id = sid.chain_id;
-            let identity_address = sid
+            let address = sid
                 .identity_address
                 .parse::<Address>()
                 .map_err(|_| Status::invalid_argument("Invalid identity_address"))?;
-            let identity_id = sid
+            let ident = sid
                 .identity_id
                 .parse::<H256>()
                 .map_err(|_| Status::invalid_argument("Invalid identity_id"))?;
-            parsed_identifiers.push(internal_secrets::SecretIdentifier {
-                chain_id,
-                identity_address,
-                identity_id,
+            ids.push(SecretId {
+                chain_id: sid.chain_id,
+                identity_address: address,
+                identity_id: ident,
             });
         }
 
-        // Reuse the same internal function that processes the batch request.
-        let internal_resp = internal_secrets::process_get_secrets_batch_request(
-            parsed_identifiers,
-            req.payload,
-            self.secrets_sender.clone(),
-        )
-        .await
-        .map_err(|e| Status::internal(format!("Error processing request: {}", e)))?;
-
-        // Map internal secret data to the gRPC response.
-        let grpc_secrets = internal_resp
-            .secrets
-            .into_iter()
-            .map(|s| EncryptedSecret {
-                data: s.data,
-                metadata: s.metadata.into(),
-                chain_id: s.chain_id,
-                identity_address: format!("{:#x}", s.identity_address),
-                identity_id: format!("{:#x}", s.identity_id),
-            })
-            .collect();
+        let secrets = self
+            .transform_and_get(ids, req.payload)
+            .await
+            .map_err(|e| Status::internal(format!("{:?}", e)))?;
 
         let response = GetSecretsResponse {
-            secrets: grpc_secrets,
+            secrets: secrets
+                .into_iter()
+                .map(|s| EncryptedSecret {
+                    data: s.data,
+                    metadata: s.metadata,
+                    chain_id: s.id.chain_id,
+                    identity_address: format!("{:#x}", s.id.identity_address),
+                    identity_id: format!("{:#x}", s.id.identity_id),
+                })
+                .collect(),
         };
 
         Ok(Response::new(response))

@@ -1,34 +1,41 @@
 pub mod notifier;
 pub mod secrets;
 
+use std::sync::Arc;
+
 use futures::channel::mpsc;
 
-use crate::network::{NotifierMessage, SecretsMessage};
+use crate::{
+    network::{NotifierMessage, SecretsMessage},
+    services::{notifier::start_service as start_notifier, secrets::SecretsService},
+};
 
 pub struct ServiceManager {
     notifier_sender: mpsc::Sender<NotifierMessage>,
-    secrets_sender: mpsc::Sender<SecretsMessage>,
+    secrets_service: Arc<SecretsService>,
 }
 
 impl ServiceManager {
     pub fn new(
         notifier_sender: mpsc::Sender<NotifierMessage>,
-        secrets_sender: mpsc::Sender<SecretsMessage>,
+        p2p_secrets_sender: mpsc::Sender<SecretsMessage>,
     ) -> Self {
-        let notifier_sender_clone = notifier_sender.clone();
-        let secrets_sender_clone = secrets_sender.clone();
+        let secrets_service = SecretsService::new(p2p_secrets_sender);
 
-        tokio::spawn(async move {
-            notifier::start_service(notifier_sender_clone).await;
-        });
-
-        tokio::spawn(async move {
-            secrets::start_service(secrets_sender_clone).await;
-        });
+        {
+            let clone = notifier_sender.clone();
+            tokio::spawn(async move {
+                start_notifier(clone).await;
+            });
+        }
 
         Self {
             notifier_sender,
-            secrets_sender,
+            secrets_service,
         }
+    }
+
+    pub fn secrets_service(&self) -> Arc<SecretsService> {
+        Arc::clone(&self.secrets_service)
     }
 }
