@@ -1,4 +1,5 @@
 use std::{
+    collections::{BTreeMap, HashMap},
     hash::{Hash, Hasher},
     sync::Arc,
     time::Duration,
@@ -18,7 +19,9 @@ use tracing::{debug, info, warn};
 use crate::{
     config::Config,
     error::AppError,
-    services::secrets::{Secret, SecretId, SecretsService},
+    services::secrets::{
+        Secret, SecretId, SecretRequest, SecretRequesterInfo, SecretsBox, SecretsService,
+    },
 };
 
 #[derive(Debug, Clone)]
@@ -31,23 +34,27 @@ pub enum NotifierMessage {
 pub enum SecretsMessage {
     PublishSecretsRequest {
         request_id: u64,
-        secret_ids: Vec<SecretId>,
+        secret_requests: BTreeMap<SecretId, Vec<SecretRequest>>,
+        requester_info: SecretRequesterInfo,
     },
     PublishSecretsResponse {
         request_id: u64,
-        secrets: Vec<Secret>,
+        remaining_requests: BTreeMap<SecretId, Vec<SecretRequest>>,
+        secrets_box: SecretsBox,
     },
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize)]
 enum GossipMessage {
     SecretBatchRequest {
         request_id: u64,
-        items: Vec<SecretId>,
+        secret_requests: BTreeMap<SecretId, Vec<SecretRequest>>,
+        requester_info: SecretRequesterInfo,
     },
     SecretBatchResponse {
         request_id: u64,
-        secrets: Vec<Secret>,
+        remaining_requests: BTreeMap<SecretId, Vec<SecretRequest>>,
+        secrets_box: SecretsBox,
     },
     Notification {
         content: String,
@@ -393,10 +400,15 @@ async fn handle_gossip_message(
     if let Ok(msg_str) = String::from_utf8(message.data.clone()) {
         if let Ok(msg) = serde_json::from_str::<GossipMessage>(&msg_str) {
             match msg {
-                GossipMessage::SecretBatchRequest { request_id, items } => {
+                GossipMessage::SecretBatchRequest {
+                    request_id,
+                    secret_requests,
+                    requester_info,
+                } => {
                     handle_secret_batch_request(
                         request_id,
-                        items,
+                        secret_requests,
+                        requester_info,
                         propagation_source,
                         swarm,
                         topic,
@@ -406,15 +418,16 @@ async fn handle_gossip_message(
                 }
                 GossipMessage::SecretBatchResponse {
                     request_id,
-                    secrets,
+                    remaining_requests,
+                    secrets_box,
                 } => {
-                    info!(
-                        "Received SecretBatchResponse for request_id={request_id} with {} secrets",
-                        secrets.len()
-                    );
-                    secrets_service
-                        .handle_incoming_secret_batch_response(request_id, secrets)
-                        .await;
+                    info!("Received SecretBatchResponse for request_id={request_id}");
+                    if let Err(e) = secrets_service
+                        .handle_incoming_secret_batch_response(request_id, secrets_box)
+                        .await
+                    {
+                        error!("Error handling secrets batch response: {e:?}")
+                    }
                 }
                 GossipMessage::Notification { content, timestamp } => {
                     handle_notification(content, timestamp, propagation_source);
@@ -430,7 +443,8 @@ async fn handle_gossip_message(
 
 async fn handle_secret_batch_request(
     request_id: u64,
-    items: Vec<SecretId>,
+    secret_requests: BTreeMap<SecretId, Vec<SecretRequest>>,
+    requester_info: SecretRequesterInfo,
     propagation_source: libp2p::PeerId,
     swarm: &mut Swarm<AppBehaviour>,
     topic: &gossipsub::IdentTopic,
@@ -439,31 +453,30 @@ async fn handle_secret_batch_request(
     info!(
         "Received SecretBatchRequest from peer={propagation_source} with request_id={request_id}, \
          {} item(s)",
-        items.len()
+        secret_requests.len()
     );
 
-    let found = secrets_service
-        .handle_incoming_secret_batch_request(request_id, items)
+    let secrets_box = secrets_service
+        .handle_incoming_secret_batch_request(
+            request_id,
+            secret_requests.keys().cloned().collect(),
+            requester_info.clone(),
+        )
         .await;
 
-    if !found.is_empty() {
-        info!(
-            "Found {} matching secret(s); sending SecretBatchResponse",
-            found.len()
-        );
-        let response = GossipMessage::SecretBatchResponse {
-            request_id,
-            secrets: found,
-        };
+    // We always respond with a SecretsBox, even if it's empty
+    info!("Sending SecretBatchResponse for request_id={request_id}");
+    let response = GossipMessage::SecretBatchResponse {
+        request_id,
+        remaining_requests: Default::default(), // No remaining requests from our perspective
+        secrets_box,
+    };
 
-        if let Ok(payload) = serde_json::to_string(&response) {
-            let _ = swarm
-                .behaviour_mut()
-                .gossipsub
-                .publish(topic.clone(), payload.as_bytes());
-        }
-    } else {
-        debug!("No secrets found for request_id={request_id}");
+    if let Ok(payload) = serde_json::to_string(&response) {
+        let _ = swarm
+            .behaviour_mut()
+            .gossipsub
+            .publish(topic.clone(), payload.as_bytes());
     }
 }
 
@@ -537,11 +550,13 @@ async fn handle_secrets_message(
     match msg {
         SecretsMessage::PublishSecretsRequest {
             request_id,
-            secret_ids,
+            secret_requests,
+            requester_info,
         } => {
             let gossip = GossipMessage::SecretBatchRequest {
                 request_id,
-                items: secret_ids,
+                secret_requests,
+                requester_info,
             };
             if let Ok(json) = serde_json::to_string(&gossip) {
                 let _ = swarm
@@ -554,11 +569,13 @@ async fn handle_secrets_message(
         }
         SecretsMessage::PublishSecretsResponse {
             request_id,
-            secrets,
+            remaining_requests,
+            secrets_box,
         } => {
             let gossip = GossipMessage::SecretBatchResponse {
                 request_id,
-                secrets,
+                remaining_requests,
+                secrets_box,
             };
             if let Ok(json) = serde_json::to_string(&gossip) {
                 let _ = swarm
