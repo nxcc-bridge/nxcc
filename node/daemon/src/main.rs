@@ -17,6 +17,8 @@ use crate::{
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+
     // ----- 1. Load config -----
     let config = Config::load()?;
     let log_level = if config.verbose {
@@ -72,7 +74,9 @@ async fn main() -> anyhow::Result<()> {
     {
         let grpc_config = config.grpc.clone();
         tokio::spawn(async move {
-            if let Err(e) = crate::grpc::start_grpc_server(&grpc_config, secrets_service).await {
+            if let Err(e) =
+                crate::grpc::start_grpc_server(&grpc_config, secrets_service, shutdown_rx).await
+            {
                 tracing::error!("gRPC server error: {e}");
             }
         });
@@ -80,6 +84,7 @@ async fn main() -> anyhow::Result<()> {
 
     // ----- 7. Wait for Ctrl-C -----
     tokio::signal::ctrl_c().await?;
-    info!("Shutting down");
+    tracing::info!("Received Ctrl-C, shutting down...");
+    let _ = shutdown_tx.send(());
     Ok(())
 }

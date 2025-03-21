@@ -6,7 +6,7 @@ use std::{
 
 use futures::{StreamExt, channel::mpsc};
 use libp2p::{
-    Multiaddr, Swarm, Transport,
+    Multiaddr, Swarm,
     core::multiaddr::Protocol,
     gossipsub, identify, kad, mdns, noise, ping,
     swarm::{NetworkBehaviour, SwarmEvent},
@@ -319,9 +319,6 @@ async fn handle_swarm_event(
             AppEvent::Identify(identify_event) => handle_identify_event(identify_event),
             AppEvent::Ping(ping_event) => handle_ping_event(ping_event),
             AppEvent::Kademlia(kad_event) => handle_kademlia_event(kad_event),
-            e => {
-                debug!("Unhandled event: {e:?}");
-            }
         },
         SwarmEvent::NewListenAddr { address, .. } => {
             info!("New listener on {address}");

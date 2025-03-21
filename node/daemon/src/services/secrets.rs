@@ -1,6 +1,5 @@
 use std::{
     collections::{HashMap, HashSet},
-    hash::{Hash, Hasher},
     sync::Arc,
 };
 
@@ -12,19 +11,11 @@ use tracing::debug;
 
 use crate::{error::AppError, network::SecretsMessage};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SecretId {
     pub chain_id: u64,
     pub identity_address: Address,
     pub identity_id: H256,
-}
-
-impl Hash for SecretId {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.chain_id.hash(state);
-        self.identity_address.hash(state);
-        self.identity_id.hash(state);
-    }
 }
 
 #[derive(Debug, Clone)]
