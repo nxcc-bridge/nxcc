@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::BTreeMap,
     hash::{Hash, Hasher},
     sync::Arc,
     time::Duration,
@@ -14,14 +14,12 @@ use libp2p::{
     tcp, yamux,
 };
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::{
     config::Config,
     error::AppError,
-    services::secrets::{
-        Secret, SecretId, SecretRequest, SecretRequesterInfo, SecretsBox, SecretsService,
-    },
+    services::secrets::{SecretId, SecretRequest, SecretRequesterInfo, SecretsBox, SecretsService},
 };
 
 #[derive(Debug, Clone)]
@@ -121,9 +119,9 @@ impl From<kad::Event> for AppEvent {
 pub struct NetworkManager {
     local_key: libp2p::identity::Keypair,
     config: Config,
-    pub notifier_sender: Option<mpsc::Sender<NotifierMessage>>,
-    pub secrets_sender: Option<mpsc::Sender<SecretsMessage>>,
-    pub secrets_service: Arc<SecretsService>,
+    notifier_receiver: mpsc::Receiver<NotifierMessage>,
+    secrets_receiver: mpsc::Receiver<SecretsMessage>,
+    secrets_service: Arc<SecretsService>,
 }
 
 impl NetworkManager {
@@ -131,23 +129,19 @@ impl NetworkManager {
         local_key: libp2p::identity::Keypair,
         config: Config,
         secrets_service: Arc<SecretsService>,
+        notifier_receiver: mpsc::Receiver<NotifierMessage>,
+        secrets_receiver: mpsc::Receiver<SecretsMessage>,
     ) -> Result<Self, AppError> {
         Ok(Self {
             local_key,
             config,
-            notifier_sender: None,
-            secrets_sender: None,
+            notifier_receiver,
+            secrets_receiver,
             secrets_service,
         })
     }
 
     pub async fn start(&mut self) -> Result<(), AppError> {
-        let (notifier_tx, notifier_rx) = mpsc::channel::<NotifierMessage>(64);
-        let (secrets_tx, secrets_rx) = mpsc::channel::<SecretsMessage>(64);
-
-        self.notifier_sender = Some(notifier_tx);
-        self.secrets_sender = Some(secrets_tx);
-
         let peer_id = self.local_key.public().to_peer_id();
 
         // Build the swarm with all behaviors
@@ -168,6 +162,8 @@ impl NetworkManager {
         }
 
         let secrets_service = Arc::clone(&self.secrets_service);
+        let notifier_rx = std::mem::replace(&mut self.notifier_receiver, mpsc::channel(1).1);
+        let secrets_rx = std::mem::replace(&mut self.secrets_receiver, mpsc::channel(1).1);
 
         // Subscribe to a global "secrets" topic for gossip
         let secrets_topic = gossipsub::IdentTopic::new("secrets");

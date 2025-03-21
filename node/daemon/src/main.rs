@@ -12,7 +12,7 @@ use crate::{
     config::Config,
     identity::{create_ephemeral_identity, get_or_create_identity},
     network::NetworkManager,
-    services::{ServiceManager, secrets::SecretsService},
+    services::secrets::SecretsService,
 };
 
 #[tokio::main]
@@ -27,9 +27,7 @@ async fn main() -> anyhow::Result<()> {
         Level::INFO
     };
 
-    // ----- 2. Initialize logging -----
-    // By default, let's raise libp2p_mdns to WARN to reduce "No route to host" spam
-    let base_filter = format!("{}={},libp2p_mdns=warn", env!("CARGO_PKG_NAME"), log_level);
+    let base_filter = format!("{}={}", env!("CARGO_PKG_NAME"), log_level);
     let env_filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(base_filter));
     let subscriber = Subscriber::builder().with_env_filter(env_filter).finish();
@@ -37,7 +35,6 @@ async fn main() -> anyhow::Result<()> {
 
     info!("Starting daemon...");
 
-    // ----- 3. Load or create identity key -----
     let local_key = match &config.identity_path {
         Some(path) => get_or_create_identity(path)?,
         None => create_ephemeral_identity(),
@@ -46,43 +43,42 @@ async fn main() -> anyhow::Result<()> {
     let local_peer_id = local_key.public().to_peer_id();
     info!("Local peer id: {local_peer_id}");
 
-    // ----- 4. Create the network manager first -----
-    // Create a temporary SecretsService with a dummy channel that will be replaced
-    let (dummy_tx, _) = futures::channel::mpsc::channel(1);
-    let temp_secrets_service = SecretsService::new(dummy_tx);
+    let (secrets_tx, secrets_rx) = futures::channel::mpsc::channel(64);
+    let (notifier_tx, notifier_rx) = futures::channel::mpsc::channel(64);
 
-    let mut network = NetworkManager::new(local_key, config.clone(), temp_secrets_service).await?;
+    let secrets_service = SecretsService::new(secrets_tx.clone());
+
+    {
+        let notifier_tx_clone = notifier_tx.clone();
+        tokio::spawn(async move {
+            services::notifier::start_service(notifier_tx_clone).await;
+        });
+    }
+
+    let mut network = NetworkManager::new(
+        local_key,
+        config.clone(),
+        secrets_service.clone(),
+        notifier_rx,
+        secrets_rx,
+    )
+    .await?;
+
     network.start().await?;
 
-    // ----- 5. Now create the real services with the actual network channels -----
-    let notifier_tx = network
-        .notifier_sender
-        .clone()
-        .expect("No notifier_sender available");
-    let secrets_tx = network
-        .secrets_sender
-        .clone()
-        .expect("No secrets_sender available");
-
-    let service_manager = ServiceManager::new(notifier_tx, secrets_tx);
-    let secrets_service = service_manager.secrets_service();
-
-    // Update the network manager with the real secrets service
-    network.secrets_service = secrets_service.clone();
-
-    // ----- 6. Start gRPC server in background task -----
     {
         let grpc_config = config.grpc.clone();
+        let secrets_service_clone = secrets_service.clone();
         tokio::spawn(async move {
             if let Err(e) =
-                crate::grpc::start_grpc_server(&grpc_config, secrets_service, shutdown_rx).await
+                crate::grpc::start_grpc_server(&grpc_config, secrets_service_clone, shutdown_rx)
+                    .await
             {
                 tracing::error!("gRPC server error: {e}");
             }
         });
     }
 
-    // ----- 7. Wait for Ctrl-C -----
     tokio::signal::ctrl_c().await?;
     tracing::info!("Received Ctrl-C, shutting down...");
     let _ = shutdown_tx.send(());

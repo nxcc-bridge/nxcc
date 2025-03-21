@@ -3,16 +3,12 @@ use std::{collections::HashMap, sync::Arc};
 use ethers::types::{Address, H256};
 use interface::proto::daemon::{
     GetSecretsRequest, GetSecretsResponse, SecretIdentifier, SecretRequest as ProtoSecretRequest,
-    SecretRequestList, SecretRequesterInfo as ProtoRequesterInfo, SecretsBox as ProtoSecretsBox,
-    secrets_server::Secrets,
+    SecretRequestList, SecretsBox as ProtoSecretsBox, secrets_server::Secrets,
 };
 use tonic::{Request, Response, Status};
 use tracing::debug;
 
-use crate::{
-    error::AppError,
-    services::secrets::{SecretId, SecretRequest, SecretRequesterInfo, SecretsBox, SecretsService},
-};
+use crate::services::secrets::{SecretId, SecretRequest, SecretRequesterInfo, SecretsService};
 
 pub struct SecretsDebugGrpc {
     secrets_service: Arc<SecretsService>,
