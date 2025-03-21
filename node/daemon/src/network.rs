@@ -49,6 +49,10 @@ enum GossipMessage {
         request_id: u64,
         secrets: Vec<Secret>,
     },
+    Notification {
+        content: String,
+        timestamp: u64,
+    },
 }
 
 /// Our top-level NetworkBehaviour, combining:
@@ -227,149 +231,183 @@ impl NetworkManager {
         tokio::spawn(async move {
             loop {
                 tokio::select! {
-                    // --- Swarm event handler ---
-                    event = swarm.select_next_some() => {
-                        match event {
-                            SwarmEvent::Behaviour(app_event) => {
-                                match app_event {
-                                    AppEvent::Mdns(mdns::Event::Discovered(list)) => {
-                                        for (discovered_peer, addr) in list {
-                                            info!("mDNS discovered peer {discovered_peer} at {addr}");
-                                            swarm.behaviour_mut().kad.add_address(&discovered_peer, addr.clone());
-                                            let _ = swarm.dial(addr);
-                                        }
-                                    }
-                                    AppEvent::Mdns(mdns::Event::Expired(list)) => {
-                                        for (expired_peer, addr) in list {
-                                            info!("mDNS expired peer {expired_peer} at {addr}");
-                                            swarm.behaviour_mut().kad.remove_address(&expired_peer, &addr);
-                                        }
-                                    }
-                                    AppEvent::Gossipsub(gossipsub::Event::Message {
-                                        propagation_source,
-                                        message_id: _,
-                                        message,
-                                    }) => {
-                                        if let Ok(msg_str) = String::from_utf8(message.data.clone()) {
-                                            if let Ok(msg) = serde_json::from_str::<GossipMessage>(&msg_str) {
-                                                match msg {
-                                                    GossipMessage::SecretBatchRequest { request_id, items } => {
-                                                        info!("Received SecretBatchRequest from peer={propagation_source} \
-                                                            with request_id={request_id}, {} item(s)", items.len());
-                                                        let found = secrets_service
-                                                            .handle_incoming_secret_batch_request(request_id, items)
-                                                            .await;
-                                                        if !found.is_empty() {
-                                                            info!("Found {} matching secret(s); sending SecretBatchResponse", found.len());
-                                                            let response = GossipMessage::SecretBatchResponse {
-                                                                request_id,
-                                                                secrets: found,
-                                                            };
-                                                            if let Ok(payload) = serde_json::to_string(&response) {
-                                                                let _ = swarm.behaviour_mut()
-                                                                    .gossipsub
-                                                                    .publish(topic_clone.clone(), payload.as_bytes());
-                                                            }
-                                                        } else {
-                                                            debug!("No secrets found for request_id={request_id}");
+                                    // --- Swarm event handler ---
+                                    event = swarm.select_next_some() => {
+                                        match event {
+                                            SwarmEvent::Behaviour(app_event) => {
+                                                match app_event {
+                                                    AppEvent::Mdns(mdns::Event::Discovered(list)) => {
+                                                        for (discovered_peer, addr) in list {
+                                                            info!("mDNS discovered peer {discovered_peer} at {addr}");
+                                                            swarm.behaviour_mut().kad.add_address(&discovered_peer, addr.clone());
+                                                            let _ = swarm.dial(addr);
                                                         }
                                                     }
-                                                    GossipMessage::SecretBatchResponse { request_id, secrets } => {
-                                                        info!("Received SecretBatchResponse for request_id={request_id} \
-                                                            with {} secrets", secrets.len());
-                                                        secrets_service
-                                                            .handle_incoming_secret_batch_response(request_id, secrets)
-                                                            .await;
+                                                    AppEvent::Mdns(mdns::Event::Expired(list)) => {
+                                                        for (expired_peer, addr) in list {
+                                                            info!("mDNS expired peer {expired_peer} at {addr}");
+                                                            swarm.behaviour_mut().kad.remove_address(&expired_peer, &addr);
+                                                        }
+                                                    }
+                                                    AppEvent::Gossipsub(gossipsub::Event::Subscribed { peer_id, topic }) => {
+                                                        debug!("Peer {peer_id} subscribed to topic {topic}");
+                                                    },
+                                                    AppEvent::Gossipsub(gossipsub::Event::Unsubscribed { peer_id, topic }) => {
+                                                        debug!("Peer {peer_id} unsubscribed from topic {topic}");
+                                                    },
+                                                    AppEvent::Gossipsub(gossipsub::Event::Message {
+                                                        propagation_source,
+                                                        message_id: _,
+                                                        message,
+                                                    }) => {
+                                                        if let Ok(msg_str) = String::from_utf8(message.data.clone()) {
+                                                            if let Ok(msg) = serde_json::from_str::<GossipMessage>(&msg_str) {
+                                                                match msg {
+                                                                    GossipMessage::SecretBatchRequest { request_id, items } => {
+                                                                        info!("Received SecretBatchRequest from peer={propagation_source} \
+                                                                            with request_id={request_id}, {} item(s)", items.len());
+                                                                        let found = secrets_service
+                                                                            .handle_incoming_secret_batch_request(request_id, items)
+                                                                            .await;
+                                                                        if !found.is_empty() {
+                                                                            info!("Found {} matching secret(s); sending SecretBatchResponse", found.len());
+                                                                            let response = GossipMessage::SecretBatchResponse {
+                                                                                request_id,
+                                                                                secrets: found,
+                                                                            };
+                                                                            if let Ok(payload) = serde_json::to_string(&response) {
+                                                                                let _ = swarm.behaviour_mut()
+                                                                                    .gossipsub
+                                                                                    .publish(topic_clone.clone(), payload.as_bytes());
+                                                                            }
+                                                                        } else {
+                                                                            debug!("No secrets found for request_id={request_id}");
+                                                                        }
+                                                                    }
+                                                                    GossipMessage::SecretBatchResponse { request_id, secrets } => {
+                                                                        info!("Received SecretBatchResponse for request_id={request_id} \
+                                                                            with {} secrets", secrets.len());
+                                                                        secrets_service
+                                                                            .handle_incoming_secret_batch_response(request_id, secrets)
+                                                                            .await;
+                                                                    }
+                                                                    GossipMessage::Notification { content, timestamp } => {
+                                                                        let now = std::time::SystemTime::now()
+                                                                            .duration_since(std::time::UNIX_EPOCH)
+                                                                            .unwrap_or_default()
+                                                                            .as_secs();
+
+                                                                        info!("Received gossip notification from peer={}: '{}' (sent {} seconds ago)",
+                                                                            propagation_source,
+                                                                            content,
+                                                                            now.saturating_sub(timestamp));
+                                                                    }
+                                                                }
+                                                            } else {
+                                                                debug!("Ignoring invalid gossip message (JSON parse failed)");
+                                                            }
+                                                        } else {
+                                                            debug!("Ignoring gossip message (UTF-8 decode failed)");
+                                                        }
+                                                    }
+                                                    AppEvent::Identify(identify::Event::Received { peer_id, info, .. }) => {
+                                                        debug!("Identify info from peer {peer_id}: {:?}", info);
+                                                    }
+                                                    AppEvent::Ping(ping_event) => {
+                                                        debug!("Ping event: {:?}", ping_event);
+                                                    }
+                                                    AppEvent::Kademlia(kad_event) => {
+                                                        debug!("Kademlia event: {:?}", kad_event);
+                                                    }
+                                                    e => {
+                                                        debug!("Unhandled event: {e:?}");
                                                     }
                                                 }
-                                            } else {
-                                                debug!("Ignoring invalid gossip message (JSON parse failed)");
                                             }
-                                        } else {
-                                            debug!("Ignoring gossip message (UTF-8 decode failed)");
+                                            SwarmEvent::NewListenAddr { address, .. } => {
+                                                info!("New listener on {address}");
+                                            }
+                                            SwarmEvent::ConnectionEstablished { peer_id, .. } => {
+                                                info!("Connection established with {peer_id}");
+                                            }
+                                            SwarmEvent::ConnectionClosed { peer_id, .. } => {
+                                                info!("Connection closed with {peer_id}");
+                                            }
+                                            _ => {}
                                         }
-                                    }
-                                    AppEvent::Identify(identify::Event::Received { peer_id, info, .. }) => {
-                                        debug!("Identify info from peer {peer_id}: {:?}", info);
-                                    }
-                                    AppEvent::Ping(ping_event) => {
-                                        debug!("Ping event: {:?}", ping_event);
-                                    }
-                                    AppEvent::Kademlia(kad_event) => {
-                                        debug!("Kademlia event: {:?}", kad_event);
-                                    }
-                                    e => {
-                                        debug!("Unhandled event: {e:?}");
-                                    }
-                                }
-                            }
-                            SwarmEvent::NewListenAddr { address, .. } => {
-                                info!("New listener on {address}");
-                            }
-                            SwarmEvent::ConnectionEstablished { peer_id, .. } => {
-                                info!("Connection established with {peer_id}");
-                            }
-                            SwarmEvent::ConnectionClosed { peer_id, .. } => {
-                                info!("Connection closed with {peer_id}");
-                            }
-                            _ => {}
-                        }
-                    },
+                                    },
 
-                    // --- Notifier channel handler ---
-                    msg = notifier_rx.next() => {
-                        if let Some(msg) = msg {
-                            match msg {
-                                NotifierMessage::Notification(content) => {
-                                    info!("NotifierMessage: {content}");
-                                }
-                                NotifierMessage::Response(content) => {
-                                    info!("NotifierResponse: {content}");
-                                }
-                            }
-                        }
-                    },
+                                    // --- Notifier channel handler ---
+                                    msg = notifier_rx.next() => {
+                                        if let Some(msg) = msg {
+                                            match msg {
+                                                NotifierMessage::Notification(content) => {
+                                                    info!("Publishing notification to network: {content}");
+                                                    // Create a gossip message for the notification
+                                                    let gossip = GossipMessage::Notification {
+                                                        content: content.clone(),
+                                                        timestamp: std::time::SystemTime::now()
+                                                            .duration_since(std::time::UNIX_EPOCH)
+                                                            .unwrap_or_default()
+                                                            .as_secs(),
+                                                    };
 
-                    // --- Secrets channel handler ---
-                    msg = secrets_rx.next() => {
-                        if let Some(msg) = msg {
-                            match msg {
-                                SecretsMessage::PublishSecretsRequest {
-                                    request_id,
-                                    secret_ids
-                                } => {
-                                    let gossip = GossipMessage::SecretBatchRequest {
-                                        request_id,
-                                        items: secret_ids,
-                                    };
-                                    if let Ok(json) = serde_json::to_string(&gossip) {
-                                        let _ = swarm.behaviour_mut()
-                                            .gossipsub
-                                            .publish(topic_clone.clone(), json.as_bytes());
-                                    } else {
-                                        debug!("Failed to serialize secret batch request");
-                                    }
-                                }
-                                SecretsMessage::PublishSecretsResponse {
-                                    request_id,
-                                    secrets
-                                } => {
-                                    let gossip = GossipMessage::SecretBatchResponse {
-                                        request_id,
-                                        secrets,
-                                    };
-                                    if let Ok(json) = serde_json::to_string(&gossip) {
-                                        let _ = swarm.behaviour_mut()
-                                            .gossipsub
-                                            .publish(topic_clone.clone(), json.as_bytes());
-                                    } else {
-                                        debug!("Failed to serialize secret batch response");
-                                    }
-                                }
-                            }
-                        }
-                    },
+                                                    if let Ok(json) = serde_json::to_string(&gossip) {
+                                                        match swarm.behaviour_mut()
+                                                            .gossipsub
+                                                            .publish(topic_clone.clone(), json.as_bytes()) {
+                                                                Ok(_) => debug!("Successfully published notification to gossip network"),
+                                                                Err(e) => warn!("Failed to publish notification: {}", e),
+                                                            }
+                                                    }
                 }
+                                                NotifierMessage::Response(content) => {
+                                                    info!("NotifierResponse: {content}");
+                                                }
+                                            }
+                                        }
+                                    },
+
+                                    // --- Secrets channel handler ---
+                                    msg = secrets_rx.next() => {
+                                        if let Some(msg) = msg {
+                                            match msg {
+                                                SecretsMessage::PublishSecretsRequest {
+                                                    request_id,
+                                                    secret_ids
+                                                } => {
+                                                    let gossip = GossipMessage::SecretBatchRequest {
+                                                        request_id,
+                                                        items: secret_ids,
+                                                    };
+                                                    if let Ok(json) = serde_json::to_string(&gossip) {
+                                                        let _ = swarm.behaviour_mut()
+                                                            .gossipsub
+                                                            .publish(topic_clone.clone(), json.as_bytes());
+                                                    } else {
+                                                        debug!("Failed to serialize secret batch request");
+                                                    }
+                                                }
+                                                SecretsMessage::PublishSecretsResponse {
+                                                    request_id,
+                                                    secrets
+                                                } => {
+                                                    let gossip = GossipMessage::SecretBatchResponse {
+                                                        request_id,
+                                                        secrets,
+                                                    };
+                                                    if let Ok(json) = serde_json::to_string(&gossip) {
+                                                        let _ = swarm.behaviour_mut()
+                                                            .gossipsub
+                                                            .publish(topic_clone.clone(), json.as_bytes());
+                                                    } else {
+                                                        debug!("Failed to serialize secret batch response");
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    },
+                                }
             }
         });
 

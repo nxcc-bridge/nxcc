@@ -13,7 +13,7 @@ pub async fn start_service(mut sender: mpsc::Sender<NotifierMessage>) {
     tokio::spawn(async move {
         let mut counter = 0;
         loop {
-            sleep(Duration::from_secs(30)).await;
+            sleep(Duration::from_secs(10)).await;
             counter += 1;
 
             let notification = format!("Periodic notification #{}", counter);
