@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use ethers::types::{Address, U256};
 use interface::proto::daemon::{
     GetSecretsRequest, GetSecretsResponse, SecretIdentifier, SecretRequest as ProtoSecretRequest,
-    SecretRequestList, SecretsBox as ProtoSecretsBox, secrets_server::Secrets,
+    SecretRequests, SecretsBox as ProtoSecretsBox, secrets_server::Secrets,
 };
 use tonic::{Request, Response, Status};
 use tracing::debug;
@@ -42,8 +42,8 @@ impl Secrets for SecretsDebugGrpc {
 
         // Convert secret requests map
         let mut secret_requests = HashMap::new();
-        for (key, request_list) in req.secret_requests {
-            let id_proto = request_list
+        for requests in req.secret_requests {
+            let id_proto = requests
                 .id
                 .ok_or_else(|| Status::invalid_argument("Missing SecretIdentifier in request"))?;
 
@@ -63,7 +63,7 @@ impl Secrets for SecretsDebugGrpc {
                 identity_id: ident,
             };
 
-            let requests: Vec<SecretRequest> = request_list
+            let requests: Vec<SecretRequest> = requests
                 .requests
                 .into_iter()
                 .map(|r| SecretRequest {

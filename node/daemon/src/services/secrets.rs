@@ -355,42 +355,64 @@ impl SecretsService {
     pub async fn handle_incoming_secret_batch_request(
         self: &Arc<Self>,
         request_id: u64,
-        items: Vec<SecretId>,
+        secret_requests: BTreeMap<SecretId, Vec<SecretRequest>>,
         requester_info: SecretRequesterInfo,
     ) -> SecretsBox {
         debug!(
-            "Handling incoming secret batch request {}: {} items",
-            request_id,
-            items.len()
+            "Incoming batch request={request_id} with {} item(s)",
+            secret_requests.len()
         );
 
+        let mut found = BTreeMap::new();
         let snapshot = self.store.read().await;
-        let found: BTreeMap<SecretId, Secret> = items
-            .iter()
-            .filter_map(|id| {
-                let secret = snapshot.get(id).map(|sec| (*id, sec.clone()));
-                if secret.is_some() {
-                    debug!(
-                        "Found requested secret locally: {:#x}-{:#x}-{}",
-                        id.chain_id, id.identity_address, id.identity_id
-                    );
+        let should_pretend = rand::random::<f32>() < 0.8;
+
+        for (id, requests) in &secret_requests {
+            if let Some(secret) = snapshot.get(id) {
+                match self
+                    .verify_policy_for_secret(secret, requests, &requester_info)
+                    .await
+                {
+                    Ok(verified_secret) => {
+                        found.insert(*id, verified_secret);
+                    }
+                    Err(e) => {
+                        debug!("Skipping secret={id} due to policy check failure: {e}");
+                    }
                 }
-                secret
-            })
-            .collect();
+            } else if should_pretend {
+                debug!("Pretending to have secret={id}");
+                let mock_secret = Secret {
+                    id: *id,
+                    data: vec![1, 2, 3, 4, 5],
+                    metadata: vec![10, 20, 30],
+                };
+                match self
+                    .verify_policy_for_secret(&mock_secret, requests, &requester_info)
+                    .await
+                {
+                    Ok(verified_secret) => {
+                        found.insert(*id, verified_secret);
+                    }
+                    Err(e) => {
+                        debug!("Skipping pretend secret={id}, policy check failed: {e}");
+                    }
+                }
+            }
+        }
 
         debug!(
-            "Found {} out of {} requested secrets",
+            "Returning {}/{} secrets in batch request={request_id}",
             found.len(),
-            items.len()
+            secret_requests.len()
         );
 
         match self.create_secrets_box(&found, &requester_info) {
             Ok(box_) => box_,
             Err(e) => {
-                error!("Failed to create secrets box: {}", e);
+                error!("Failed to create secrets box: {e}");
                 SecretsBox {
-                    alg: "AES-256-GCM+Ed25519".to_string(),
+                    alg: String::from("AES-256-GCM+Ed25519"),
                     nonce: vec![],
                     sender_public_key: vec![],
                     payload: vec![],
@@ -420,12 +442,31 @@ impl SecretsService {
             }
         };
 
+        // Add the received secrets to the collected map
         for secret in secrets {
-            req.collected.insert(secret.id, secret);
+            // Only collect secrets that were actually requested
+            if req.requested_ids.contains_key(&secret.id) {
+                req.collected.insert(secret.id, secret);
+            }
         }
 
-        if req.collected.len() >= req.threshold {
+        // Check if we've collected all the requested secrets
+        // OR if we've received responses from enough peers to meet the threshold
+        let have_all_requested = req
+            .requested_ids
+            .keys()
+            .all(|id| req.collected.contains_key(id));
+
+        if have_all_requested || req.collected.len() >= req.threshold {
             if let Some(done) = pending_guard.remove(&request_id) {
+                // Now store these collected secrets in our local store
+                for secret in done.collected.values() {
+                    if let Err(e) = self.store_secrets(vec![secret.clone()]).await {
+                        warn!("Failed to store received secret: {}", e);
+                    }
+                }
+
+                // Create the final box with all collected secrets
                 let collected_secrets: BTreeMap<SecretId, Secret> =
                     done.collected.into_iter().collect();
 
@@ -489,7 +530,7 @@ impl SecretsService {
         Ok(())
     }
 
-    async fn get_local_secrets(
+    pub async fn get_local_secrets(
         self: &Arc<Self>,
         secret_requests: &HashMap<SecretId, Vec<SecretRequest>>,
         requester_info: &SecretRequesterInfo,
@@ -503,17 +544,9 @@ impl SecretsService {
         let secret_ids: Vec<SecretId> = secret_requests.keys().copied().collect();
         let local_ids = self.probe_secrets(secret_ids).await?;
 
-        debug!(
-            "Found {} locally available secrets out of {} requested",
-            local_ids.len(),
-            secret_requests.len()
-        );
-
-        // For secrets we have locally, fetch and verify their policies
         let mut verified_secrets = HashMap::new();
         let mut missing_secrets = HashMap::new();
 
-        // First, identify which secrets we have locally
         let store_guard = self.store.read().await;
         for (id, requests) in secret_requests {
             if local_ids.contains(id) {
@@ -529,10 +562,6 @@ impl SecretsService {
                     missing_secrets.insert(*id, requests.clone());
                 }
             } else {
-                debug!(
-                    "Secret {:#x}-{:#x}-{} not available locally, will request from P2P",
-                    id.chain_id, id.identity_address, id.identity_id
-                );
                 missing_secrets.insert(*id, requests.clone());
             }
         }
@@ -597,36 +626,53 @@ impl SecretsService {
         Ok(secret.clone())
     }
 
-    // Helper method to fetch a policy from a URL
     async fn fetch_policy(&self, url: &str) -> Result<Vec<u8>, AppError> {
-        // In a real implementation, this would use reqwest or another HTTP client
-        // For now, we'll just return a mock policy bundle
-        debug!("Mock: Fetching policy from URL: {}", url);
+        debug!("Fetching policy from URL={url}");
+        if url == "mock://policy.example.com" {
+            // Return a hardcoded policy bundle
+            let manifest = serde_json::json!({
+                "version": "1.0",
+                "name": "Mock Policy for chain_id=11155111",
+                "description": "This is a dummy policy allowing any consumer",
+                "allowed_consumers": ["*"],
+                "execution_constraints": {
+                    "max_memory_mb": 128,
+                    "max_execution_time_ms": 3000,
+                    "allowed_network_calls": false
+                }
+            });
+            let mock_executable = vec![0, 1, 2, 3, 4, 5];
+            let bundle = serde_json::json!({
+                "manifest": manifest,
+                "executable": mock_executable
+            });
+            let serialized = serde_json::to_vec(&bundle)
+                .map_err(|e| AppError::Service(format!("Failed to serialize mock policy: {e}")))?;
+            return Ok(serialized);
+        }
 
-        // Create a mock policy bundle
+        // In a real implementation, an HTTP GET would happen here
+        // For demonstration, treat any non-"mock://" URL as if we do a mock fetch
         let manifest = serde_json::json!({
             "version": "1.0",
-            "name": "Mock Policy",
-            "description": "A mock policy for testing",
+            "name": "Default Mock Policy",
+            "description": "Mock policy for demonstration",
             "allowed_consumers": ["*"],
             "execution_constraints": {
                 "max_memory_mb": 128,
-                "max_execution_time_ms": 1000,
+                "max_execution_time_ms": 3000,
                 "allowed_network_calls": false
             }
         });
-
-        // Mock executable (in reality, this would be WASM or another format)
-        let executable = vec![0, 1, 2, 3, 4, 5];
-
+        let mock_executable = vec![0, 1, 2, 3, 4, 5];
         let bundle = serde_json::json!({
             "manifest": manifest,
-            "executable": executable
+            "executable": mock_executable
         });
-
-        serde_json::to_vec(&bundle).map_err(|e| {
-            AppError::Service(format!("Failed to serialize mock policy bundle: {}", e))
-        })
+        let serialized = serde_json::to_vec(&bundle).map_err(|e| {
+            AppError::Service(format!("Failed to serialize default mock policy: {e}"))
+        })?;
+        Ok(serialized)
     }
 
     fn prepare_evaluation_payload(

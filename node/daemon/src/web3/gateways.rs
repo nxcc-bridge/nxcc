@@ -52,6 +52,7 @@ impl GatewayManager {
         // In a real implementation, this would come from configuration
         // For now, we'll use hardcoded values for common chains
         match chain_id {
+            0 => Ok("mock://gateway.example.com".to_string()),
             1 => Ok("https://eth.llamarpc.com".to_string()),
             5 => Ok("https://rpc.ankr.com/eth_goerli".to_string()),
             11155111 => Ok("https://rpc.sepolia.org".to_string()),
@@ -69,22 +70,27 @@ impl GatewayManager {
         identity_address: Address,
         identity_id: U256,
     ) -> Result<String, AppError> {
-        let provider = self.get_provider(chain_id).await?;
+        let rpc_url = self.get_rpc_url_for_chain(chain_id)?;
+        if rpc_url.starts_with("mock://") {
+            // Return a dummy URL rather than calling the contract
+            debug!("Using mock policy URL for chain_id={chain_id}");
+            return Ok("mock://policy.example.com".to_string());
+        }
+
+        let provider = Provider::<Http>::try_from(rpc_url)
+            .map_err(|e| AppError::Service(format!("Failed to create provider: {e}")))?;
 
         let identity_contract = Identity::new(identity_address, Arc::new(provider));
-
-        // Call the tokenURI function to get the policy URL
         let policy_url = identity_contract
             .token_uri(identity_id)
             .call()
             .await
-            .map_err(|e| AppError::Service(format!("Failed to fetch policy URL: {}", e)))?;
+            .map_err(|e| AppError::Service(format!("Failed to fetch policy URL: {e}")))?;
 
         debug!(
-            "Retrieved policy URL for identity {:#x} on chain {}: {}",
-            identity_address, chain_id, policy_url
+            "Retrieved policy URL for identity {identity_address:#x} on chain {chain_id}: \
+             {policy_url}"
         );
-
         Ok(policy_url)
     }
 }

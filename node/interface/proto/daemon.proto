@@ -42,12 +42,12 @@ message SecretRequesterInfo {
 
 message GetSecretsRequest {
   // Map of secret identifiers to their request details
-  map<string, SecretRequestList> secret_requests = 1;
+  repeated SecretRequests secret_requests = 1;
   // Information about the requester for authentication and encryption
   SecretRequesterInfo requester_info = 2;
 }
 
-message SecretRequestList {
+message SecretRequests {
   SecretIdentifier id = 1;
   repeated SecretRequest requests = 2;
 }

@@ -466,16 +466,15 @@ async fn handle_secret_batch_request(
     let secrets_box = secrets_service
         .handle_incoming_secret_batch_request(
             request_id,
-            secret_requests.keys().cloned().collect(),
+            secret_requests.clone(),
             requester_info.clone(),
         )
         .await;
 
-    // We always respond with a SecretsBox, even if it's empty
     info!("Sending SecretBatchResponse for request_id={request_id}");
     let response = GossipMessage::SecretBatchResponse {
         request_id,
-        remaining_requests: Default::default(), // No remaining requests from our perspective
+        remaining_requests: Default::default(),
         secrets_box,
     };
 
