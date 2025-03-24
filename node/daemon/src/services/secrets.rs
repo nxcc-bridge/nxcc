@@ -226,7 +226,7 @@ impl SecretsService {
         self: &Arc<Self>,
         secret_requests: HashMap<SecretId, Vec<SecretRequest>>,
         requester_info: SecretRequesterInfo,
-    ) -> Result<(HashMap<SecretId, Vec<SecretRequest>>, SecretsBox), AppError> {
+    ) -> Result<SecretsBox, AppError> {
         // Get local secrets with policy verification
         let (local_secrets, missing) = self
             .get_local_secrets(&secret_requests, &requester_info)
@@ -236,7 +236,7 @@ impl SecretsService {
             debug!("All secrets requested are already stored locally and verified");
             let local_secrets_btree: BTreeMap<_, _> = local_secrets.into_iter().collect();
             let secrets_box = self.create_secrets_box(&local_secrets_btree, &requester_info)?;
-            return Ok((HashMap::new(), secrets_box));
+            return Ok(secrets_box);
         }
 
         // For missing secrets, use the P2P network
@@ -281,38 +281,32 @@ impl SecretsService {
             }
         });
 
-        let (remaining_requests, p2p_secrets_box) = rx
+        let p2p_secrets_box = rx
             .await
             .map_err(|e| AppError::Service(format!("Response channel closed: {}", e)))??;
 
-        // Extract secrets from the P2P response and store them
-        match self.extract_secrets_from_box(&p2p_secrets_box) {
-            Ok(p2p_secrets) => {
-                if let Err(e) = self.store_secrets(p2p_secrets).await {
-                    warn!("Failed to store received secrets: {}", e);
-                }
-            }
-            Err(e) => {
-                warn!("Failed to extract secrets from box: {}", e);
+        // Extract secrets from the P2P response
+        let p2p_secrets = self.extract_secrets_from_box(&p2p_secrets_box)?;
+
+        // Store received secrets
+        if !p2p_secrets.is_empty() {
+            if let Err(e) = self.store_secrets(p2p_secrets.clone()).await {
+                warn!("Failed to store received secrets: {}", e);
             }
         }
 
         // Combine local and P2P secrets
         let mut all_secrets: BTreeMap<SecretId, Secret> = local_secrets.into_iter().collect();
 
-        // Extract and verify P2P secrets
-        if let Ok(p2p_secrets) = self.extract_secrets_from_box(&p2p_secrets_box) {
-            for secret in p2p_secrets {
-                // We should verify policies for P2P secrets too, but for simplicity
-                // we'll just add them directly in this implementation
-                all_secrets.insert(secret.id, secret);
-            }
+        // Add P2P secrets
+        for secret in p2p_secrets {
+            all_secrets.insert(secret.id, secret);
         }
 
         // Create a final secrets box with all verified secrets
         let final_secrets_box = self.create_secrets_box(&all_secrets, &requester_info)?;
 
-        Ok((remaining_requests, final_secrets_box))
+        Ok(final_secrets_box)
     }
 
     fn create_secrets_box(
@@ -438,12 +432,7 @@ impl SecretsService {
 
                 match self.create_secrets_box(&collected_secrets, &done.requester_info) {
                     Ok(final_box) => {
-                        let mut remaining = done.requested_ids;
-                        for id in collected_secrets.keys() {
-                            remaining.remove(id);
-                        }
-
-                        let _ = done.responder.send(Ok((remaining, final_box)));
+                        let _ = done.responder.send(Ok(final_box));
                     }
                     Err(e) => {
                         let _ = done.responder.send(Err(AppError::Service(format!(
@@ -469,40 +458,38 @@ impl SecretsService {
         if !req.collected.is_empty() {
             let collected_secrets: BTreeMap<SecretId, Secret> = req.collected.into_iter().collect();
 
-            match self.create_secrets_box(&collected_secrets, &req.requester_info) {
-                Ok(secrets_box) => {
-                    let mut remaining = req.requested_ids;
-                    for id in collected_secrets.keys() {
-                        remaining.remove(id);
+            // Check if we've collected enough secrets to meet the threshold
+            if collected_secrets.len() >= req.threshold {
+                match self.create_secrets_box(&collected_secrets, &req.requester_info) {
+                    Ok(secrets_box) => {
+                        let _ = req.responder.send(Ok(secrets_box));
                     }
-
-                    let _ = req.responder.send(Ok((remaining, secrets_box)));
+                    Err(e) => {
+                        let _ = req.responder.send(Err(AppError::Service(format!(
+                            "Failed to create secrets box: {}",
+                            e
+                        ))));
+                    }
                 }
-                Err(e) => {
-                    let _ = req.responder.send(Err(AppError::Service(format!(
-                        "Failed to create secrets box: {}",
-                        e
-                    ))));
-                }
+            } else {
+                // Not enough responses were collected
+                let _ = req.responder.send(Err(AppError::Service(format!(
+                    "Failed to gather sufficient secret responses: received {} out of {} required",
+                    collected_secrets.len(),
+                    req.threshold
+                ))));
             }
         } else {
-            let empty_box = SecretsBox {
-                alg: "AES-256-GCM+Ed25519".to_string(),
-                nonce: vec![],
-                sender_public_key: vec![],
-                payload: vec![],
-                signature: vec![],
-            };
-
-            let _ = req.responder.send(Ok((req.requested_ids, empty_box)));
+            // No responses were collected
+            let _ = req.responder.send(Err(AppError::Service(format!(
+                "Failed to gather any secret responses: required {}",
+                req.threshold
+            ))));
         }
 
         Ok(())
     }
-}
 
-impl SecretsService {
-    // Add a new method for getting local secrets with policy verification
     async fn get_local_secrets(
         self: &Arc<Self>,
         secret_requests: &HashMap<SecretId, Vec<SecretRequest>>,
@@ -554,7 +541,6 @@ impl SecretsService {
         Ok((verified_secrets, missing_secrets))
     }
 
-    // Add a method to verify policy for a single secret
     async fn verify_policy_for_secret(
         &self,
         secret: &Secret,
@@ -644,7 +630,6 @@ impl SecretsService {
         })
     }
 
-    // Helper method to prepare the evaluation payload
     fn prepare_evaluation_payload(
         &self,
         secret: &Secret,

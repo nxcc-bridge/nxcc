@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 mod config;
 mod error;
 mod grpc;
@@ -21,7 +23,6 @@ use crate::{
 async fn main() -> anyhow::Result<()> {
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
-    // ----- 1. Load config -----
     let config = Config::load()?;
     let log_level = if config.verbose {
         Level::DEBUG

@@ -75,41 +75,11 @@ impl Secrets for SecretsDebugGrpc {
         }
 
         // Call the service
-        let (remaining, secrets_box) = self
+        let secrets_box = self
             .secrets_service
             .get_secrets(secret_requests, requester_info)
             .await
             .map_err(|e| Status::internal(format!("{:?}", e)))?;
-
-        // Convert remaining requests back to proto format
-        let mut proto_remaining = HashMap::new();
-        for (id, requests) in remaining {
-            let proto_id = SecretIdentifier {
-                chain_id: id.chain_id,
-                identity_address: format!("{:#x}", id.identity_address),
-                identity_id: format!("{:#x}", id.identity_id),
-            };
-
-            let proto_requests: Vec<ProtoSecretRequest> = requests
-                .into_iter()
-                .map(|r| ProtoSecretRequest {
-                    consumer: r.consumer,
-                })
-                .collect();
-
-            let request_list = SecretRequestList {
-                id: Some(proto_id),
-                requests: proto_requests,
-            };
-
-            proto_remaining.insert(
-                format!(
-                    "{:#x}-{:#x}-{}",
-                    id.chain_id, id.identity_address, id.identity_id
-                ),
-                request_list,
-            );
-        }
 
         // Convert SecretsBox to proto format
         let proto_box = ProtoSecretsBox {
@@ -121,7 +91,6 @@ impl Secrets for SecretsDebugGrpc {
         };
 
         let response = GetSecretsResponse {
-            remaining_requests: proto_remaining,
             secrets_box: Some(proto_box),
         };
 

@@ -62,8 +62,6 @@ message SecretsBox {
 }
 
 message GetSecretsResponse {
-  // Remaining unfulfilled secret requests
-  map<string, SecretRequestList> remaining_requests = 1;
   // Encrypted box containing the secrets
   SecretsBox secrets_box = 2;
 }
