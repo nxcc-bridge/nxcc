@@ -12,7 +12,7 @@ use crate::{
 pub async fn start_grpc_server(
     config: &GrpcConfig,
     secrets_service: std::sync::Arc<SecretsService>,
-    shutdown: tokio::sync::oneshot::Receiver<()>,
+    mut shutdown: tokio::sync::broadcast::Receiver<()>,
 ) -> Result<(), AppError> {
     match config.mode.as_str() {
         "vsock" => {
@@ -30,7 +30,7 @@ pub async fn start_grpc_server(
             Server::builder()
                 .add_service(SecretsServer::new(SecretsDebugGrpc::new(secrets_service)))
                 .serve_with_incoming_shutdown(incoming, async {
-                    let _ = shutdown.await;
+                    let _ = shutdown.recv().await;
                 })
                 .await
                 .map_err(|e| AppError::Service(format!("gRPC server error: {}", e)))?;
@@ -79,7 +79,7 @@ pub async fn start_grpc_server(
                 Server::builder()
                     .add_service(svc)
                     .serve_with_incoming_shutdown(incoming, async {
-                        let _ = shutdown.await;
+                        let _ = shutdown.recv().await;
                     })
                     .await
                     .map_err(|e| AppError::Service(format!("gRPC server error: {}", e)))?;

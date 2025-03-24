@@ -192,8 +192,7 @@ struct PendingRequest {
     requester_info: SecretRequesterInfo,
     threshold: usize,
     collected: HashMap<SecretId, Secret>,
-    responder:
-        oneshot::Sender<Result<(HashMap<SecretId, Vec<SecretRequest>>, SecretsBox), AppError>>,
+    responder: oneshot::Sender<Result<SecretsBox, AppError>>,
 }
 
 impl SecretsService {

@@ -141,7 +141,10 @@ impl NetworkManager {
         })
     }
 
-    pub async fn start(&mut self) -> Result<(), AppError> {
+    pub async fn start(
+        &mut self,
+        shutdown: tokio::sync::broadcast::Receiver<()>,
+    ) -> Result<(), AppError> {
         let peer_id = self.local_key.public().to_peer_id();
 
         // Build the swarm with all behaviors
@@ -176,6 +179,7 @@ impl NetworkManager {
                 secrets_rx,
                 secrets_service,
                 secrets_topic,
+                shutdown,
             )
             .await;
         });
@@ -282,27 +286,29 @@ async fn run_network_loop(
     mut secrets_rx: mpsc::Receiver<SecretsMessage>,
     secrets_service: Arc<SecretsService>,
     topic: gossipsub::IdentTopic,
+    mut shutdown: tokio::sync::broadcast::Receiver<()>,
 ) {
     loop {
         tokio::select! {
-            // --- Swarm event handler ---
             event = swarm.select_next_some() => {
                 handle_swarm_event(event, &mut swarm, &topic, &secrets_service).await;
             },
 
-            // --- Notifier channel handler ---
             msg = notifier_rx.next() => {
                 if let Some(msg) = msg {
                     handle_notifier_message(msg, &mut swarm, &topic).await;
                 }
             },
 
-            // --- Secrets channel handler ---
             msg = secrets_rx.next() => {
                 if let Some(msg) = msg {
                     handle_secrets_message(msg, &mut swarm, &topic).await;
                 }
             },
+
+            Ok(()) = shutdown.recv() => {
+                break;
+            }
         }
     }
 }

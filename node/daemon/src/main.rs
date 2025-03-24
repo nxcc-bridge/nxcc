@@ -21,7 +21,7 @@ use crate::{
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+    let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel::<()>(1);
 
     let config = Config::load()?;
     let log_level = if config.verbose {
@@ -67,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
     )
     .await?;
 
-    network.start().await?;
+    network.start(shutdown_tx.subscribe()).await?;
 
     {
         let grpc_config = config.grpc.clone();
