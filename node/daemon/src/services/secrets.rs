@@ -54,7 +54,7 @@ impl SecretsService {
             manifest_checker: ManifestChecker,
             enclave_client: tokio::sync::Mutex::new(
                 // We'll replace with real connect in get_secrets() if needed
-                EnclaveClient::connect_uds("/tmp/enclave_grpc.sock")
+                EnclaveClient::connect_uds("/tmp/enclave_grpc.sock".to_string())
                     .await
                     .unwrap_or_else(|_| {
                         panic!(

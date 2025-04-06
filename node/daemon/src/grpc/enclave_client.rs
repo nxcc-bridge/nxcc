@@ -22,19 +22,60 @@ pub struct EnclaveClient {
 
 impl EnclaveClient {
     /// Create a client that connects via a Unix domain socket
-    pub async fn connect_uds(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        // Tonic + UDS usage: format "http://[unix://path]"
-        let channel = Endpoint::from_shared(format!("http://[unix://{}]", path))?
-            .connect()
-            .await?;
-        Ok(Self {
-            inner: ProtoEnclaveSecretsClient::new(channel),
-        })
+    pub async fn connect_uds(path: String) -> Result<Self, Box<dyn std::error::Error>> {
+        #[cfg(unix)]
+        {
+            use hyper_util::rt::TokioIo;
+            use tokio::net::UnixStream;
+            use tonic::transport::{Endpoint, Uri};
+            use tower::service_fn;
+
+            // Create an endpoint with a dummy URI (not used for UDS)
+            let channel = Endpoint::try_from("http://[::]:50051")?
+                .connect_with_connector(service_fn(move |_: Uri| {
+                    let path = path.to_string();
+                    async move {
+                        // Connect to the Unix domain socket
+                        let stream = UnixStream::connect(path).await?;
+                        Ok::<_, std::io::Error>(TokioIo::new(stream))
+                    }
+                }))
+                .await?;
+
+            Ok(Self {
+                inner: ProtoEnclaveSecretsClient::new(channel),
+            })
+        }
+
+        #[cfg(not(unix))]
+        {
+            Err("Unix domain sockets are not supported on this platform".into())
+        }
     }
 
     /// Create a client that connects via vsock. Requires a custom connector.
     pub async fn connect_vsock(cid: u32, port: u32) -> Result<Self, Box<dyn std::error::Error>> {
-        todo!()
+        use hyper_util::rt::TokioIo;
+        use tonic::transport::{Endpoint, Uri};
+        use tower::service_fn;
+
+        // Create an endpoint with a dummy URI (not used for vsock)
+        let channel = Endpoint::try_from("http://[::]:50051")?
+            .connect_with_connector(service_fn(move |_: Uri| {
+                let cid = cid;
+                let port = port;
+                async move {
+                    // Connect to vsock
+                    let addr = tokio_vsock::VsockAddr::new(cid, port);
+                    let stream = tokio_vsock::VsockStream::connect(addr).await?;
+                    Ok::<_, std::io::Error>(TokioIo::new(stream))
+                }
+            }))
+            .await?;
+
+        Ok(Self {
+            inner: ProtoEnclaveSecretsClient::new(channel),
+        })
     }
 
     pub async fn get_report(&mut self, user_data: Vec<u8>) -> Result<AttestationReport, String> {
