@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {Test} from "forge-std/Test.sol";
-import {Identity} from "../src/Identity.sol";
+import {Test} from "forge-std-1.9.6/Test.sol";
 import {IERC721Errors} from "@openzeppelin-contracts-5.2.0/interfaces/draft-IERC6093.sol";
+
+import {Identity} from "../src/Identity.sol";
 
 contract IdentityTest is Test {
     Identity internal nft;
