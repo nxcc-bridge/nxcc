@@ -1,14 +1,18 @@
 use std::{collections::HashMap, sync::Arc};
 
 use ethers::types::{Address, U256};
-use interface::proto::daemon::{
-    GetSecretsRequest, GetSecretsResponse, SecretIdentifier, SecretRequest as ProtoSecretRequest,
-    SecretRequests, SecretsBox as ProtoSecretsBox, secrets_server::Secrets,
+use interface::{
+    Secret as DomainSecret, SecretId, SecretRequest, SecretRequesterInfo, SecretsBox,
+    proto::daemon::{
+        GetSecretsRequest, GetSecretsResponse, SecretIdentifier,
+        SecretRequest as ProtoSecretRequest, SecretRequests, SecretsBox as ProtoSecretsBox,
+        secrets_server::Secrets,
+    },
 };
 use tonic::{Request, Response, Status};
 use tracing::debug;
 
-use crate::services::secrets::{SecretId, SecretRequest, SecretRequesterInfo, SecretsService};
+use crate::services::secrets::SecretsService;
 
 pub struct SecretsDebugGrpc {
     secrets_service: Arc<SecretsService>,
@@ -86,7 +90,7 @@ impl Secrets for SecretsDebugGrpc {
             alg: secrets_box.alg,
             nonce: secrets_box.nonce,
             sender_public_key: secrets_box.sender_public_key,
-            payload: secrets_box.payload,
+            payload: secrets_box.encrypted_payload,
             signature: secrets_box.signature,
         };
 

@@ -2,10 +2,16 @@ use tonic::transport::Server;
 use tracing::info;
 
 use crate::config::EnclaveConfig;
-use crate::services::{runner::RunnerService, secrets::SecretsService};
-use interface::proto::enclave::{runner_server::RunnerServer, secrets_server::SecretsServer};
+use crate::services::{
+    grpc::EnclaveSecretsService, runner::RunnerService, secrets::SecretsEnclave,
+};
+use interface::proto::enclave::{
+    enclave_secrets_server::EnclaveSecretsServer, runner_server::RunnerServer,
+};
 
 pub async fn start_grpc_server(config: &EnclaveConfig) -> Result<(), Box<dyn std::error::Error>> {
+    let enclave = SecretsEnclave::new();
+
     match config.mode {
         "vsock" => {
             info!(
@@ -18,7 +24,9 @@ pub async fn start_grpc_server(config: &EnclaveConfig) -> Result<(), Box<dyn std
             ))?;
 
             Server::builder()
-                .add_service(SecretsServer::new(SecretsService::default()))
+                .add_service(EnclaveSecretsServer::new(EnclaveSecretsService {
+                    enclave: enclave.clone(),
+                }))
                 .add_service(RunnerServer::new(RunnerService))
                 .serve_with_incoming(listener.incoming())
                 .await?;
@@ -40,7 +48,9 @@ pub async fn start_grpc_server(config: &EnclaveConfig) -> Result<(), Box<dyn std
                 let incoming = UnixListenerStream::new(uds_listener);
 
                 Server::builder()
-                    .add_service(SecretsServer::new(SecretsService::default()))
+                    .add_service(EnclaveSecretsServer::new(EnclaveSecretsService {
+                        enclave: enclave.clone(),
+                    }))
                     .add_service(RunnerServer::new(RunnerService))
                     .serve_with_incoming(incoming)
                     .await?;

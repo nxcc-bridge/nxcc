@@ -49,7 +49,7 @@ async fn main() -> anyhow::Result<()> {
     let (secrets_tx, secrets_rx) = futures::channel::mpsc::channel(64);
     let (notifier_tx, notifier_rx) = futures::channel::mpsc::channel(64);
 
-    let secrets_service = SecretsService::new(secrets_tx.clone());
+    let secrets_service = SecretsService::new(secrets_tx.clone()).await;
 
     {
         let notifier_tx_clone = notifier_tx.clone();

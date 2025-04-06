@@ -6,6 +6,7 @@ use std::{
 };
 
 use futures::{StreamExt, channel::mpsc};
+use interface::{SecretId, SecretRequest, SecretRequesterInfo, SecretsBox};
 use libp2p::{
     Multiaddr, Swarm,
     core::multiaddr::Protocol,
@@ -16,11 +17,7 @@ use libp2p::{
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, trace, warn};
 
-use crate::{
-    config::Config,
-    error::AppError,
-    services::secrets::{SecretId, SecretRequest, SecretRequesterInfo, SecretsBox, SecretsService},
-};
+use crate::{config::Config, error::AppError, services::secrets::SecretsService};
 
 #[derive(Debug, Clone)]
 pub enum NotifierMessage {

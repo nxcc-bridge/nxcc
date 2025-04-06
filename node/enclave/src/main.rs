@@ -1,4 +1,5 @@
 mod config;
+mod crypto;
 mod daemon_client;
 mod server;
 mod services;
