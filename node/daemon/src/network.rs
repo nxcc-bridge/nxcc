@@ -396,52 +396,49 @@ async fn handle_gossip_message(
     topic: &gossipsub::IdentTopic,
     secrets_service: &Arc<SecretsService>,
 ) {
-    if let Ok(msg_str) = String::from_utf8(message.data.clone()) {
-        match serde_json::from_str::<GossipMessage>(&msg_str) {
-            Ok(msg) => match msg {
-                GossipMessage::SecretBatchRequest {
+    match ciborium::de::from_reader::<GossipMessage, _>(&message.data[..]) {
+        Ok(msg) => match msg {
+            GossipMessage::SecretBatchRequest {
+                request_id,
+                secret_requests,
+                requester_info,
+            } => {
+                handle_secret_batch_request(
                     request_id,
                     secret_requests,
                     requester_info,
-                } => {
-                    handle_secret_batch_request(
-                        request_id,
-                        secret_requests,
-                        requester_info,
-                        propagation_source,
-                        swarm,
-                        topic,
-                        secrets_service,
-                    )
-                    .await;
+                    propagation_source,
+                    swarm,
+                    topic,
+                    secrets_service,
+                )
+                .await;
+            }
+            GossipMessage::SecretBatchResponse {
+                request_id,
+                remaining_requests,
+                secrets_box,
+            } => {
+                info!("Received SecretBatchResponse for request_id={request_id}");
+                if let Err(e) = secrets_service
+                    .handle_incoming_secret_batch_response(request_id, secrets_box)
+                    .await
+                {
+                    error!("Error handling secrets batch response: {e:?}")
                 }
-                GossipMessage::SecretBatchResponse {
-                    request_id,
-                    remaining_requests,
-                    secrets_box,
-                } => {
-                    info!("Received SecretBatchResponse for request_id={request_id}");
-                    if let Err(e) = secrets_service
-                        .handle_incoming_secret_batch_response(request_id, secrets_box)
-                        .await
-                    {
-                        error!("Error handling secrets batch response: {e:?}")
-                    }
-                }
-                GossipMessage::Notification { content, timestamp } => {
-                    handle_notification(content, timestamp, propagation_source);
-                }
-            },
-            Err(e) => {
-                debug!(
-                    "Ignoring invalid gossip message: JSON parse failed: {e:?} ({})",
-                    &msg_str[..msg_str.len().min(100)]
-                );
-                trace!("The message: {msg_str}");
+            }
+            GossipMessage::Notification { content, timestamp } => {
+                handle_notification(content, timestamp, propagation_source);
+            }
+        },
+        Err(e) => {
+            debug!(
+                "Ignoring invalid gossip message: CBOR parse failed: {e:?}"
+            );
+            if let Ok(msg_str) = String::from_utf8(message.data.clone()) {
+                trace!("The message: {}", &msg_str[..msg_str.len().min(100)]);
             }
         }
-    } else {
-        debug!("Ignoring gossip message: UTF-8 decode failed");
     }
 }
 
@@ -475,11 +472,12 @@ async fn handle_secret_batch_request(
         secrets_box,
     };
 
-    if let Ok(payload) = serde_json::to_string(&response) {
+    let mut payload = Vec::new();
+    if let Ok(()) = ciborium::ser::into_writer(&response, &mut payload) {
         let _ = swarm
             .behaviour_mut()
             .gossipsub
-            .publish(topic.clone(), payload.as_bytes());
+            .publish(topic.clone(), payload);
     }
 }
 
@@ -528,11 +526,12 @@ async fn handle_notifier_message(
                     .as_secs(),
             };
 
-            if let Ok(json) = serde_json::to_string(&gossip) {
+            let mut payload = Vec::new();
+            if let Ok(()) = ciborium::ser::into_writer(&gossip, &mut payload) {
                 match swarm
                     .behaviour_mut()
                     .gossipsub
-                    .publish(topic.clone(), json.as_bytes())
+                    .publish(topic.clone(), payload)
                 {
                     Ok(_) => debug!("Successfully published notification to gossip network"),
                     Err(e) => warn!("Failed to publish notification: {}", e),
@@ -567,13 +566,14 @@ async fn handle_secrets_message(
                 requester_info,
             };
 
-            match serde_json::to_string(&gossip) {
-                Ok(json) => {
+            let mut payload = Vec::new();
+            match ciborium::ser::into_writer(&gossip, &mut payload) {
+                Ok(()) => {
                     debug!("Successfully serialized request {request_id}");
                     match swarm
                         .behaviour_mut()
                         .gossipsub
-                        .publish(topic.clone(), json.as_bytes())
+                        .publish(topic.clone(), payload)
                     {
                         Ok(_) => {
                             debug!("Successfully published request {request_id} to gossip network")
@@ -602,12 +602,13 @@ async fn handle_secrets_message(
                 secrets_box,
             };
 
-            match serde_json::to_string(&gossip) {
-                Ok(json) => {
+            let mut payload = Vec::new();
+            match ciborium::ser::into_writer(&gossip, &mut payload) {
+                Ok(()) => {
                     match swarm
                         .behaviour_mut()
                         .gossipsub
-                        .publish(topic.clone(), json.as_bytes())
+                        .publish(topic.clone(), payload)
                     {
                         Ok(_) => {
                             debug!("Successfully published response {request_id} to gossip network",)
