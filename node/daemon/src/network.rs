@@ -472,13 +472,7 @@ async fn handle_secret_batch_request(
         secrets_box,
     };
 
-    let mut payload = Vec::new();
-    if let Ok(()) = ciborium::ser::into_writer(&response, &mut payload) {
-        let _ = swarm
-            .behaviour_mut()
-            .gossipsub
-            .publish(topic.clone(), payload);
-    }
+    publish_message(swarm, topic, &response);
 }
 
 fn handle_notification(content: String, timestamp: u64, propagation_source: libp2p::PeerId) {
@@ -526,17 +520,7 @@ async fn handle_notifier_message(
                     .as_secs(),
             };
 
-            let mut payload = Vec::new();
-            if let Ok(()) = ciborium::ser::into_writer(&gossip, &mut payload) {
-                match swarm
-                    .behaviour_mut()
-                    .gossipsub
-                    .publish(topic.clone(), payload)
-                {
-                    Ok(_) => debug!("Successfully published notification to gossip network"),
-                    Err(e) => warn!("Failed to publish notification: {}", e),
-                }
-            }
+            publish_message(swarm, topic, &gossip);
         }
         NotifierMessage::Response(content) => {
             info!("NotifierResponse: {content}");
@@ -566,25 +550,7 @@ async fn handle_secrets_message(
                 requester_info,
             };
 
-            let mut payload = Vec::new();
-            match ciborium::ser::into_writer(&gossip, &mut payload) {
-                Ok(()) => {
-                    debug!("Successfully serialized request {request_id}");
-                    match swarm
-                        .behaviour_mut()
-                        .gossipsub
-                        .publish(topic.clone(), payload)
-                    {
-                        Ok(_) => {
-                            debug!("Successfully published request {request_id} to gossip network")
-                        }
-                        Err(e) => warn!("Failed to publish request {request_id}: {e:?}"),
-                    }
-                }
-                Err(e) => {
-                    warn!("Failed to serialize secret batch request {request_id}: {e}",);
-                }
-            }
+            publish_message(swarm, topic, &gossip);
         }
         SecretsMessage::PublishSecretsResponse {
             request_id,
@@ -602,24 +568,31 @@ async fn handle_secrets_message(
                 secrets_box,
             };
 
-            let mut payload = Vec::new();
-            match ciborium::ser::into_writer(&gossip, &mut payload) {
-                Ok(()) => {
-                    match swarm
-                        .behaviour_mut()
-                        .gossipsub
-                        .publish(topic.clone(), payload)
-                    {
-                        Ok(_) => {
-                            debug!("Successfully published response {request_id} to gossip network",)
-                        }
-                        Err(e) => warn!("Failed to publish response {request_id}: {e}"),
-                    }
-                }
-                Err(e) => {
-                    warn!("Failed to serialize secret batch response {request_id}: {e}",);
-                }
+            publish_message(swarm, topic, &gossip);
+        }
+    }
+}
+
+// Helper function to serialize and publish a message
+fn publish_message<T: serde::Serialize>(
+    swarm: &mut Swarm<AppBehaviour>,
+    topic: &gossipsub::IdentTopic,
+    message: &T,
+) {
+    let mut buffer = Vec::new();
+    match ciborium::ser::into_writer(message, &mut buffer) {
+        Ok(()) => {
+            match swarm
+                .behaviour_mut()
+                .gossipsub
+                .publish(topic.clone(), buffer)
+            {
+                Ok(_) => debug!("Successfully published message to gossip network"),
+                Err(e) => warn!("Failed to publish message: {e}"),
             }
+        }
+        Err(e) => {
+            warn!("Failed to serialize message: {e}");
         }
     }
 }

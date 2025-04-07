@@ -20,7 +20,6 @@ tokio-vsock = { version = "0.7.0", features = ["tonic012"] }
 tonic = { version = "0.12.3", features = ["transport"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
-
 interface = { path = "../interface" }
 tower = "0.5.2"
 hyper-util = "0.1.11"
