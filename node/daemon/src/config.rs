@@ -51,16 +51,6 @@ pub struct NetworkConfig {
     )]
     #[serde(default)]
     pub bootstrap_peers: Vec<String>,
-
-    /// Enable automatic peer discovery via mDNS.
-    /// Defaults to true.
-    #[clap(
-        long,
-        default_value_t = true,
-        help = "Enable automatic peer discovery (default: true)"
-    )]
-    #[serde(default = "default_enable_discovery")]
-    pub enable_discovery: bool,
 }
 
 impl Default for NetworkConfig {
@@ -68,17 +58,12 @@ impl Default for NetworkConfig {
         Self {
             listen_addresses: default_listen_addresses(),
             bootstrap_peers: vec![],
-            enable_discovery: default_enable_discovery(),
         }
     }
 }
 
 fn default_listen_addresses() -> Vec<String> {
     vec!["/ip4/0.0.0.0/tcp/0".to_string()]
-}
-
-fn default_enable_discovery() -> bool {
-    true
 }
 
 /// Configuration for the local gRPC interface.
@@ -152,7 +137,7 @@ impl Config {
         Figment::new()
             .merge(Serialized::defaults(Config::default()))
             .merge(Toml::file(config_path))
-            .merge(Env::prefixed("P2P_"))
+            .merge(Env::prefixed("NXCC_"))
             .merge(Serialized::defaults(cli))
             .extract()
     }

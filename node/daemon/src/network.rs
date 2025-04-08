@@ -208,8 +208,8 @@ impl NetworkManager {
             enable_ipv6: false,
             ..mdns::Config::default()
         };
-        let mdns_behavior =
-            mdns::tokio::Behaviour::new(mdns_config, peer_id).expect("mDNS init error");
+        let mdns_behavior = mdns::tokio::Behaviour::new(mdns_config, peer_id)
+            .map_err(|e| AppError::Network(format!("mDNS initialization error: {e}")))?;
 
         // Build identify
         let identify_config = identify::Config::new("/p2p/1.0.0".into(), self.local_key.public());
@@ -265,11 +265,22 @@ impl NetworkManager {
     ) -> Result<(), AppError> {
         let addr: Multiaddr = peer_addr.parse()?;
         if let Some(Protocol::P2p(peer_id)) = addr.iter().last() {
-            swarm
+            match swarm
                 .behaviour_mut()
                 .kad
-                .add_address(&peer_id, addr.clone());
-            let _ = swarm.dial(addr);
+                .add_address(&peer_id, addr.clone())
+            {
+                kad::RoutingUpdate::Success => {}
+                kad::RoutingUpdate::Pending => {}
+                kad::RoutingUpdate::Failed => {
+                    return Err(AppError::Network(format!(
+                        "Failed to add address to Kademlia"
+                    )));
+                }
+            }
+            swarm
+                .dial(addr)
+                .map_err(|e| AppError::Network(format!("Failed to dial: {e}")))?;
         } else {
             warn!("Peer address {peer_addr} is missing /p2p/ segment with peer ID");
         }
@@ -293,13 +304,17 @@ async fn run_network_loop(
 
             msg = notifier_rx.next() => {
                 if let Some(msg) = msg {
-                    handle_notifier_message(msg, &mut swarm, &topic).await;
+                    if let Err(e) = handle_notifier_message(msg, &mut swarm, &topic).await {
+                        error!("Failed to handle notifier message: {e}");
+                    }
                 }
             },
 
             msg = secrets_rx.next() => {
                 if let Some(msg) = msg {
-                    handle_secrets_message(msg, &mut swarm, &topic).await;
+                    if let Err(e) = handle_secrets_message(msg, &mut swarm, &topic).await {
+                        error!("Failed to handle secrets message: {e}");
+                    }
                 }
             },
 
@@ -348,7 +363,9 @@ fn handle_mdns_event(event: mdns::Event, swarm: &mut Swarm<AppBehaviour>) {
                     .behaviour_mut()
                     .kad
                     .add_address(&discovered_peer, addr.clone());
-                let _ = swarm.dial(addr);
+                if let Err(e) = swarm.dial(addr) {
+                    warn!("Failed to dial discovered peer: {e}");
+                }
             }
         }
         mdns::Event::Expired(list) => {
@@ -432,9 +449,7 @@ async fn handle_gossip_message(
             }
         },
         Err(e) => {
-            debug!(
-                "Ignoring invalid gossip message: CBOR parse failed: {e:?}"
-            );
+            debug!("Ignoring invalid gossip message: CBOR parse failed: {e:?}");
             if let Ok(msg_str) = String::from_utf8(message.data.clone()) {
                 trace!("The message: {}", &msg_str[..msg_str.len().min(100)]);
             }
@@ -450,7 +465,7 @@ async fn handle_secret_batch_request(
     swarm: &mut Swarm<AppBehaviour>,
     topic: &gossipsub::IdentTopic,
     secrets_service: &Arc<SecretsService>,
-) {
+) -> Result<(), AppError> {
     info!(
         "Received SecretBatchRequest from peer={propagation_source} with request_id={request_id}, \
          {} item(s)",
@@ -472,12 +487,14 @@ async fn handle_secret_batch_request(
         secrets_box,
     };
 
-    publish_message(swarm, topic, &response);
+    publish_message(swarm, topic, &response)?;
+    Ok(())
 }
 
 fn handle_notification(content: String, timestamp: u64, propagation_source: libp2p::PeerId) {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| error!("System time error: {e}"))
         .unwrap_or_default()
         .as_secs();
 
@@ -507,32 +524,35 @@ async fn handle_notifier_message(
     msg: NotifierMessage,
     swarm: &mut Swarm<AppBehaviour>,
     topic: &gossipsub::IdentTopic,
-) {
+) -> Result<(), AppError> {
     match msg {
         NotifierMessage::Notification(content) => {
             info!("Publishing notification to network: {content}");
             // Create a gossip message for the notification
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|e| AppError::Network(format!("System time error: {e}")))?
+                .as_secs();
+
             let gossip = GossipMessage::Notification {
                 content: content.clone(),
-                timestamp: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs(),
+                timestamp,
             };
 
-            publish_message(swarm, topic, &gossip);
+            publish_message(swarm, topic, &gossip)?;
         }
         NotifierMessage::Response(content) => {
             info!("NotifierResponse: {content}");
         }
     }
+    Ok(())
 }
 
 async fn handle_secrets_message(
     msg: SecretsMessage,
     swarm: &mut Swarm<AppBehaviour>,
     topic: &gossipsub::IdentTopic,
-) {
+) -> Result<(), AppError> {
     match msg {
         SecretsMessage::PublishSecretsRequest {
             request_id,
@@ -550,7 +570,7 @@ async fn handle_secrets_message(
                 requester_info,
             };
 
-            publish_message(swarm, topic, &gossip);
+            publish_message(swarm, topic, &gossip)?;
         }
         SecretsMessage::PublishSecretsResponse {
             request_id,
@@ -568,9 +588,10 @@ async fn handle_secrets_message(
                 secrets_box,
             };
 
-            publish_message(swarm, topic, &gossip);
+            publish_message(swarm, topic, &gossip)?;
         }
     }
+    Ok(())
 }
 
 // Helper function to serialize and publish a message
@@ -578,21 +599,17 @@ fn publish_message<T: serde::Serialize>(
     swarm: &mut Swarm<AppBehaviour>,
     topic: &gossipsub::IdentTopic,
     message: &T,
-) {
+) -> Result<(), AppError> {
     let mut buffer = Vec::new();
-    match ciborium::ser::into_writer(message, &mut buffer) {
-        Ok(()) => {
-            match swarm
-                .behaviour_mut()
-                .gossipsub
-                .publish(topic.clone(), buffer)
-            {
-                Ok(_) => debug!("Successfully published message to gossip network"),
-                Err(e) => warn!("Failed to publish message: {e}"),
-            }
-        }
-        Err(e) => {
-            warn!("Failed to serialize message: {e}");
-        }
-    }
+    ciborium::ser::into_writer(message, &mut buffer)
+        .map_err(|e| AppError::Network(format!("Failed to serialize message: {e}")))?;
+
+    swarm
+        .behaviour_mut()
+        .gossipsub
+        .publish(topic.clone(), buffer)
+        .map_err(|e| AppError::Network(format!("Failed to publish message: {e}")))?;
+
+    debug!("Successfully published message to gossip network");
+    Ok(())
 }
