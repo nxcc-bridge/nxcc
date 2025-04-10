@@ -2,11 +2,13 @@ use std::{collections::HashMap, sync::Arc};
 
 use ethers::types::{Address, U256};
 use interface::{
-    Secret as DomainSecret, SecretId, SecretRequest, SecretRequesterInfo, SecretsBox,
     proto::daemon::{
-        GetSecretsRequest, GetSecretsResponse, SecretIdentifier,
-        SecretRequest as ProtoSecretRequest, SecretRequests, SecretsBox as ProtoSecretsBox,
+        GetSecretsRequest, GetSecretsResponse,
         secrets_server::Secrets,
+        SecretRequests,
+    },
+    types::{
+        SecretId, SecretRequest, SecretRequesterInfo, SecretsBox,
     },
 };
 use tonic::{Request, Response, Status};
@@ -36,63 +38,32 @@ impl Secrets for SecretsDebugGrpc {
             req.secret_requests.len()
         );
 
-        let Some(requester_info) = req.requester_info else {
+        let Some(requester_info_proto) = req.requester_info else {
             return Err(Status::invalid_argument("Missing requester info"));
         };
-        let requester_info = SecretRequesterInfo {
-            report: requester_info.report.clone(),
-            public_key: requester_info.public_key,
-        };
+        let requester_info = SecretRequesterInfo::from_proto(requester_info_proto);
 
-        // Convert secret requests map
         let mut secret_requests = HashMap::new();
-        for requests in req.secret_requests {
-            let id_proto = requests
-                .id
-                .ok_or_else(|| Status::invalid_argument("Missing SecretIdentifier in request"))?;
+        for sr in req.secret_requests {
+            let id_proto = sr.id.ok_or_else(|| Status::invalid_argument("Missing SecretIdentifier"))?;
+            let domain_id = SecretId::from_proto(id_proto);
 
-            let address = id_proto
-                .identity_address
-                .parse::<Address>()
-                .map_err(|_| Status::invalid_argument("Invalid identity_address"))?;
-
-            let ident = id_proto
-                .identity_id
-                .parse::<U256>()
-                .map_err(|e| Status::invalid_argument(format!("Invalid identity_id: {e}")))?;
-
-            let id = SecretId {
-                chain_id: id_proto.chain_id,
-                identity_address: address,
-                identity_id: ident,
-            };
-
-            let requests: Vec<SecretRequest> = requests
+            let requests: Vec<SecretRequest> = sr
                 .requests
                 .into_iter()
-                .map(|r| SecretRequest {
-                    consumer: r.consumer,
-                })
+                .map(|r_proto| SecretRequest::from_proto(r_proto))
                 .collect();
 
-            secret_requests.insert(id, requests);
+            secret_requests.insert(domain_id, requests);
         }
 
-        // Call the service
-        let secrets_box = self
+        let secrets_box: SecretsBox = self
             .secrets_service
             .get_secrets(secret_requests, requester_info)
             .await
             .map_err(|e| Status::internal(format!("{:?}", e)))?;
 
-        // Convert SecretsBox to proto format
-        let proto_box = ProtoSecretsBox {
-            alg: secrets_box.alg,
-            nonce: secrets_box.nonce,
-            sender_public_key: secrets_box.sender_public_key,
-            payload: secrets_box.encrypted_payload,
-            signature: secrets_box.signature,
-        };
+        let proto_box = secrets_box.to_proto();
 
         let response = GetSecretsResponse {
             secrets_box: Some(proto_box),

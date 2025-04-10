@@ -3,42 +3,25 @@ syntax = "proto3";
 package enclave;
 
 import "google/protobuf/empty.proto";
+import "interface.proto";
 
 // The main secrets service inside the TEE (EnclaveSecrets).
 service EnclaveSecrets {
-  // get_report returns a fresh attestation report containing:
-  //   - ephemeral public key used by peers to encrypt data for this enclave
-  //   - user_data from the untrusted host
-  rpc GetReport(GetReportRequest) returns (AttestationReport);
+  // get_report returns a fresh attestation report containing ephemeral pubkey, etc.
+  rpc GetReport(GetReportRequest) returns (interface.AttestationReport);
 
-  // put_secrets stores secrets boxes from peers into the local enclave, decrypts them,
-  // and accumulates their shares or full secrets. (Step 8, 9, 13)
+  // put_secrets stores secrets boxes from peers into this enclave.
   rpc PutSecrets(PutSecretsRequest) returns (PutSecretsResponse);
 
-  // get_secrets returns a secrets box that is encrypted for the requesting enclave,
-  // after verifying the attached policy execution reports, etc.
+  // get_secrets returns a secrets box encrypted for the requesting enclave.
   rpc GetSecrets(GetSecretsEnclaveRequest) returns (GetSecretsEnclaveResponse);
 
-  // check_secrets returns whether the given secrets exist and if so their expiry time.
+  // check_secrets returns whether the given secrets exist.
   rpc CheckSecrets(CheckSecretsRequest) returns (CheckSecretsResponse);
 }
 
-// get_report input
 message GetReportRequest {
-  // Optional data from the host to embed in the attestation.
   bytes user_data = 1;
-}
-
-// A remote-verifiable TEE attestation report with ephemeral key, user data, etc.
-message AttestationReport {
-  // ephemeral_public_key is used by peers to encrypt messages back to this enclave.
-  bytes ephemeral_public_key = 1;
-
-  // block_hashes is an example way to prove freshness. Omitted from this demo for brevity
-  repeated bytes block_hashes = 2;
-
-  // user_data is arbitrary host-provided data that is bound in the attestation.
-  bytes user_data = 3;
 }
 
 message PutSecretsRequest {
@@ -46,63 +29,35 @@ message PutSecretsRequest {
 }
 
 message SecretsBundle {
-  SecretsBox secrets_box = 1;
-  AttestationReport attestation_report = 2;
-}
-
-message SecretsBox {
-  // AEAD-encrypted payload containing one or more secrets.
-  bytes encrypted_payload = 1;
-
-  // The AEAD nonce. Must be unique per encryption operation.
-  bytes nonce = 2;
-
-  // ephemeral public key from the sender's enclave (or ephemeral key).
-  bytes sender_public_key = 3;
-
-  // Optional signature from the sender's enclave or node operator (not fully implemented).
-  bytes signature = 4;
-
-  // High-level description of the crypto used, e.g. "X25519+AES256GCM"
-  string alg = 5;
+  interface.SecretsBox secrets_box = 1;
+  interface.AttestationReport attestation_report = 2;
 }
 
 message PutSecretsResponse {
   bool success = 1;
 }
 
-// Request for get_secrets includes which secrets we want, the policy execution reports, and
-// the requester's attestation (includes ephemeral public key).
 message GetSecretsEnclaveRequest {
   repeated SecretEnclaveRequest requests = 1;
   repeated PolicyExecutionReport policy_reports = 2;
-  AttestationReport requester_attestation = 3;
+  interface.AttestationReport requester_attestation = 3;
 }
 
 message SecretEnclaveRequest {
-  SecretIdentifier id = 1;
-  // Additional fields (e.g. context) can be added.
+  interface.SecretIdentifier id = 1;
 }
 
 message PolicyExecutionReport {
-  // minimal: the content hash of the policy code, any signature, etc.
   bytes content_hash = 1;
   bytes signature = 2;
 }
 
-message SecretIdentifier {
-  uint64 chain_id = 1;
-  string identity_address = 2;
-  string identity_id = 3;
-}
-
 message GetSecretsEnclaveResponse {
-  SecretsBox secrets_box = 1;
+  interface.SecretsBox secrets_box = 1;
 }
 
-// Check whether some secrets exist in the enclave store, and if so what is the expiry
 message CheckSecretsRequest {
-  repeated SecretIdentifier ids = 1;
+  repeated interface.SecretIdentifier ids = 1;
 }
 
 message CheckSecretsResponse {
@@ -110,12 +65,10 @@ message CheckSecretsResponse {
 }
 
 message SecretStatus {
-  SecretIdentifier id = 1;
+  interface.SecretIdentifier id = 1;
   bool found = 2;
   uint64 expiry = 3;
 }
-
-// The existing runner service remains unchanged below.
 
 service Runner {
   rpc RunWorker (RunWorkerRequest) returns (RunWorkerResponse);

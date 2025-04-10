@@ -4,7 +4,7 @@ use std::{
 };
 
 use futures::channel::mpsc;
-use interface::{Secret as DomainSecret, SecretId, SecretRequest, SecretRequesterInfo, SecretsBox};
+use interface::types::{Secret, SecretId, SecretRequest, SecretRequesterInfo, SecretsBox};
 use tokio::sync::{Mutex, RwLock, oneshot};
 use tracing::{debug, error, warn};
 
@@ -20,7 +20,7 @@ pub struct SecretsService {
     // A local ephemeral store of secrets we have "outside" of the real enclave. In reality,
     // we want to rely entirely on the enclave for storing secrets. We'll keep a small map
     // for quick checks. But the real approach is: check `enclave_client.check_secrets`.
-    local_cache: RwLock<HashMap<SecretId, DomainSecret>>,
+    local_cache: RwLock<HashMap<SecretId, Secret>>,
 
     pending: Mutex<HashMap<u64, PendingRequest>>,
     request_counter: Mutex<u64>,
@@ -239,18 +239,16 @@ impl SecretsService {
         // We need a domain-level "policy reports" for each secret; not implementing for now.
         let pol_reports = vec![];
 
-        
-        encl
-            .get_secrets(
-                found_secrets,
-                pol_reports,
-                attestation_report_from_requester(&requester_info),
-            )
-            .await
-            .unwrap_or_else(|e| {
-                warn!("Failed to get secrets from enclave: {}", e);
-                SecretsBox::new_empty()
-            })
+        encl.get_secrets(
+            found_secrets,
+            pol_reports,
+            attestation_report_from_requester(&requester_info),
+        )
+        .await
+        .unwrap_or_else(|e| {
+            warn!("Failed to get secrets from enclave: {}", e);
+            SecretsBox::new_empty()
+        })
     }
 
     /// Called after a timeout, or if the request was canceled, etc.
@@ -344,8 +342,6 @@ impl SecretsService {
             .map_err(|e| AppError::Service(format!("Enclave get_report failed: {}", e)))?;
 
         // We call get_secrets in our local enclave. The secrets to get are those in `secret_ids`.
-        // The requester's ephemeral pubkey is not actually stored in `_requester_info` in this minimal flow,
-        // so we just re-use the ephemeral public key from the request? That portion is somewhat moot.
         let secrets_box = encl
             .get_secrets(secret_ids, pol_reports, ar)
             .await

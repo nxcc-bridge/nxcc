@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package interface;
+
+// A remote-verifiable TEE attestation report with ephemeral key, user data, etc.
+message AttestationReport {
+  bytes ephemeral_public_key = 1;
+  repeated bytes block_hashes = 2;
+  bytes user_data = 3;
+}
+
+// An AEAD-encrypted "box" containing secrets.
+message SecretsBox {
+  bytes encrypted_payload = 1;
+  bytes nonce = 2;
+  bytes sender_public_key = 3;
+  bytes signature = 4;
+  string alg = 5;
+}
+
+// An identifier for a particular secret. For example, referencing an on-chain Identity token.
+message SecretIdentifier {
+  uint64 chain_id = 1;
+  string identity_address = 2;
+  string identity_id = 3;
+}
+
+// A request for secret usage from some consumer (like a worker).
+message SecretRequest {
+  bytes consumer = 1;
+}
+
+// Information about the requesting enclave (public key, attestation).
+message SecretRequesterInfo {
+  // The attestation data from the requester's enclave.
+  bytes report = 1;
+  // The ephemeral public key used for encryption.
+  bytes public_key = 2;
+}

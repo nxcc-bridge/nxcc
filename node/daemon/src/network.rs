@@ -6,7 +6,7 @@ use std::{
 };
 
 use futures::{StreamExt, channel::mpsc};
-use interface::{SecretId, SecretRequest, SecretRequesterInfo, SecretsBox};
+use interface::types::{SecretId, SecretRequest, SecretRequesterInfo, SecretsBox};
 use libp2p::{
     Multiaddr, Swarm,
     core::multiaddr::Protocol,

@@ -1,12 +1,11 @@
 use interface::{
-    AttestationReport, Secret as DomainSecret, SecretId, SecretsBox,
     proto::enclave::{
-        AttestationReport as ProtoAttestationReport, CheckSecretsRequest, GetReportRequest,
-        GetSecretsEnclaveRequest, PolicyExecutionReport, PutSecretsRequest, PutSecretsResponse,
-        SecretEnclaveRequest, SecretIdentifier as ProtoSecretId, SecretsBox as ProtoSecretsBox,
-        SecretsBundle as ProtoSecretsBundle,
+        CheckSecretsRequest, GetReportRequest, GetSecretsEnclaveRequest,
+        PolicyExecutionReport, PutSecretsRequest, PutSecretsResponse,
+        SecretEnclaveRequest, SecretsBundle as ProtoSecretsBundle,
         enclave_secrets_client::EnclaveSecretsClient as ProtoEnclaveSecretsClient,
     },
+    types::{AttestationReport, SecretId, SecretsBox},
 };
 use tokio_vsock::VsockStream;
 use tonic::{
@@ -80,12 +79,8 @@ impl EnclaveClient {
 
     pub async fn get_report(&mut self, user_data: Vec<u8>) -> Result<AttestationReport, String> {
         let req = GetReportRequest { user_data };
-        let resp = self
-            .inner
-            .get_report(req)
-            .await
-            .map_err(|e| e.to_string())?;
-        Ok(proto_attestation_to_domain(resp.into_inner()))
+        let resp = self.inner.get_report(req).await.map_err(|e| e.to_string())?;
+        Ok(AttestationReport::from_proto(resp.into_inner()))
     }
 
     pub async fn put_secrets(
@@ -94,24 +89,22 @@ impl EnclaveClient {
     ) -> Result<bool, String> {
         let mut bundles = Vec::new();
         for (sb, att) in boxes {
+            let sb_proto = sb.to_proto();
+            let att_proto = att.to_proto();
             bundles.push(ProtoSecretsBundle {
-                secrets_box: Some(domain_secrets_box_to_proto(&sb)),
-                attestation_report: Some(domain_attestation_to_proto(&att)),
+                secrets_box: Some(sb_proto),
+                attestation_report: Some(att_proto),
             });
         }
 
         let req = PutSecretsRequest {
             secrets_bundles: bundles,
         };
-        let resp = self
-            .inner
-            .put_secrets(req)
-            .await
-            .map_err(|e| e.to_string())?;
-        Ok(resp.into_inner().success)
+        let resp: PutSecretsResponse = self.inner.put_secrets(req).await.map_err(|e| e.to_string())?.into_inner();
+        Ok(resp.success)
     }
 
-    /// get_secrets for the provided secrets. The policy reports are ignored in this demo.
+    /// get_secrets for the provided IDs. The policy reports are ignored in this demo.
     pub async fn get_secrets(
         &mut self,
         ids: Vec<SecretId>,
@@ -121,11 +114,7 @@ impl EnclaveClient {
         let mut requests = Vec::new();
         for id in ids {
             requests.push(SecretEnclaveRequest {
-                id: Some(ProtoSecretId {
-                    chain_id: id.chain_id,
-                    identity_address: format!("{:x}", id.identity_address),
-                    identity_id: format!("{:x}", id.identity_id),
-                }),
+                id: Some(id.to_proto()),
             });
         }
         let pr_proto = policy_reports
@@ -139,17 +128,13 @@ impl EnclaveClient {
         let req = GetSecretsEnclaveRequest {
             requests,
             policy_reports: pr_proto,
-            requester_attestation: Some(domain_attestation_to_proto(&requester_report)),
+            requester_attestation: Some(requester_report.to_proto()),
         };
 
-        let resp = self
-            .inner
-            .get_secrets(req)
-            .await
-            .map_err(|e| e.to_string())?;
+        let resp = self.inner.get_secrets(req).await.map_err(|e| e.to_string())?;
         let r = resp.into_inner();
         match r.secrets_box {
-            Some(pb) => Ok(proto_secrets_box_to_domain(&pb)),
+            Some(pb) => Ok(SecretsBox::from_proto(pb)),
             None => Err("Enclave returned no secrets_box".to_string()),
         }
     }
@@ -160,72 +145,19 @@ impl EnclaveClient {
     ) -> Result<Vec<(SecretId, bool, u64)>, String> {
         let proto_ids = ids
             .iter()
-            .map(|id| ProtoSecretId {
-                chain_id: id.chain_id,
-                identity_address: format!("{:x}", id.identity_address),
-                identity_id: format!("{:x}", id.identity_id),
-            })
+            .map(|id| id.to_proto())
             .collect();
 
         let req = CheckSecretsRequest { ids: proto_ids };
-        let resp = self
-            .inner
-            .check_secrets(req)
-            .await
-            .map_err(|e| e.to_string())?;
+        let resp = self.inner.check_secrets(req).await.map_err(|e| e.to_string())?;
         let r = resp.into_inner();
         let mut out = Vec::new();
         for st in r.statuses {
             if let Some(pid) = st.id {
-                out.push((
-                    SecretId {
-                        chain_id: pid.chain_id,
-                        identity_address: pid.identity_address.parse().expect("TODO"),
-                        identity_id: pid.identity_id.parse().expect("TODO"),
-                    },
-                    st.found,
-                    st.expiry,
-                ));
+                let domain_id = SecretId::from_proto(pid);
+                out.push((domain_id, st.found, st.expiry));
             }
         }
         Ok(out)
-    }
-}
-
-// -- Helper conversions --
-
-fn domain_attestation_to_proto(a: &AttestationReport) -> ProtoAttestationReport {
-    ProtoAttestationReport {
-        ephemeral_public_key: a.ephemeral_public_key.clone(),
-        block_hashes: a.block_hashes.clone(),
-        user_data: a.user_data.clone(),
-    }
-}
-
-fn proto_attestation_to_domain(a: ProtoAttestationReport) -> AttestationReport {
-    AttestationReport {
-        ephemeral_public_key: a.ephemeral_public_key,
-        block_hashes: a.block_hashes,
-        user_data: a.user_data,
-    }
-}
-
-fn domain_secrets_box_to_proto(sb: &SecretsBox) -> ProtoSecretsBox {
-    ProtoSecretsBox {
-        encrypted_payload: sb.encrypted_payload.clone(),
-        nonce: sb.nonce.clone(),
-        sender_public_key: sb.sender_public_key.clone(),
-        signature: sb.signature.clone(),
-        alg: sb.alg.clone(),
-    }
-}
-
-fn proto_secrets_box_to_domain(psb: &ProtoSecretsBox) -> SecretsBox {
-    SecretsBox {
-        encrypted_payload: psb.encrypted_payload.clone(),
-        nonce: psb.nonce.clone(),
-        sender_public_key: psb.sender_public_key.clone(),
-        signature: psb.signature.clone(),
-        alg: psb.alg.clone(),
     }
 }
