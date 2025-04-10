@@ -1,6 +1,6 @@
-use aes_gcm::{
-    Aes256Gcm, Key, Nonce,
+use aes_gcm_siv::{
     aead::{Aead as AeadTrait, KeyInit},
+    Aes256GcmSiv, Key, Nonce,
 };
 use ed25519_dalek::{Signature, Signer as _, SigningKey, Verifier, VerifyingKey};
 use rand_core::RngCore;
@@ -38,30 +38,27 @@ impl Ephemeral {
 impl Clone for Ephemeral {
     fn clone(&self) -> Self {
         // Note: This is inefficient and should only be used when absolutely necessary
-        // since we need to regenerate the secret key (which doesn't implement Clone)
-        let mut secret_bytes = [0u8; 32];
-        secret_bytes.copy_from_slice(self.public.as_bytes());
-
-        // This is a new ephemeral key with the same public key
-        // In practice, you should avoid cloning ephemeral keys
+        // since we need to regenerate the secret key (which doesn't implement Clone).
+        // In practice, avoid cloning ephemeral keys.
+        let _secret_bytes = self.public.as_bytes();
         Self::new()
     }
 }
 
-/// AEAD encryption with AES-256-GCM
+/// AEAD encryption with AES-256-GCM-SIV
 pub struct Aead {
-    cipher: Aes256Gcm,
+    cipher: Aes256GcmSiv,
 }
 
 impl Aead {
     /// Create a new AEAD cipher from a 32-byte key
     pub fn new(key_material: &[u8; 32]) -> Self {
-        let key = Key::<Aes256Gcm>::from_slice(key_material);
-        let cipher = Aes256Gcm::new(key);
+        let key = Key::<Aes256GcmSiv>::from_slice(key_material);
+        let cipher = Aes256GcmSiv::new(key);
         Self { cipher }
     }
 
-    /// Encrypt data with AES-256-GCM
+    /// Encrypt data with AES-256-GCM-SIV
     ///
     /// Returns ciphertext with nonce prepended (first 12 bytes)
     pub fn encrypt(&self, plaintext: &[u8]) -> Vec<u8> {
@@ -82,7 +79,7 @@ impl Aead {
         output
     }
 
-    /// Decrypt data with AES-256-GCM
+    /// Decrypt data with AES-256-GCM-SIV
     ///
     /// Expects ciphertext with nonce prepended (first 12 bytes)
     pub fn decrypt(&self, ciphertext: &[u8]) -> Option<Vec<u8>> {
