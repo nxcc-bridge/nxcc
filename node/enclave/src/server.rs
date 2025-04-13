@@ -2,15 +2,13 @@ use tonic::transport::Server;
 use tracing::info;
 
 use crate::config::EnclaveConfig;
-use crate::services::{
-    grpc::EnclaveSecretsService, runner::RunnerService, secrets::SecretsEnclave,
-};
+use crate::services::{grpc::EnclaveSecretsService, runner::RunnerService, secrets::Secrets};
 use interface::proto::enclave::{
     enclave_secrets_server::EnclaveSecretsServer, runner_server::RunnerServer,
 };
 
 pub async fn start_grpc_server(config: &EnclaveConfig) -> Result<(), Box<dyn std::error::Error>> {
-    let enclave = SecretsEnclave::new();
+    let enclave = Secrets::new();
 
     match config.mode {
         "vsock" => {

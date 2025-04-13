@@ -1,9 +1,9 @@
-use std::sync::Arc;
 use interface::types::{AttestationReport, SecretId, SecretsBox};
+use std::sync::Arc;
 
-pub struct SecretsEnclave;
+pub struct Secrets;
 
-impl SecretsEnclave {
+impl Secrets {
     pub fn new() -> Arc<Self> {
         Arc::new(Self)
     }

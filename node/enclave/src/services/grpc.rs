@@ -1,26 +1,20 @@
-use std::sync::Arc;
-use tonic::{Request, Response, Status};
-use tracing::debug;
+use super::secrets::Secrets;
 use interface::{
     proto::enclave::{
-        enclave_secrets_server::EnclaveSecrets,
-        CheckSecretsRequest,
-        CheckSecretsResponse,
-        GetReportRequest,
-        GetSecretsEnclaveRequest,
-        GetSecretsEnclaveResponse,
-        PutSecretsRequest,
-        PutSecretsResponse,
-        SecretStatus as ProtoSecretStatus,
+        CheckSecretsRequest, CheckSecretsResponse, GetReportRequest, GetSecretsEnclaveRequest,
+        GetSecretsEnclaveResponse, PutSecretsRequest, PutSecretsResponse,
+        SecretStatus as ProtoSecretStatus, enclave_secrets_server::EnclaveSecrets,
     },
     proto::interface::AttestationReport as ProtoAttestationReport,
     proto::interface::SecretsBox as ProtoSecretsBox,
-    types::{AttestationReport, SecretsBox, SecretId},
+    types::{AttestationReport, SecretId, SecretsBox},
 };
-use super::secrets::SecretsEnclave;
+use std::sync::Arc;
+use tonic::{Request, Response, Status};
+use tracing::debug;
 
 pub struct EnclaveSecretsService {
-    pub enclave: Arc<SecretsEnclave>,
+    pub enclave: Arc<Secrets>,
 }
 
 #[tonic::async_trait]
@@ -52,7 +46,10 @@ impl EnclaveSecrets for EnclaveSecretsService {
             let att_proto = sb
                 .attestation_report
                 .ok_or_else(|| Status::invalid_argument("missing attestation report"))?;
-            bundles.push((SecretsBox::from_proto(sb_proto), AttestationReport::from_proto(att_proto)));
+            bundles.push((
+                SecretsBox::from_proto(sb_proto),
+                AttestationReport::from_proto(att_proto),
+            ));
         }
         let success = self.enclave.put_secrets(bundles);
         Ok(Response::new(PutSecretsResponse { success }))
@@ -77,7 +74,8 @@ impl EnclaveSecrets for EnclaveSecretsService {
             policy_reports.push((p.content_hash, p.signature));
         }
         let ar = AttestationReport::from_proto(
-            req.requester_attestation.ok_or_else(|| Status::invalid_argument("missing attestation"))?,
+            req.requester_attestation
+                .ok_or_else(|| Status::invalid_argument("missing attestation"))?,
         );
         let sb = self.enclave.get_secrets(ids, policy_reports, ar);
         Ok(Response::new(GetSecretsEnclaveResponse {

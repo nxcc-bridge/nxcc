@@ -1,6 +1,6 @@
 use aes_gcm_siv::{
-    aead::{Aead as AeadTrait, KeyInit},
     Aes256GcmSiv, Key, Nonce,
+    aead::{Aead as AeadTrait, KeyInit},
 };
 use ed25519_dalek::{Signature, Signer as _, SigningKey, Verifier, VerifyingKey};
 use rand_core::RngCore;
