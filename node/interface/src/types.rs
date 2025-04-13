@@ -1,5 +1,5 @@
-use ethers::types::{Address, U256};
 use crate::proto::interface as proto;
+use alloy_primitives::{Address, U256};
 
 /// A remote-verifiable TEE attestation report in domain form.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -28,7 +28,9 @@ impl AttestationReport {
 }
 
 /// An identifier for a secret (chain ID, identity address, identity ID).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub struct SecretId {
     pub chain_id: u64,
     pub identity_address: Address,
@@ -39,16 +41,19 @@ impl SecretId {
     pub fn from_proto(p: proto::SecretIdentifier) -> Self {
         Self {
             chain_id: p.chain_id,
-            identity_address: p.identity_address.parse().expect("Invalid address"),
-            identity_id: p.identity_id.parse().expect("Invalid U256"),
+            identity_address: p
+                .identity_address
+                .parse::<Address>()
+                .expect("Invalid address"),
+            identity_id: p.identity_id.parse::<U256>().expect("Invalid U256"),
         }
     }
 
     pub fn to_proto(&self) -> proto::SecretIdentifier {
         let mut out = proto::SecretIdentifier::default();
         out.chain_id = self.chain_id;
-        out.identity_address = format!("{:x}", self.identity_address);
-        out.identity_id = format!("{:x}", self.identity_id);
+        out.identity_address = format!("{:#x}", self.identity_address); // Use 0x prefix for consistency
+        out.identity_id = self.identity_id.to_string(); // U256::to_string() is usually sufficient
         out
     }
 }

@@ -1,19 +1,25 @@
 use std::{collections::HashMap, sync::Arc};
 
-use ethers::{
-    prelude::*,
-    providers::{Http, Provider},
-};
+use alloy_primitives::{Address, U256};
+use alloy_provider::{DynProvider, Provider, ProviderBuilder};
+use alloy_sol_types::sol;
+use alloy_transport_http::Http;
+use reqwest::Client;
 use tokio::sync::RwLock;
 use tracing::debug;
+use url::Url;
 
 use crate::error::AppError;
 
-abigen!(Identity, "../contracts/evm/out/Identity.sol/Identity.json");
+sol!(
+    #[sol(rpc)] // Add rpc attribute for contract calls
+    Identity,
+    "../../contracts/evm/out/Identity.sol/Identity.json"
+);
 
 #[derive(Debug, Clone)]
 pub struct GatewayManager {
-    providers: Arc<RwLock<HashMap<u64, Provider<Http>>>>,
+    providers: Arc<RwLock<HashMap<u64, DynProvider>>>,
 }
 
 impl GatewayManager {
@@ -23,7 +29,7 @@ impl GatewayManager {
         }
     }
 
-    pub async fn get_provider(&self, chain_id: u64) -> Result<Provider<Http>, AppError> {
+    pub async fn get_provider(&self, chain_id: u64) -> Result<DynProvider, AppError> {
         let providers = self.providers.read().await;
 
         if let Some(provider) = providers.get(&chain_id) {
@@ -41,11 +47,13 @@ impl GatewayManager {
 
         // Create a new provider based on chain_id
         let rpc_url = self.get_rpc_url_for_chain(chain_id)?;
-        let provider = Provider::<Http>::try_from(rpc_url)
-            .map_err(|e| AppError::Service(format!("Failed to create provider: {}", e)))?;
+        let url = rpc_url
+            .parse::<Url>()
+            .map_err(|e| AppError::Service(format!("Invalid RPC URL {}: {}", rpc_url, e)))?;
+        let provider = ProviderBuilder::new().on_http(url);
 
-        providers.insert(chain_id, provider.clone());
-        Ok(provider)
+        providers.insert(chain_id, provider.clone().erased());
+        Ok(provider.erased())
     }
 
     fn get_rpc_url_for_chain(&self, chain_id: u64) -> Result<String, AppError> {
@@ -77,12 +85,14 @@ impl GatewayManager {
             return Ok("mock://policy.example.com".to_string());
         }
 
-        let provider = Provider::<Http>::try_from(rpc_url)
-            .map_err(|e| AppError::Service(format!("Failed to create provider: {e}")))?;
+        let url = rpc_url
+            .parse::<Url>()
+            .map_err(|e| AppError::Service(format!("Invalid RPC URL {}: {}", rpc_url, e)))?;
+        let provider = ProviderBuilder::new().on_http(url);
 
-        let identity_contract = Identity::new(identity_address, Arc::new(provider));
-        let policy_url = identity_contract
-            .token_uri(identity_id)
+        let identity_contract = Identity::new(identity_address, provider.clone()); // Provider is likely Arc-wrapped internally
+        let policy_url: String = identity_contract
+            .tokenURI(identity_id)
             .call()
             .await
             .map_err(|e| AppError::Service(format!("Failed to fetch policy URL: {e}")))?;

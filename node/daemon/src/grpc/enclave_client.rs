@@ -1,8 +1,8 @@
 use interface::{
     proto::enclave::{
-        CheckSecretsRequest, GetReportRequest, GetSecretsEnclaveRequest,
-        PolicyExecutionReport, PutSecretsRequest, PutSecretsResponse,
-        SecretEnclaveRequest, SecretsBundle as ProtoSecretsBundle,
+        CheckSecretsRequest, GetReportRequest, GetSecretsEnclaveRequest, PolicyExecutionReport,
+        PutSecretsRequest, PutSecretsResponse, SecretEnclaveRequest,
+        SecretsBundle as ProtoSecretsBundle,
         enclave_secrets_client::EnclaveSecretsClient as ProtoEnclaveSecretsClient,
     },
     types::{AttestationReport, SecretId, SecretsBox},
@@ -79,7 +79,11 @@ impl EnclaveClient {
 
     pub async fn get_report(&mut self, user_data: Vec<u8>) -> Result<AttestationReport, String> {
         let req = GetReportRequest { user_data };
-        let resp = self.inner.get_report(req).await.map_err(|e| e.to_string())?;
+        let resp = self
+            .inner
+            .get_report(req)
+            .await
+            .map_err(|e| e.to_string())?;
         Ok(AttestationReport::from_proto(resp.into_inner()))
     }
 
@@ -100,7 +104,12 @@ impl EnclaveClient {
         let req = PutSecretsRequest {
             secrets_bundles: bundles,
         };
-        let resp: PutSecretsResponse = self.inner.put_secrets(req).await.map_err(|e| e.to_string())?.into_inner();
+        let resp: PutSecretsResponse = self
+            .inner
+            .put_secrets(req)
+            .await
+            .map_err(|e| e.to_string())?
+            .into_inner();
         Ok(resp.success)
     }
 
@@ -131,7 +140,11 @@ impl EnclaveClient {
             requester_attestation: Some(requester_report.to_proto()),
         };
 
-        let resp = self.inner.get_secrets(req).await.map_err(|e| e.to_string())?;
+        let resp = self
+            .inner
+            .get_secrets(req)
+            .await
+            .map_err(|e| e.to_string())?;
         let r = resp.into_inner();
         match r.secrets_box {
             Some(pb) => Ok(SecretsBox::from_proto(pb)),
@@ -143,13 +156,14 @@ impl EnclaveClient {
         &mut self,
         ids: Vec<SecretId>,
     ) -> Result<Vec<(SecretId, bool, u64)>, String> {
-        let proto_ids = ids
-            .iter()
-            .map(|id| id.to_proto())
-            .collect();
+        let proto_ids = ids.iter().map(|id| id.to_proto()).collect();
 
         let req = CheckSecretsRequest { ids: proto_ids };
-        let resp = self.inner.check_secrets(req).await.map_err(|e| e.to_string())?;
+        let resp = self
+            .inner
+            .check_secrets(req)
+            .await
+            .map_err(|e| e.to_string())?;
         let r = resp.into_inner();
         let mut out = Vec::new();
         for st in r.statuses {

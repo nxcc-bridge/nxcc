@@ -1,15 +1,11 @@
 use std::{collections::HashMap, sync::Arc};
 
-use ethers::types::{Address, U256};
+use alloy_primitives::{Address, U256};
 use interface::{
     proto::daemon::{
-        GetSecretsRequest, GetSecretsResponse,
-        secrets_server::Secrets,
-        SecretRequests,
+        GetSecretsRequest, GetSecretsResponse, SecretRequests, secrets_server::Secrets,
     },
-    types::{
-        SecretId, SecretRequest, SecretRequesterInfo, SecretsBox,
-    },
+    types::{SecretId, SecretRequest, SecretRequesterInfo, SecretsBox},
 };
 use tonic::{Request, Response, Status};
 use tracing::debug;
@@ -45,7 +41,9 @@ impl Secrets for SecretsDebugGrpc {
 
         let mut secret_requests = HashMap::new();
         for sr in req.secret_requests {
-            let id_proto = sr.id.ok_or_else(|| Status::invalid_argument("Missing SecretIdentifier"))?;
+            let id_proto = sr
+                .id
+                .ok_or_else(|| Status::invalid_argument("Missing SecretIdentifier"))?;
             let domain_id = SecretId::from_proto(id_proto);
 
             let requests: Vec<SecretRequest> = sr

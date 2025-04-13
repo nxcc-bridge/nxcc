@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-ethers = "2.0.14"
+alloy-primitives = { version = "1.0.0", features = ["serde"] }
 prost = "0.13.5"
 serde = { version = "1.0", features = ["derive"] }
 tonic = { version = "0.12.3", features = ["transport"] }
