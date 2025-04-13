@@ -12,10 +12,9 @@ message AttestationReport {
 // An AEAD-encrypted "box" containing secrets.
 message SecretsBox {
   bytes encrypted_payload = 1;
-  bytes nonce = 2;
-  bytes sender_public_key = 3;
-  bytes signature = 4;
-  string alg = 5;
+  bytes sender_public_key = 2;
+  bytes signature = 3;
+  string alg = 4;
 }
 
 // An identifier for a particular secret. For example, referencing an on-chain Identity token.

@@ -62,7 +62,6 @@ impl SecretId {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SecretsBox {
     pub encrypted_payload: Vec<u8>,
-    pub nonce: Vec<u8>,
     pub sender_public_key: Vec<u8>,
     pub signature: Vec<u8>,
     pub alg: String,
@@ -72,7 +71,6 @@ impl SecretsBox {
     pub fn new_empty() -> Self {
         SecretsBox {
             encrypted_payload: Vec::new(),
-            nonce: Vec::new(),
             sender_public_key: Vec::new(),
             signature: Vec::new(),
             alg: "X25519+AES256GCM".to_string(),
@@ -82,7 +80,6 @@ impl SecretsBox {
     pub fn from_proto(p: proto::SecretsBox) -> Self {
         Self {
             encrypted_payload: p.encrypted_payload,
-            nonce: p.nonce,
             sender_public_key: p.sender_public_key,
             signature: p.signature,
             alg: p.alg,
@@ -92,7 +89,6 @@ impl SecretsBox {
     pub fn to_proto(&self) -> proto::SecretsBox {
         let mut out = proto::SecretsBox::default();
         out.encrypted_payload = self.encrypted_payload.clone();
-        out.nonce = self.nonce.clone();
         out.sender_public_key = self.sender_public_key.clone();
         out.signature = self.signature.clone();
         out.alg = self.alg.clone();

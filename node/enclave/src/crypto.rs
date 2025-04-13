@@ -4,20 +4,20 @@ use aes_gcm_siv::{
 };
 use ed25519_dalek::{Signature, Signer as _, SigningKey, Verifier, VerifyingKey};
 use rand_core::RngCore;
-use x25519_dalek::{EphemeralSecret, PublicKey as X25519PublicKey};
+use x25519_dalek::{EphemeralSecret as X25519EphemeralSecret, PublicKey as X25519PublicKey};
 
 use std::fmt;
 
 /// Ephemeral key for X25519 key exchange
-pub struct Ephemeral {
-    pub(crate) secret: EphemeralSecret,
+pub struct EphemeralSecret {
+    pub(crate) secret: X25519EphemeralSecret,
     pub(crate) public: X25519PublicKey,
 }
 
-impl Ephemeral {
+impl EphemeralSecret {
     /// Generate a new ephemeral key pair for X25519
     pub fn new() -> Self {
-        let secret = EphemeralSecret::random();
+        let secret = X25519EphemeralSecret::random();
         let public = X25519PublicKey::from(&secret);
         Self { secret, public }
     }
@@ -35,7 +35,7 @@ impl Ephemeral {
     }
 }
 
-impl Clone for Ephemeral {
+impl Clone for EphemeralSecret {
     fn clone(&self) -> Self {
         // Note: This is inefficient and should only be used when absolutely necessary
         // since we need to regenerate the secret key (which doesn't implement Clone).

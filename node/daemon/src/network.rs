@@ -273,9 +273,9 @@ impl NetworkManager {
                 kad::RoutingUpdate::Success => {}
                 kad::RoutingUpdate::Pending => {}
                 kad::RoutingUpdate::Failed => {
-                    return Err(AppError::Network(format!(
-                        "Failed to add address to Kademlia"
-                    )));
+                    return Err(AppError::Network(
+                        "Failed to add address to Kademlia".to_string(),
+                    ));
                 }
             }
             swarm

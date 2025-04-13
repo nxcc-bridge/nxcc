@@ -6,7 +6,6 @@ use interface::{
         SecretStatus as ProtoSecretStatus, enclave_secrets_server::EnclaveSecrets,
     },
     proto::interface::AttestationReport as ProtoAttestationReport,
-    proto::interface::SecretsBox as ProtoSecretsBox,
     types::{AttestationReport, SecretId, SecretsBox},
 };
 use std::sync::Arc;

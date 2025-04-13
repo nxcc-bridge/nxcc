@@ -49,7 +49,7 @@ impl Secrets for SecretsDebugGrpc {
             let requests: Vec<SecretRequest> = sr
                 .requests
                 .into_iter()
-                .map(|r_proto| SecretRequest::from_proto(r_proto))
+                .map(SecretRequest::from_proto)
                 .collect();
 
             secret_requests.insert(domain_id, requests);
