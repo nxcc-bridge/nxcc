@@ -10,7 +10,6 @@ pub mod proto {
     }
 }
 
-// Move domain types into types.rs
 pub mod types;
 
 pub mod policy {

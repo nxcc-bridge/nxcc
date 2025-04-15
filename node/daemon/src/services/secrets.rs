@@ -1,6 +1,9 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 use futures::channel::mpsc;
@@ -11,9 +14,9 @@ use crate::{error::AppError, grpc::enclave_client::EnclaveClient, network::Secre
 
 pub struct SecretsService {
     p2p_secrets_sender: mpsc::Sender<SecretsMessage>,
-    enclave_client: Mutex<EnclaveClient>,
+    enclave_client: EnclaveClient,
     pending: Mutex<HashMap<u64, PendingRequest>>,
-    request_counter: Mutex<u64>,
+    request_counter: AtomicU64,
 }
 
 struct PendingRequest {
@@ -31,9 +34,9 @@ impl SecretsService {
     ) -> Arc<Self> {
         Arc::new(Self {
             p2p_secrets_sender,
-            enclave_client: Mutex::new(enclave_client),
+            enclave_client,
             pending: Mutex::new(HashMap::new()),
-            request_counter: Mutex::new(0),
+            request_counter: AtomicU64::new(0),
         })
     }
 
@@ -46,19 +49,15 @@ impl SecretsService {
         let (local_ids, missing) = self.check_local(&secret_requests).await?;
         if missing.is_empty() {
             let att = env_report.attestation.clone();
-            let mut encl = self.enclave_client.lock().await;
-            let sb = encl
+            let sb = self
+                .enclave_client
                 .get_secrets(local_ids, vec![], att)
                 .await
                 .map_err(|e| AppError::Service(format!("Enclave get_secrets: {e}")))?;
             return Ok(sb);
         }
 
-        let request_id = {
-            let mut rc = self.request_counter.lock().await;
-            *rc += 1;
-            *rc
-        };
+        let request_id = self.request_counter.fetch_add(1, Ordering::Relaxed) + 1;
         let (tx, rx) = oneshot::channel();
 
         {
@@ -90,23 +89,18 @@ impl SecretsService {
             Err(e) => return Err(AppError::Service(format!("oneshot canceled: {e}"))),
         };
 
-        {
-            let mut encl = self.enclave_client.lock().await;
-            let local_report = encl
-                .get_report(vec![])
-                .await
-                .map_err(|e| AppError::Service(format!("Enclave get_report: {e}")))?;
-            encl.put_secrets(vec![(p2p_box.clone(), local_report)])
-                .await
-                .map_err(|e| AppError::Service(format!("Enclave put_secrets: {e}")))?;
-        }
+        self.enclave_client
+            .put_secrets(todo!("get these from peers"))
+            .await
+            .map_err(|e| AppError::Service(format!("Enclave put_secrets: {e}")))?;
 
         let att = env_report.attestation.clone();
-        let mut encl = self.enclave_client.lock().await;
-        let sb = encl
+        let sb = self
+            .enclave_client
             .get_secrets(local_ids, vec![], att)
             .await
             .map_err(|e| AppError::Service(format!("Final get_secrets: {e}")))?;
+
         Ok(sb)
     }
 
@@ -152,8 +146,7 @@ impl SecretsService {
             return SecretsBox::new_empty();
         }
         let att = env_report.attestation.clone();
-        let mut encl = self.enclave_client.lock().await;
-        match encl.get_secrets(found, vec![], att).await {
+        match self.enclave_client.get_secrets(found, vec![], att).await {
             Ok(sb) => sb,
             Err(_) => SecretsBox::new_empty(),
         }
@@ -190,8 +183,9 @@ impl SecretsService {
         if all_ids.is_empty() {
             return Ok((Vec::new(), HashMap::new()));
         }
-        let mut encl = self.enclave_client.lock().await;
-        let statuses = encl
+
+        let statuses = self
+            .enclave_client
             .check_secrets(all_ids.clone())
             .await
             .map_err(|e| AppError::Service(format!("check_secrets: {e}")))?;
@@ -229,8 +223,7 @@ impl SecretsService {
             return Vec::new();
         }
 
-        let mut encl = self.enclave_client.lock().await;
-        match encl.check_secrets(all_ids.clone()).await {
+        match self.enclave_client.check_secrets(all_ids.clone()).await {
             Ok(statuses) => {
                 let now = current_unix_time();
                 statuses

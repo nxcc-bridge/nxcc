@@ -8,7 +8,7 @@ use interface::{
     },
     types::{AttestationReport, SecretId, SecretsBox},
 };
-use tokio::{net::UnixStream, sync::Mutex};
+use tokio::net::UnixStream;
 use tonic::{
     codegen::http::Uri as HttpUri,
     transport::{Channel, Endpoint, Uri},
@@ -18,9 +18,10 @@ use tower::service_fn;
 use crate::error::AppError;
 
 /// A single client struct for both the secrets and runner services in the enclave.
+#[derive(Clone)]
 pub struct EnclaveClient {
-    secrets_client: Mutex<EnclaveSecretsClient<Channel>>,
-    runner_client: Mutex<RunnerClient<Channel>>,
+    secrets_client: EnclaveSecretsClient<Channel>,
+    runner_client: RunnerClient<Channel>,
 }
 
 impl EnclaveClient {
@@ -39,8 +40,8 @@ impl EnclaveClient {
             .map_err(|e| AppError::Service(format!("UDS connect error: {e}")))?;
 
         Ok(Self {
-            secrets_client: Mutex::new(EnclaveSecretsClient::new(channel.clone())),
-            runner_client: Mutex::new(RunnerClient::new(channel.clone())),
+            secrets_client: EnclaveSecretsClient::new(channel.clone()),
+            runner_client: RunnerClient::new(channel),
         })
     }
 
@@ -52,7 +53,7 @@ impl EnclaveClient {
     // Secrets interface calls
 
     pub async fn get_report(&self, user_data: Vec<u8>) -> Result<AttestationReport, String> {
-        let mut client = self.secrets_client.lock().await;
+        let mut client = self.secrets_client.clone();
         let req = GetReportRequest { user_data };
         let resp = client.get_report(req).await.map_err(|e| e.to_string())?;
         Ok(AttestationReport::from_proto(resp.into_inner()))
@@ -72,7 +73,7 @@ impl EnclaveClient {
         let req = PutSecretsRequest {
             secrets_bundles: bundles,
         };
-        let mut client = self.secrets_client.lock().await;
+        let mut client = self.secrets_client.clone();
         let resp = client.put_secrets(req).await.map_err(|e| e.to_string())?;
         Ok(resp.into_inner().success)
     }
@@ -94,7 +95,7 @@ impl EnclaveClient {
             requester_attestation: Some(att.to_proto()),
             policy_reports: vec![], // not used yet
         };
-        let mut client = self.secrets_client.lock().await;
+        let mut client = self.secrets_client.clone();
         let resp = client.get_secrets(req).await.map_err(|e| e.to_string())?;
         let out = resp.into_inner();
         if let Some(box_proto) = out.secrets_box {
@@ -113,7 +114,7 @@ impl EnclaveClient {
             proto_ids.push(sid.to_proto());
         }
         let req = CheckSecretsRequest { ids: proto_ids };
-        let mut client = self.secrets_client.lock().await;
+        let mut client = self.secrets_client.clone();
         let resp = client.check_secrets(req).await.map_err(|e| e.to_string())?;
         let statuses = resp.into_inner().statuses;
         let mut out = Vec::new();
@@ -130,7 +131,7 @@ impl EnclaveClient {
 
     pub async fn run_worker(&self, worker_binary: Vec<u8>) -> Result<(), String> {
         let req = RunWorkerRequest { worker_binary };
-        let mut client = self.runner_client.lock().await;
+        let mut client = self.runner_client.clone();
         client.run_worker(req).await.map_err(|e| e.to_string())?;
         Ok(())
     }
@@ -140,7 +141,7 @@ impl EnclaveClient {
             worker_id,
             event_payload: payload,
         };
-        let mut client = self.runner_client.lock().await;
+        let mut client = self.runner_client.clone();
         let _resp: DeliverEventResponse = client
             .deliver_event(req)
             .await

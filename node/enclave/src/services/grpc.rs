@@ -41,15 +41,15 @@ impl EnclaveSecrets for EnclaveSecretsService {
         let req = request.into_inner();
         let mut bundles = Vec::new();
         for b in req.secrets_bundles {
-            let sb = b
+            let proto_sb = b
                 .secrets_box
                 .ok_or_else(|| Status::invalid_argument("Missing secrets_box"))?;
-            let att = b
+            let proto_att = b
                 .attestation_report
                 .ok_or_else(|| Status::invalid_argument("Missing att_report"))?;
-            let domain_sb = SecretsBox::from_proto(sb);
-            let domain_att = AttestationReport::from_proto(att);
-            bundles.push((domain_sb, domain_att));
+            let sb = SecretsBox::from_proto(proto_sb);
+            let att = AttestationReport::from_proto(proto_att);
+            bundles.push((sb, att));
         }
         let success = self.secrets.put_secrets(bundles);
         Ok(Response::new(PutSecretsResponse { success }))
@@ -66,11 +66,11 @@ impl EnclaveSecrets for EnclaveSecretsService {
                 ids.push(interface::types::SecretId::from_proto(si));
             }
         }
-        let att = req
+        let proto_att = req
             .requester_attestation
             .ok_or_else(|| Status::invalid_argument("Missing requester_attestation"))?;
-        let domain_att = AttestationReport::from_proto(att);
-        let sb = self.secrets.get_secrets(ids, vec![], domain_att);
+        let att = AttestationReport::from_proto(proto_att);
+        let sb = self.secrets.get_secrets(ids, vec![], att);
         let resp = GetSecretsEnclaveResponse {
             secrets_box: Some(sb.to_proto()),
         };
