@@ -6,7 +6,7 @@ use interface::{
         SecretEnclaveRequest, SecretsBundle as ProtoSecretsBundle,
         enclave_secrets_client::EnclaveSecretsClient, runner_client::RunnerClient,
     },
-    types::{AttestationReport, EnvReport, SecretId, SecretsBox},
+    types::{AttestationReport, EnvReport, FromProto as _, IntoProto as _, SecretId, SecretsBox},
 };
 use tokio::net::UnixStream;
 use tonic::{

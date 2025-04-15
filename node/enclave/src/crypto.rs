@@ -1,137 +1,457 @@
 use aes_gcm_siv::{
-    Aes256GcmSiv, Key, Nonce,
-    aead::{Aead as AeadTrait, KeyInit},
+    AeadCore as _, Aes256GcmSiv,
+    aead::{Aead, KeyInit, OsRng, generic_array::GenericArray},
 };
-use ed25519_dalek::{Signature, Signer as _, SigningKey, Verifier, VerifyingKey};
-use rand_core::RngCore;
-use x25519_dalek::{EphemeralSecret as X25519EphemeralSecret, PublicKey as X25519PublicKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
+use interface::types::{AttestationReport, SecretId, SecretsBox};
+use sha2::{Digest, Sha256};
+use std::convert::TryInto;
+use thiserror::Error;
+use x25519_dalek::{PublicKey, SharedSecret, StaticSecret};
+use zeroize::Zeroize;
 
-use std::fmt;
+const AES_NONCE_SIZE: usize = 12; // 96 bits for AES-GCM-SIV
 
-/// Ephemeral key for X25519 key exchange
-pub struct EphemeralSecret {
-    pub(crate) secret: X25519EphemeralSecret,
-    pub(crate) public: X25519PublicKey,
+#[derive(Error, Debug)]
+pub enum CryptoError {
+    #[error("Invalid key length: expected {expected}, got {got}")]
+    InvalidKeyLength { expected: usize, got: usize },
+    #[error("Invalid signature")]
+    InvalidSignature,
+    #[error("Cryptography operation failed: {0}")]
+    OperationFailed(String),
+    #[error("Serialization error: {0}")]
+    Serialization(String),
+    #[error("Deserialization error: {0}")]
+    Deserialization(String),
 }
 
-impl EphemeralSecret {
-    /// Generate a new ephemeral key pair for X25519
-    pub fn new() -> Self {
-        let secret = X25519EphemeralSecret::random();
-        let public = X25519PublicKey::from(&secret);
-        Self { secret, public }
-    }
-
-    /// Perform Diffie-Hellman key exchange with peer's public key
-    pub fn diffie_hellman(&self, peer_public: &[u8; 32]) -> [u8; 32] {
-        let peer_key = X25519PublicKey::from(*peer_public);
-        let shared_secret = self.secret.diffie_hellman(&peer_key);
-        *shared_secret.as_bytes()
-    }
-
-    /// Get the public key bytes
-    pub fn public_key(&self) -> &[u8; 32] {
-        self.public.as_bytes()
-    }
-}
-
-impl Clone for EphemeralSecret {
-    fn clone(&self) -> Self {
-        // Note: This is inefficient and should only be used when absolutely necessary
-        // since we need to regenerate the secret key (which doesn't implement Clone).
-        // In practice, avoid cloning ephemeral keys.
-        let _secret_bytes = self.public.as_bytes();
-        Self::new()
-    }
-}
-
-/// AEAD encryption with AES-256-GCM-SIV
-pub struct Aead {
-    cipher: Aes256GcmSiv,
-}
-
-impl Aead {
-    /// Create a new AEAD cipher from a 32-byte key
-    pub fn new(key_material: &[u8; 32]) -> Self {
-        let key = Key::<Aes256GcmSiv>::from_slice(key_material);
-        let cipher = Aes256GcmSiv::new(key);
-        Self { cipher }
-    }
-
-    /// Encrypt data with AES-256-GCM-SIV
-    ///
-    /// Returns ciphertext with nonce prepended (first 12 bytes)
-    pub fn encrypt(&self, plaintext: &[u8]) -> Vec<u8> {
-        // Generate a random 96-bit nonce
-        let mut nonce_bytes = [0u8; 12];
-        rand::rng().fill_bytes(&mut nonce_bytes);
-        let nonce = Nonce::from_slice(&nonce_bytes);
-
-        // Encrypt
-        let ciphertext = self
-            .cipher
-            .encrypt(nonce, plaintext)
-            .expect("encryption should not fail with valid inputs");
-
-        // Prepend the nonce to the ciphertext
-        let mut output = nonce_bytes.to_vec();
-        output.extend_from_slice(&ciphertext);
-        output
-    }
-
-    /// Decrypt data with AES-256-GCM-SIV
-    ///
-    /// Expects ciphertext with nonce prepended (first 12 bytes)
-    pub fn decrypt(&self, ciphertext: &[u8]) -> Option<Vec<u8>> {
-        if ciphertext.len() < 12 {
-            return None;
-        }
-
-        let nonce_bytes = &ciphertext[..12];
-        let payload = &ciphertext[12..];
-
-        let nonce = Nonce::from_slice(nonce_bytes);
-        self.cipher.decrypt(nonce, payload).ok()
-    }
-}
-
-/// Ed25519 signing and verification
-pub struct Signer {
+/// Represents an Ed25519 keypair for signing.
+pub struct SigningKeyPair {
     signing_key: SigningKey,
-    verifying_key: VerifyingKey,
 }
 
-impl Signer {
-    /// Generate a new Ed25519 signing key
-    pub fn new() -> Self {
-        let signing_key = SigningKey::generate(&mut rand_core_0_6::OsRng);
-        let verifying_key = signing_key.verifying_key();
-        Self {
-            signing_key,
-            verifying_key,
-        }
+impl SigningKeyPair {
+    /// Generates a new Ed25519 keypair.
+    pub fn generate() -> Self {
+        let mut csprng = OsRng;
+        let signing_key = SigningKey::generate(&mut csprng);
+        Self { signing_key }
     }
 
-    /// Sign a message with the Ed25519 private key
+    /// Returns the public verification key.
+    pub fn public_key(&self) -> VerifyingKey {
+        self.signing_key.verifying_key()
+    }
+
+    /// Signs a message.
     pub fn sign(&self, message: &[u8]) -> Signature {
         self.signing_key.sign(message)
     }
 
-    /// Verify a signature with the Ed25519 public key
-    pub fn verify(&self, message: &[u8], signature: &Signature) -> bool {
-        self.verifying_key.verify(message, signature).is_ok()
+    /// Creates a keypair from raw bytes. Input must be 32 bytes.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, CryptoError> {
+        let bytes_array: [u8; 32] =
+            bytes
+                .try_into()
+                .map_err(|_| CryptoError::InvalidKeyLength {
+                    expected: 32,
+                    got: bytes.len(),
+                })?;
+        Ok(Self {
+            signing_key: SigningKey::from_bytes(&bytes_array),
+        })
     }
 
-    /// Get the public key bytes
-    pub fn public_key_bytes(&self) -> [u8; 32] {
-        self.verifying_key.to_bytes()
+    /// Returns the secret key bytes.
+    pub fn to_bytes(&self) -> [u8; 32] {
+        self.signing_key.to_bytes()
     }
 }
 
-impl fmt::Debug for Signer {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Signer")
-            .field("public_key", &hex::encode(self.verifying_key.to_bytes()))
-            .finish_non_exhaustive() // Don't print the private key
+/// Represents an X25519 keypair for key exchange.
+/// Uses StaticSecret for the private part to allow repeated use for GetReport.
+pub struct KeyExchangeKeyPair {
+    secret: StaticSecret,
+    public: PublicKey,
+}
+
+impl KeyExchangeKeyPair {
+    /// Generates a new X25519 keypair.
+    pub fn generate() -> Self {
+        let secret = StaticSecret::random_from_rng(OsRng);
+        let public = PublicKey::from(&secret);
+        Self { secret, public }
+    }
+
+    /// Returns the public key.
+    pub fn public_key(&self) -> &PublicKey {
+        &self.public
+    }
+
+    /// Computes the Diffie-Hellman shared secret.
+    pub fn diffie_hellman(&self, their_public: &PublicKey) -> SharedSecret {
+        self.secret.diffie_hellman(their_public)
+    }
+
+    /// Creates a keypair from raw bytes. Input must be 32 bytes.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, CryptoError> {
+        let secret_bytes: [u8; 32] =
+            bytes
+                .try_into()
+                .map_err(|_| CryptoError::InvalidKeyLength {
+                    expected: 32,
+                    got: bytes.len(),
+                })?;
+        let secret = StaticSecret::from(secret_bytes);
+        let public = PublicKey::from(&secret);
+        Ok(Self { secret, public })
+    }
+
+    /// Returns the secret key bytes.
+    pub fn to_bytes(&self) -> [u8; 32] {
+        self.secret.to_bytes()
+    }
+}
+
+impl Drop for KeyExchangeKeyPair {
+    fn drop(&mut self) {
+        self.secret.zeroize();
+    }
+}
+
+/// Derives a symmetric key from a shared secret using SHA-256.
+fn derive_symmetric_key(shared_secret: &SharedSecret) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(shared_secret.as_bytes());
+    hasher.finalize().into()
+}
+
+/// Encrypts data using AES-GCM-SIV with the derived key.
+/// Returns (nonce, ciphertext).
+fn encrypt_aead(
+    symmetric_key: &[u8; 32],
+    plaintext: &[u8],
+    aad: &[u8],
+) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
+    let key = GenericArray::from_slice(symmetric_key);
+    let cipher = Aes256GcmSiv::new(key);
+    let nonce = Aes256GcmSiv::generate_nonce(&mut OsRng); // 96-bits; unique per message
+    let ciphertext = cipher
+        .encrypt(
+            &nonce,
+            aes_gcm_siv::aead::Payload {
+                msg: plaintext,
+                aad,
+            },
+        )
+        .map_err(|e| CryptoError::OperationFailed(format!("AEAD encryption failed: {e}")))?;
+    Ok((nonce.to_vec(), ciphertext))
+}
+
+/// Decrypts data using AES-GCM-SIV with the derived key.
+fn decrypt_aead(
+    symmetric_key: &[u8; 32],
+    nonce: &[u8],
+    ciphertext: &[u8],
+    aad: &[u8],
+) -> Result<Vec<u8>, CryptoError> {
+    if nonce.len() != AES_NONCE_SIZE {
+        return Err(CryptoError::InvalidKeyLength {
+            expected: AES_NONCE_SIZE,
+            got: nonce.len(),
+        });
+    }
+    let key = GenericArray::from_slice(symmetric_key);
+    let cipher = Aes256GcmSiv::new(key);
+    let nonce_arr = GenericArray::from_slice(nonce);
+    let plaintext = cipher
+        .decrypt(
+            nonce_arr,
+            aes_gcm_siv::aead::Payload {
+                msg: ciphertext,
+                aad,
+            },
+        )
+        .map_err(|e| CryptoError::OperationFailed(format!("AEAD decryption failed: {e}")))?;
+    Ok(plaintext)
+}
+
+/// Encrypts secrets into a SecretsBox for a recipient.
+/// Uses X25519 for key exchange and AES-GCM-SIV for encryption.
+/// Includes the sender's public key in the box.
+pub fn encrypt_secrets_box(
+    our_kx_keypair: &KeyExchangeKeyPair,
+    recipient_kx_pk: &PublicKey,
+    signing_keypair: &SigningKeyPair,
+    secrets: &Vec<(SecretId, Vec<u8>, u64)>, // (id, data, expiry)
+) -> Result<SecretsBox, CryptoError> {
+    let shared_secret = our_kx_keypair.diffie_hellman(recipient_kx_pk);
+    let symmetric_key = derive_symmetric_key(&shared_secret);
+
+    // Serialize secrets using ciborium
+    let mut payload = Vec::new();
+    ciborium::into_writer(secrets, &mut payload)
+        .map_err(|e| CryptoError::Serialization(e.to_string()))?;
+
+    // Construct AAD: recipient pubkey + sender pubkey
+    let mut aad = Vec::new();
+    aad.extend_from_slice(recipient_kx_pk.as_bytes());
+    aad.extend_from_slice(our_kx_keypair.public_key().as_bytes());
+
+    // Encrypt: prefix ciphertext with nonce
+    let (nonce, ciphertext) = encrypt_aead(&symmetric_key, &payload, &aad)?;
+    let mut encrypted_payload = nonce;
+    encrypted_payload.extend(ciphertext);
+
+    // Sign the encrypted payload (nonce + ciphertext)
+    let signature = signing_keypair.sign(&encrypted_payload);
+
+    // Extract contained IDs
+    let contained_secret_ids: Vec<SecretId> = secrets.iter().map(|(id, _, _)| id.clone()).collect();
+
+    Ok(SecretsBox {
+        encrypted_payload,
+        sender_public_key: our_kx_keypair.public_key().as_bytes().to_vec(),
+        signature: signature.to_bytes().to_vec(),
+        alg: "X25519_AES-GCM-SIV_Ed25519".to_string(),
+        contained_secret_ids,
+    })
+}
+
+/// Decrypts secrets from a SecretsBox.
+/// Verifies the signature using the sender's public key from the box.
+/// Uses X25519 for key exchange and AES-GCM-SIV for decryption.
+pub fn decrypt_secrets_box(
+    our_kx_keypair: &KeyExchangeKeyPair,
+    sender_sig_pk: &VerifyingKey,
+    secrets_box: &SecretsBox,
+) -> Result<Vec<(SecretId, Vec<u8>, u64)>, CryptoError> {
+    if secrets_box.alg != "X25519_AES-GCM-SIV_Ed25519" {
+        return Err(CryptoError::OperationFailed(format!(
+            "Unsupported SecretsBox algorithm: {}",
+            secrets_box.alg
+        )));
+    }
+
+    // Verify signature
+    let signature_bytes: [u8; 64] =
+        secrets_box
+            .signature
+            .as_slice()
+            .try_into()
+            .map_err(|_| CryptoError::InvalidKeyLength {
+                expected: 64,
+                got: secrets_box.signature.len(),
+            })?;
+    let signature = Signature::from_bytes(&signature_bytes);
+    sender_sig_pk
+        .verify_strict(&secrets_box.encrypted_payload, &signature)
+        .map_err(|_| CryptoError::InvalidSignature)?;
+
+    // Extract sender's KX public key
+    let sender_kx_pk_bytes: [u8; 32] = secrets_box
+        .sender_public_key
+        .as_slice()
+        .try_into()
+        .map_err(|_| CryptoError::InvalidKeyLength {
+            expected: 32,
+            got: secrets_box.sender_public_key.len(),
+        })?;
+    let sender_kx_pk = PublicKey::from(sender_kx_pk_bytes);
+
+    // Derive key
+    let shared_secret = our_kx_keypair.diffie_hellman(&sender_kx_pk);
+    let symmetric_key = derive_symmetric_key(&shared_secret);
+
+    // Extract nonce and ciphertext
+    if secrets_box.encrypted_payload.len() < AES_NONCE_SIZE {
+        return Err(CryptoError::OperationFailed(
+            "Encrypted payload too short".to_string(),
+        ));
+    }
+    let (nonce, ciphertext) = secrets_box.encrypted_payload.split_at(AES_NONCE_SIZE);
+
+    // Construct AAD: our pubkey + sender pubkey
+    let mut aad = Vec::new();
+    aad.extend_from_slice(our_kx_keypair.public_key().as_bytes());
+    aad.extend_from_slice(sender_kx_pk.as_bytes());
+
+    // Decrypt
+    let plaintext = decrypt_aead(&symmetric_key, nonce, ciphertext, &aad)?;
+
+    // Deserialize secrets
+    let secrets: Vec<(SecretId, Vec<u8>, u64)> = ciborium::from_reader(plaintext.as_slice())
+        .map_err(|e| CryptoError::Deserialization(e.to_string()))?;
+
+    Ok(secrets)
+}
+
+/// Generates a dummy attestation report. In a real TEE, this would query the hardware.
+pub fn generate_attestation(ephemeral_kx_pk: &PublicKey, user_data: Vec<u8>) -> AttestationReport {
+    // TODO: Integrate with actual TEE attestation mechanism
+    AttestationReport {
+        ephemeral_public_key: ephemeral_kx_pk.as_bytes().to_vec(),
+        block_hashes: vec![b"dummy_block_hash".to_vec()], // Placeholder
+        user_data,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{Address, U256};
+
+    #[test]
+    fn test_key_exchange_aead() {
+        let alice_kx = KeyExchangeKeyPair::generate();
+        let bob_kx = KeyExchangeKeyPair::generate();
+
+        let alice_shared = alice_kx.diffie_hellman(bob_kx.public_key());
+        let bob_shared = bob_kx.diffie_hellman(alice_kx.public_key());
+
+        assert_eq!(alice_shared.as_bytes(), bob_shared.as_bytes());
+
+        let alice_key = derive_symmetric_key(&alice_shared);
+        let bob_key = derive_symmetric_key(&bob_shared);
+        assert_eq!(alice_key, bob_key);
+
+        let plaintext = b"Hello, secure world!";
+        let aad = b"additional_authenticated_data";
+
+        let (nonce, ciphertext) = encrypt_aead(&alice_key, plaintext, aad).unwrap();
+        let decrypted = decrypt_aead(&bob_key, &nonce, &ciphertext, aad).unwrap();
+
+        assert_eq!(plaintext.to_vec(), decrypted);
+
+        // Test tampering with ciphertext
+        let mut tampered_ciphertext = ciphertext.clone();
+        tampered_ciphertext[0] ^= 1;
+        let decrypt_err = decrypt_aead(&bob_key, &nonce, &tampered_ciphertext, aad);
+        assert!(decrypt_err.is_err());
+
+        // Test tampering with AAD
+        let tampered_aad = b"tampered_aad";
+        let decrypt_err_aad = decrypt_aead(&bob_key, &nonce, &ciphertext, tampered_aad);
+        assert!(decrypt_err_aad.is_err());
+    }
+
+    #[test]
+    fn test_signing() {
+        let keypair = SigningKeyPair::generate();
+        let message = b"Sign this message";
+        let signature = keypair.sign(message);
+        assert!(
+            keypair
+                .public_key()
+                .verify_strict(message, &signature)
+                .is_ok()
+        );
+
+        // Test wrong message
+        let wrong_message = b"Don't sign this";
+        assert!(
+            keypair
+                .public_key()
+                .verify_strict(wrong_message, &signature)
+                .is_err()
+        );
+
+        // Test wrong key
+        let other_keypair = SigningKeyPair::generate();
+        assert!(
+            other_keypair
+                .public_key()
+                .verify_strict(message, &signature)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_secrets_box_roundtrip() {
+        let sender_kx = KeyExchangeKeyPair::generate();
+        let sender_sig = SigningKeyPair::generate();
+        let recipient_kx = KeyExchangeKeyPair::generate();
+        let recipient_sig = SigningKeyPair::generate(); // Not used for decrypt, but needed for symmetry
+
+        let secret_id1 = SecretId {
+            chain_id: 1,
+            identity_address: Address::random(),
+            identity_id: U256::from(123),
+        };
+        let secret_id2 = SecretId {
+            chain_id: 5,
+            identity_address: Address::random(),
+            identity_id: U256::from(456),
+        };
+        let secrets_to_send = vec![
+            (secret_id1.clone(), b"secret_data_1".to_vec(), 1000),
+            (secret_id2.clone(), b"secret_data_2".to_vec(), 2000),
+        ];
+
+        // Sender encrypts
+        let secrets_box = encrypt_secrets_box(
+            &sender_kx,
+            recipient_kx.public_key(),
+            &sender_sig,
+            &secrets_to_send,
+        )
+        .unwrap();
+
+        assert_eq!(secrets_box.contained_secret_ids.len(), 2);
+        assert!(secrets_box.contained_secret_ids.contains(&secret_id1));
+        assert!(secrets_box.contained_secret_ids.contains(&secret_id2));
+        assert_eq!(secrets_box.alg, "X25519_AES-GCM-SIV_Ed25519");
+
+        // Recipient decrypts
+        let decrypted_secrets = decrypt_secrets_box(
+            &recipient_kx,            // Recipient uses their KX private key
+            &sender_sig.public_key(), // Recipient uses sender's SIG public key
+            &secrets_box,
+        )
+        .unwrap();
+
+        assert_eq!(secrets_to_send, decrypted_secrets);
+
+        // Test decryption failure with wrong recipient key
+        let wrong_recipient_kx = KeyExchangeKeyPair::generate();
+        let decrypt_err =
+            decrypt_secrets_box(&wrong_recipient_kx, &sender_sig.public_key(), &secrets_box);
+        assert!(decrypt_err.is_err());
+        assert!(matches!(
+            decrypt_err.unwrap_err(),
+            CryptoError::OperationFailed(_)
+        )); // AEAD decrypt fails
+
+        // Test decryption failure with wrong sender signing key
+        let wrong_sender_sig = SigningKeyPair::generate();
+        let decrypt_err_sig =
+            decrypt_secrets_box(&recipient_kx, &wrong_sender_sig.public_key(), &secrets_box);
+        assert!(decrypt_err_sig.is_err());
+        assert!(matches!(
+            decrypt_err_sig.unwrap_err(),
+            CryptoError::InvalidSignature
+        ));
+    }
+
+    #[test]
+    fn test_keypair_serialization() {
+        let kx_orig = KeyExchangeKeyPair::generate();
+        let kx_bytes = kx_orig.to_bytes();
+        let kx_recon = KeyExchangeKeyPair::from_bytes(&kx_bytes).unwrap();
+        assert_eq!(kx_orig.public_key(), kx_recon.public_key());
+        assert_eq!(
+            kx_orig.secret.to_bytes(),
+            kx_recon.secret.to_bytes() // Compare secrets directly
+        );
+
+        let sig_orig = SigningKeyPair::generate();
+        let sig_bytes = sig_orig.to_bytes();
+        let sig_recon = SigningKeyPair::from_bytes(&sig_bytes).unwrap();
+        assert_eq!(sig_orig.public_key(), sig_recon.public_key());
+        assert_eq!(
+            sig_orig.signing_key.to_bytes(),
+            sig_recon.signing_key.to_bytes() // Compare secrets directly
+        );
     }
 }

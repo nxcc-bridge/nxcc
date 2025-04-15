@@ -55,7 +55,7 @@ impl PolicyManager {
         if let Some(path) = &disk_cache_path {
             tokio::fs::create_dir_all(path)
                 .await
-                .map_err(|e| AppError::Io(e))?;
+                .map_err(AppError::Io)?;
             info!("Using policy disk cache at: {}", path.display());
         } else {
             info!("Policy disk cache disabled.");

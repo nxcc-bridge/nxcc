@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use interface::{
     proto::daemon::{GetSecretsRequest, GetSecretsResponse, secrets_server::Secrets},
-    types::{EnvReport, SecretId, SecretRequest, SecretsBox},
+    types::{EnvReport, FromProto as _, IntoProto as _, SecretId, SecretRequest, SecretsBox},
 };
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, info};

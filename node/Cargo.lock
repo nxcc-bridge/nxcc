@@ -313,6 +313,7 @@ dependencies = [
  "const-hex",
  "derive_more 2.0.1",
  "foldhash",
+ "getrandom 0.3.2",
  "hashbrown 0.15.2",
  "indexmap 2.9.0",
  "itoa",
@@ -1811,6 +1812,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "115531babc129696a58c64a4fef0a8bf9e9698629fb97e9e40767d235cfbcd53"
 dependencies = [
  "pkcs8",
+ "serde",
  "signature",
 ]
 
@@ -1863,15 +1865,19 @@ name = "enclave"
 version = "0.1.0"
 dependencies = [
  "aes-gcm-siv",
+ "alloy-primitives",
+ "chrono",
  "ciborium",
  "ed25519-dalek",
  "futures",
  "hex",
  "interface",
- "rand 0.9.0",
+ "once_cell",
+ "rand 0.8.5",
  "rand_core 0.6.4",
- "rand_core 0.9.3",
  "serde",
+ "sha2",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
  "tokio-vsock",
@@ -1879,6 +1885,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "x25519-dalek",
+ "zeroize",
 ]
 
 [[package]]
@@ -4683,6 +4690,9 @@ name = "rustc-hash"
 version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "357703d41365b4b27c590e3ed91eabb1b663f07c4c084095e60cbed4362dff0d"
+dependencies = [
+ "rand 0.8.5",
+]
 
 [[package]]
 name = "rustc-hex"

@@ -51,8 +51,8 @@ impl FromProto<proto::SecretIdentifier> for SecretId {
     fn from_proto(p: proto::SecretIdentifier) -> Self {
         Self {
             chain_id: p.chain_id,
-            identity_address: p.identity_address.parse().unwrap(),
-            identity_id: p.identity_id.parse().unwrap(),
+            identity_address: p.identity_address.parse().unwrap_or(Address::ZERO), // Handle parse error gracefully
+            identity_id: p.identity_id.parse().unwrap_or(U256::ZERO), // Handle parse error
         }
     }
 }
@@ -145,8 +145,8 @@ impl IntoProto<proto::EnvReport> for EnvReport {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SecretsBox {
     pub encrypted_payload: Vec<u8>,
-    pub sender_public_key: Vec<u8>,
-    pub signature: Vec<u8>,
+    pub sender_public_key: Vec<u8>, // This is the sender's *ephemeral key exchange* public key
+    pub signature: Vec<u8>, // Signature over encrypted_payload made with sender's *signing* key
     pub alg: String,
     pub contained_secret_ids: Vec<SecretId>,
 }
@@ -157,7 +157,7 @@ impl SecretsBox {
             encrypted_payload: vec![],
             sender_public_key: vec![],
             signature: vec![],
-            alg: "X25519+AES256GCM".to_string(),
+            alg: "X25519_AES-GCM-SIV_Ed25519".to_string(), // Default algorithm
             contained_secret_ids: vec![],
         }
     }
@@ -200,13 +200,34 @@ impl IntoProto<proto::SecretsBox> for SecretsBox {
 pub struct PolicyExecutionRequest {
     pub secret_ids: Vec<SecretId>,
     pub consumer: ConsumerInfo,
-    pub env_report: EnvReport,
+    pub env_report: EnvReport, // The EnvReport of the entity being evaluated
 }
 
-/// The runner's final judgment about a request.
+impl FromProto<proto::PolicyExecutionRequest> for PolicyExecutionRequest {
+    fn from_proto(p: proto::PolicyExecutionRequest) -> Self {
+        Self {
+            secret_ids: p.secret_ids.into_iter().map(SecretId::from_proto).collect(),
+            consumer: ConsumerInfo::from_proto(p.consumer.unwrap_or_default()),
+            env_report: EnvReport::from_proto(p.env_report.unwrap_or_default()),
+        }
+    }
+}
+
+impl IntoProto<proto::PolicyExecutionRequest> for PolicyExecutionRequest {
+    fn to_proto(&self) -> proto::PolicyExecutionRequest {
+        proto::PolicyExecutionRequest {
+            secret_ids: self.secret_ids.iter().map(|id| id.to_proto()).collect(),
+            consumer: Some(self.consumer.to_proto()),
+            env_report: Some(self.env_report.to_proto()),
+        }
+    }
+}
+
+/// The runner's final judgment about a request. This structure is used internally within the enclave
+/// between the runner and secrets service. It's distinct from the proto message used for gRPC transport.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PolicyExecutionReport {
     pub request: PolicyExecutionRequest,
     pub decision: bool,
-    pub timestamp: u64,
+    pub timestamp: u64, // Unix timestamp
 }

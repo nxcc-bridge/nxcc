@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use tonic::transport::Server;
 use tracing::info;
 
@@ -13,8 +14,13 @@ use interface::proto::enclave::{
 };
 
 pub async fn start_grpc_server(config: &EnclaveConfig) -> Result<(), Box<dyn std::error::Error>> {
-    let secrets = Secrets::new();
-    let runner_svc = RunnerService::new(secrets.clone());
+    // Instantiate shared services
+    let secrets_service = Secrets::new(); // Arc<Secrets>
+    let runner_service = Arc::new(RunnerService::new(secrets_service.clone())); // Arc<RunnerService>
+
+    // Instantiate gRPC service wrappers
+    let secrets_grpc = EnclaveSecretsService::new(secrets_service); // Takes Arc<Secrets>
+    let runner_grpc = EnclaveRunnerService::new(runner_service); // Takes Arc<RunnerService>
 
     match config.mode {
         "vsock" => {
@@ -28,10 +34,8 @@ pub async fn start_grpc_server(config: &EnclaveConfig) -> Result<(), Box<dyn std
             ))?;
 
             Server::builder()
-                .add_service(EnclaveSecretsServer::new(EnclaveSecretsService::new(
-                    secrets,
-                )))
-                .add_service(RunnerServer::new(EnclaveRunnerService::new(runner_svc)))
+                .add_service(EnclaveSecretsServer::new(secrets_grpc))
+                .add_service(RunnerServer::new(runner_grpc))
                 .serve_with_incoming(listener.incoming())
                 .await?;
         }
@@ -39,25 +43,47 @@ pub async fn start_grpc_server(config: &EnclaveConfig) -> Result<(), Box<dyn std
             info!("Enclave gRPC listening on UDS: {}", config.uds_path);
             #[cfg(unix)]
             {
-                use std::path::Path;
-                use tokio::net::UnixListener;
+                use std::{io::ErrorKind, path::Path};
+                use tokio::net::{UnixListener, UnixStream};
                 use tokio_stream::wrappers::UnixListenerStream;
 
                 let path = Path::new(config.uds_path);
                 if path.exists() {
-                    let _ = std::fs::remove_file(path);
+                    // Attempt to connect to check if it's active
+                    match UnixStream::connect(path).await {
+                        Ok(_) => {
+                            return Err(format!(
+                                "Enclave UDS {} already in use by a running server.",
+                                config.uds_path
+                            )
+                            .into());
+                        }
+                        Err(e) if e.kind() == ErrorKind::ConnectionRefused => {
+                            // Socket exists but server isn't running, remove it
+                            info!("Removing stale UDS file: {}", config.uds_path);
+                            std::fs::remove_file(path)?;
+                        }
+                        Err(e) => {
+                            return Err(format!(
+                                "Error checking existing UDS {}: {}",
+                                config.uds_path, e
+                            )
+                            .into());
+                        }
+                    }
                 }
 
                 let uds_listener = UnixListener::bind(path)?;
                 let incoming = UnixListenerStream::new(uds_listener);
 
                 Server::builder()
-                    .add_service(EnclaveSecretsServer::new(EnclaveSecretsService::new(
-                        secrets,
-                    )))
-                    .add_service(RunnerServer::new(EnclaveRunnerService::new(runner_svc)))
+                    .add_service(EnclaveSecretsServer::new(secrets_grpc))
+                    .add_service(RunnerServer::new(runner_grpc))
                     .serve_with_incoming(incoming)
                     .await?;
+
+                // Clean up UDS file on shutdown (best effort)
+                let _ = std::fs::remove_file(path);
             }
             #[cfg(not(unix))]
             {

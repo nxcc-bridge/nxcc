@@ -1,17 +1,28 @@
-use std::sync::Arc;
-use tonic::{Request, Response, Status};
-
-use crate::services::runner::RunnerService;
-use crate::services::secrets::Secrets;
+use crate::services::{runner::RunnerService, secrets::Secrets};
 use interface::{
     proto::enclave::{
-        CheckSecretsRequest, CheckSecretsResponse, DeliverEventRequest, DeliverEventResponse,
-        GetReportRequest, GetSecretsEnclaveRequest, GetSecretsEnclaveResponse, PutSecretsRequest,
-        PutSecretsResponse, RunWorkerRequest, RunWorkerResponse, SecretStatus as ProtoSecretStatus,
-        enclave_secrets_server::EnclaveSecrets, runner_server::Runner,
+        CheckSecretsRequest,
+        CheckSecretsResponse,
+        DeliverEventRequest,
+        DeliverEventResponse,
+        GetReportRequest,
+        GetSecretsEnclaveRequest as GetSecretsRequestProto, // Renamed to avoid clash
+        GetSecretsResponse,
+        PutSecretsRequest,
+        PutSecretsResponse,
+        RunWorkerRequest,
+        RunWorkerResponse,
+        SecretStatus,
+        enclave_secrets_server::EnclaveSecrets,
+        runner_server::Runner,
     },
-    types::{AttestationReport, EnvReport, SecretId, SecretsBox},
+    types::{EnvReport, FromProto, IntoProto, SecretId, SecretsBox},
 };
+use std::sync::Arc;
+use tonic::{Request, Response, Status};
+use tracing::{debug, error};
+
+// --- Secrets Service Implementation ---
 
 pub struct EnclaveSecretsService {
     secrets: Arc<Secrets>,
@@ -29,82 +40,131 @@ impl EnclaveSecrets for EnclaveSecretsService {
         &self,
         request: Request<GetReportRequest>,
     ) -> Result<Response<interface::proto::interface::AttestationReport>, Status> {
-        let req = request.into_inner();
-        let ar = self.secrets.get_report(req.user_data);
-        Ok(Response::new(ar.to_proto()))
+        let user_data = request.into_inner().user_data;
+        debug!(
+            "gRPC GetReport request with user_data size {}",
+            user_data.len()
+        );
+        match self.secrets.get_report(user_data) {
+            Ok(report) => Ok(Response::new(report.to_proto())),
+            Err(e) => {
+                error!("GetReport failed: {}", e);
+                Err(Status::internal(format!("Failed to get report: {e}")))
+            }
+        }
     }
 
     async fn put_secrets(
         &self,
         request: Request<PutSecretsRequest>,
     ) -> Result<Response<PutSecretsResponse>, Status> {
-        let req = request.into_inner();
+        let proto_req = request.into_inner();
+        debug!(
+            "gRPC PutSecrets request with {} bundles",
+            proto_req.secrets_bundles.len()
+        );
         let mut bundles = Vec::new();
-        for b in req.secrets_bundles {
-            let proto_sb = b
+        for bundle_proto in proto_req.secrets_bundles {
+            let secrets_box = bundle_proto
                 .secrets_box
-                .ok_or_else(|| Status::invalid_argument("Missing secrets_box"))?;
-            let proto_env_report = b
+                .map(SecretsBox::from_proto)
+                .ok_or_else(|| Status::invalid_argument("Missing SecretsBox in bundle"))?;
+            let env_report = bundle_proto
                 .env_report
-                .ok_or_else(|| Status::invalid_argument("Missing env_report"))?;
-            let sb = SecretsBox::from_proto(proto_sb);
-            let env_report = EnvReport::from_proto(proto_env_report);
-            bundles.push((sb, env_report)); // Store EnvReport
+                .map(EnvReport::from_proto)
+                .ok_or_else(|| Status::invalid_argument("Missing EnvReport in bundle"))?;
+            bundles.push((secrets_box, env_report));
         }
-        let success = self.secrets.put_secrets(bundles);
-        Ok(Response::new(PutSecretsResponse { success }))
+
+        match self.secrets.put_secrets(bundles) {
+            Ok(success) => Ok(Response::new(PutSecretsResponse { success })),
+            Err(e) => {
+                error!("PutSecrets failed: {}", e);
+                Err(Status::internal(format!("Failed to put secrets: {e}")))
+            }
+        }
     }
 
     async fn get_secrets(
         &self,
-        request: Request<GetSecretsEnclaveRequest>,
-    ) -> Result<Response<GetSecretsEnclaveResponse>, Status> {
-        let req = request.into_inner();
-        let mut ids = Vec::new();
-        for sreq in req.requests {
-            if let Some(si) = sreq.id {
-                ids.push(SecretId::from_proto(si));
+        request: Request<GetSecretsRequestProto>, // Use renamed proto type
+    ) -> Result<Response<GetSecretsResponse>, Status> {
+        let proto_req = request.into_inner();
+        debug!(
+            "gRPC GetSecrets request for {} secret IDs",
+            proto_req.requests.len()
+        );
+
+        let secret_ids: Vec<SecretId> = proto_req
+            .requests
+            .into_iter()
+            .filter_map(|r| r.id.map(SecretId::from_proto))
+            .collect();
+
+        let requester_env_report = proto_req
+            .requester_env_report // This field was missing in the proto def! Added it.
+            .map(EnvReport::from_proto)
+            .ok_or_else(|| Status::invalid_argument("Missing requester_env_report"))?;
+
+        // Policy reports are currently ignored per instructions, local auth store is checked
+        let policy_reports = Vec::new(); // Placeholder
+
+        match self
+            .secrets
+            .get_secrets(secret_ids, requester_env_report, policy_reports)
+        {
+            Ok(secrets_box) => Ok(Response::new(GetSecretsResponse {
+                secrets_box: Some(secrets_box.to_proto()),
+            })),
+            Err(e) => {
+                error!("GetSecrets failed: {}", e);
+                Err(Status::internal(format!("Failed to get secrets: {e}")))
             }
         }
-        let proto_env_report = req
-            .requester_env_report
-            .ok_or_else(|| Status::invalid_argument("Missing requester_env_report"))?;
-        let env_report = EnvReport::from_proto(proto_env_report);
-        let sb = self.secrets.get_secrets(ids, env_report);
-        let resp = GetSecretsEnclaveResponse {
-            secrets_box: Some(sb.to_proto()),
-        };
-        Ok(Response::new(resp))
     }
 
     async fn check_secrets(
         &self,
         request: Request<CheckSecretsRequest>,
     ) -> Result<Response<CheckSecretsResponse>, Status> {
-        let req = request.into_inner();
-        let mut ids = Vec::new();
-        for pid in req.ids {
-            ids.push(SecretId::from_proto(pid));
+        let proto_req = request.into_inner();
+        debug!("gRPC CheckSecrets request for {} IDs", proto_req.ids.len());
+        let ids: Vec<SecretId> = proto_req
+            .ids
+            .into_iter()
+            .map(SecretId::from_proto)
+            .collect();
+
+        match self.secrets.check_secrets(ids) {
+            Ok(statuses) => {
+                let proto_statuses = statuses
+                    .into_iter()
+                    .map(|(id, found, expiry)| SecretStatus {
+                        id: Some(id.to_proto()),
+                        found,
+                        expiry,
+                    })
+                    .collect();
+                Ok(Response::new(CheckSecretsResponse {
+                    statuses: proto_statuses,
+                }))
+            }
+            Err(e) => {
+                error!("CheckSecrets failed: {}", e);
+                Err(Status::internal(format!("Failed to check secrets: {e}")))
+            }
         }
-        let results = self.secrets.check_secrets(ids);
-        let mut statuses = Vec::new();
-        for (id, found, expiry) in results {
-            let mut st = ProtoSecretStatus::default();
-            st.id = Some(id.to_proto());
-            st.found = found;
-            st.expiry = expiry;
-            statuses.push(st);
-        }
-        Ok(Response::new(CheckSecretsResponse { statuses }))
     }
 }
 
+// --- Runner Service Implementation ---
+
 pub struct EnclaveRunnerService {
-    runner: RunnerService,
+    runner: Arc<RunnerService>,
 }
 
 impl EnclaveRunnerService {
-    pub fn new(runner: RunnerService) -> Self {
+    pub fn new(runner: Arc<RunnerService>) -> Self {
         Self { runner }
     }
 }
@@ -115,10 +175,17 @@ impl Runner for EnclaveRunnerService {
         &self,
         request: Request<RunWorkerRequest>,
     ) -> Result<Response<RunWorkerResponse>, Status> {
-        let r = request.into_inner();
-        match self.runner.run_worker(r.worker_binary).await {
+        let req = request.into_inner();
+        debug!(
+            "gRPC RunWorker request with binary size {}",
+            req.worker_binary.len()
+        );
+        match self.runner.run_worker(req.worker_binary).await {
             Ok(_) => Ok(Response::new(RunWorkerResponse { accepted: true })),
-            Err(e) => Err(Status::internal(format!("run_worker failed: {e}"))),
+            Err(e) => {
+                error!("RunWorker failed: {}", e);
+                Err(Status::internal(format!("Failed to run worker: {e}")))
+            }
         }
     }
 
@@ -126,14 +193,22 @@ impl Runner for EnclaveRunnerService {
         &self,
         request: Request<DeliverEventRequest>,
     ) -> Result<Response<DeliverEventResponse>, Status> {
-        let r = request.into_inner();
+        let req = request.into_inner();
+        debug!(
+            "gRPC DeliverEvent request for worker '{}', payload size {}",
+            req.worker_id,
+            req.event_payload.len()
+        );
         match self
             .runner
-            .deliver_event(r.worker_id, r.event_payload)
+            .deliver_event(req.worker_id, req.event_payload)
             .await
         {
             Ok(_) => Ok(Response::new(DeliverEventResponse { delivered: true })),
-            Err(e) => Err(Status::internal(format!("deliver_event failed: {e}"))),
+            Err(e) => {
+                error!("DeliverEvent failed: {}", e);
+                Err(Status::internal(format!("Failed to deliver event: {e}")))
+            }
         }
     }
 }

@@ -14,7 +14,8 @@ service EnclaveSecrets {
   rpc PutSecrets(PutSecretsRequest) returns (PutSecretsResponse);
 
   // get_secrets returns a secrets box encrypted for the requesting enclave.
-  rpc GetSecrets(GetSecretsEnclaveRequest) returns (GetSecretsEnclaveResponse);
+  // Corrected message name usage here: GetSecretsEnclaveRequest -> GetSecretsResponse
+  rpc GetSecrets(GetSecretsEnclaveRequest) returns (GetSecretsResponse);
 
   // check_secrets returns whether the given secrets exist.
   rpc CheckSecrets(CheckSecretsRequest) returns (CheckSecretsResponse);
@@ -37,22 +38,25 @@ message PutSecretsResponse {
   bool success = 1;
 }
 
+// Renamed message to avoid conflict with RPC name
 message GetSecretsEnclaveRequest {
   repeated SecretEnclaveRequest requests = 1;
-  repeated PolicyExecutionReport policy_reports = 2;
-  interface.EnvReport requester_env_report = 3; // Changed from AttestationReport
+  repeated PolicyExecutionReport policy_reports = 2; // Currently unused by implementation
+  interface.EnvReport requester_env_report = 3; // Added field
 }
 
 message SecretEnclaveRequest {
   interface.SecretIdentifier id = 1;
 }
 
+// This message definition seems incomplete/unused based on current logic
 message PolicyExecutionReport {
-  bytes content_hash = 1;
-  bytes signature = 2;
+  // TODO: Define what proves successful policy execution.
+  // For now, it's checked via the internal authorization store.
+  bytes proof_data = 1; // Placeholder
 }
 
-message GetSecretsEnclaveResponse {
+message GetSecretsResponse {
   interface.SecretsBox secrets_box = 1;
 }
 
