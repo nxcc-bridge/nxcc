@@ -1,6 +1,16 @@
 use crate::proto::interface as proto;
 use alloy_primitives::{Address, U256};
 
+/// Trait for converting a type to its Protocol Buffers representation
+pub trait IntoProto<P> {
+    fn to_proto(&self) -> P;
+}
+
+/// Trait for converting from a Protocol Buffers representation to a type
+pub trait FromProto<P> {
+    fn from_proto(proto: P) -> Self;
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AttestationReport {
     pub ephemeral_public_key: Vec<u8>,
@@ -8,15 +18,18 @@ pub struct AttestationReport {
     pub user_data: Vec<u8>,
 }
 
-impl AttestationReport {
-    pub fn from_proto(p: proto::AttestationReport) -> Self {
+impl FromProto<proto::AttestationReport> for AttestationReport {
+    fn from_proto(p: proto::AttestationReport) -> Self {
         Self {
             ephemeral_public_key: p.ephemeral_public_key,
             block_hashes: p.block_hashes,
             user_data: p.user_data,
         }
     }
-    pub fn to_proto(&self) -> proto::AttestationReport {
+}
+
+impl IntoProto<proto::AttestationReport> for AttestationReport {
+    fn to_proto(&self) -> proto::AttestationReport {
         let mut out = proto::AttestationReport::default();
         out.ephemeral_public_key = self.ephemeral_public_key.clone();
         out.block_hashes = self.block_hashes.clone();
@@ -34,15 +47,18 @@ pub struct SecretId {
     pub identity_id: U256,
 }
 
-impl SecretId {
-    pub fn from_proto(p: proto::SecretIdentifier) -> Self {
+impl FromProto<proto::SecretIdentifier> for SecretId {
+    fn from_proto(p: proto::SecretIdentifier) -> Self {
         Self {
             chain_id: p.chain_id,
             identity_address: p.identity_address.parse().unwrap(),
             identity_id: p.identity_id.parse().unwrap(),
         }
     }
-    pub fn to_proto(&self) -> proto::SecretIdentifier {
+}
+
+impl IntoProto<proto::SecretIdentifier> for SecretId {
+    fn to_proto(&self) -> proto::SecretIdentifier {
         let mut out = proto::SecretIdentifier::default();
         out.chain_id = self.chain_id;
         out.identity_address = format!("{:#x}", self.identity_address);
@@ -57,14 +73,17 @@ pub struct ConsumerInfo {
     pub signature: Vec<u8>,
 }
 
-impl ConsumerInfo {
-    pub fn from_proto(p: proto::ConsumerInfo) -> Self {
+impl FromProto<proto::ConsumerInfo> for ConsumerInfo {
+    fn from_proto(p: proto::ConsumerInfo) -> Self {
         Self {
             code_hash: p.code_hash,
             signature: p.signature,
         }
     }
-    pub fn to_proto(&self) -> proto::ConsumerInfo {
+}
+
+impl IntoProto<proto::ConsumerInfo> for ConsumerInfo {
+    fn to_proto(&self) -> proto::ConsumerInfo {
         let mut out = proto::ConsumerInfo::default();
         out.code_hash = self.code_hash.clone();
         out.signature = self.signature.clone();
@@ -78,14 +97,17 @@ pub struct SecretRequest {
     pub consumer: ConsumerInfo,
 }
 
-impl SecretRequest {
-    pub fn from_proto(p: proto::SecretRequest) -> Self {
+impl FromProto<proto::SecretRequest> for SecretRequest {
+    fn from_proto(p: proto::SecretRequest) -> Self {
         Self {
             secret_id: SecretId::from_proto(p.secret_id.unwrap_or_default()),
             consumer: ConsumerInfo::from_proto(p.consumer.unwrap_or_default()),
         }
     }
-    pub fn to_proto(&self) -> proto::SecretRequest {
+}
+
+impl IntoProto<proto::SecretRequest> for SecretRequest {
+    fn to_proto(&self) -> proto::SecretRequest {
         let mut out = proto::SecretRequest::default();
         out.secret_id = Some(self.secret_id.to_proto());
         out.consumer = Some(self.consumer.to_proto());
@@ -100,15 +122,18 @@ pub struct EnvReport {
     pub node_id: String,
 }
 
-impl EnvReport {
-    pub fn from_proto(p: proto::EnvReport) -> Self {
+impl FromProto<proto::EnvReport> for EnvReport {
+    fn from_proto(p: proto::EnvReport) -> Self {
         Self {
             attestation: AttestationReport::from_proto(p.attestation.unwrap_or_default()),
             operator_signature: p.operator_signature,
             node_id: p.node_id,
         }
     }
-    pub fn to_proto(&self) -> proto::EnvReport {
+}
+
+impl IntoProto<proto::EnvReport> for EnvReport {
+    fn to_proto(&self) -> proto::EnvReport {
         let mut out = proto::EnvReport::default();
         out.attestation = Some(self.attestation.to_proto());
         out.operator_signature = self.operator_signature.clone();
@@ -136,8 +161,10 @@ impl SecretsBox {
             contained_secret_ids: vec![],
         }
     }
+}
 
-    pub fn from_proto(p: proto::SecretsBox) -> Self {
+impl FromProto<proto::SecretsBox> for SecretsBox {
+    fn from_proto(p: proto::SecretsBox) -> Self {
         Self {
             encrypted_payload: p.encrypted_payload,
             sender_public_key: p.sender_public_key,
@@ -150,8 +177,10 @@ impl SecretsBox {
                 .collect(),
         }
     }
+}
 
-    pub fn to_proto(&self) -> proto::SecretsBox {
+impl IntoProto<proto::SecretsBox> for SecretsBox {
+    fn to_proto(&self) -> proto::SecretsBox {
         let mut out = proto::SecretsBox::default();
         out.encrypted_payload = self.encrypted_payload.clone();
         out.sender_public_key = self.sender_public_key.clone();
@@ -174,7 +203,7 @@ pub struct PolicyExecutionRequest {
     pub env_report: EnvReport,
 }
 
-/// The runner’s final judgment about a request.
+/// The runner's final judgment about a request.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PolicyExecutionReport {
     pub request: PolicyExecutionRequest,
