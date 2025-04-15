@@ -1,11 +1,8 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
-use alloy_primitives::{Address, U256};
 use interface::{
-    proto::daemon::{
-        GetSecretsRequest, GetSecretsResponse, SecretRequests, secrets_server::Secrets,
-    },
-    types::{SecretId, SecretRequest, SecretRequesterInfo, SecretsBox},
+    proto::daemon::{GetSecretsRequest, GetSecretsResponse, secrets_server::Secrets},
+    types::{EnvReport, SecretId, SecretRequest, SecretsBox},
 };
 use tonic::{Request, Response, Status};
 use tracing::debug;
@@ -13,11 +10,11 @@ use tracing::debug;
 use crate::services::secrets::SecretsService;
 
 pub struct SecretsDebugGrpc {
-    secrets_service: Arc<SecretsService>,
+    secrets_service: std::sync::Arc<SecretsService>,
 }
 
 impl SecretsDebugGrpc {
-    pub fn new(secrets_service: Arc<SecretsService>) -> Self {
+    pub fn new(secrets_service: std::sync::Arc<SecretsService>) -> Self {
         Self { secrets_service }
     }
 }
@@ -30,43 +27,33 @@ impl Secrets for SecretsDebugGrpc {
     ) -> Result<Response<GetSecretsResponse>, Status> {
         let req = request.into_inner();
         debug!(
-            "Received gRPC get_secrets with {} items",
+            "Received gRPC get_secrets with {} request items",
             req.secret_requests.len()
         );
 
-        let Some(requester_info_proto) = req.requester_info else {
-            return Err(Status::invalid_argument("Missing requester info"));
-        };
-        let requester_info = SecretRequesterInfo::from_proto(requester_info_proto);
+        let env_proto = req
+            .env_report
+            .ok_or_else(|| Status::invalid_argument("Missing EnvReport"))?;
+        let env_report = EnvReport::from_proto(env_proto);
 
-        let mut secret_requests = HashMap::new();
-        for sr in req.secret_requests {
-            let id_proto = sr
-                .id
-                .ok_or_else(|| Status::invalid_argument("Missing SecretIdentifier"))?;
-            let domain_id = SecretId::from_proto(id_proto);
-
-            let requests: Vec<SecretRequest> = sr
-                .requests
-                .into_iter()
-                .map(SecretRequest::from_proto)
-                .collect();
-
-            secret_requests.insert(domain_id, requests);
+        let mut grouped = HashMap::new();
+        for proto_req in req.secret_requests {
+            let sr = SecretRequest::from_proto(proto_req);
+            grouped
+                .entry(sr.secret_id.clone())
+                .or_insert_with(Vec::new)
+                .push(sr);
         }
 
         let secrets_box: SecretsBox = self
             .secrets_service
-            .get_secrets(secret_requests, requester_info)
+            .get_secrets(grouped, env_report)
             .await
-            .map_err(|e| Status::internal(format!("{:?}", e)))?;
+            .map_err(|e| Status::internal(format!("SecretsService error: {:?}", e)))?;
 
-        let proto_box = secrets_box.to_proto();
-
-        let response = GetSecretsResponse {
-            secrets_box: Some(proto_box),
+        let resp = GetSecretsResponse {
+            secrets_box: Some(secrets_box.to_proto()),
         };
-
-        Ok(Response::new(response))
+        Ok(Response::new(resp))
     }
 }

@@ -6,7 +6,7 @@ use std::{
 };
 
 use futures::{StreamExt, channel::mpsc};
-use interface::types::{SecretId, SecretRequest, SecretRequesterInfo, SecretsBox};
+use interface::types::{EnvReport, SecretId, SecretRequest, SecretsBox};
 use libp2p::{
     Multiaddr, Swarm,
     core::multiaddr::Protocol,
@@ -25,16 +25,15 @@ pub enum NotifierMessage {
     Response(String),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum SecretsMessage {
     PublishSecretsRequest {
         request_id: u64,
         secret_requests: BTreeMap<SecretId, Vec<SecretRequest>>,
-        requester_info: SecretRequesterInfo,
+        env_report: EnvReport,
     },
     PublishSecretsResponse {
         request_id: u64,
-        remaining_requests: BTreeMap<SecretId, Vec<SecretRequest>>,
         secrets_box: SecretsBox,
     },
 }
@@ -44,11 +43,10 @@ enum GossipMessage {
     SecretBatchRequest {
         request_id: u64,
         secret_requests: BTreeMap<SecretId, Vec<SecretRequest>>,
-        requester_info: SecretRequesterInfo,
+        env_report: EnvReport,
     },
     SecretBatchResponse {
         request_id: u64,
-        remaining_requests: BTreeMap<SecretId, Vec<SecretRequest>>,
         secrets_box: SecretsBox,
     },
     Notification {
@@ -418,12 +416,12 @@ async fn handle_gossip_message(
             GossipMessage::SecretBatchRequest {
                 request_id,
                 secret_requests,
-                requester_info,
+                env_report,
             } => {
                 handle_secret_batch_request(
                     request_id,
                     secret_requests,
-                    requester_info,
+                    env_report,
                     propagation_source,
                     swarm,
                     topic,
@@ -433,7 +431,6 @@ async fn handle_gossip_message(
             }
             GossipMessage::SecretBatchResponse {
                 request_id,
-                remaining_requests,
                 secrets_box,
             } => {
                 info!("Received SecretBatchResponse for request_id={request_id}");
@@ -460,7 +457,7 @@ async fn handle_gossip_message(
 async fn handle_secret_batch_request(
     request_id: u64,
     secret_requests: BTreeMap<SecretId, Vec<SecretRequest>>,
-    requester_info: SecretRequesterInfo,
+    env_report: EnvReport,
     propagation_source: libp2p::PeerId,
     swarm: &mut Swarm<AppBehaviour>,
     topic: &gossipsub::IdentTopic,
@@ -476,14 +473,13 @@ async fn handle_secret_batch_request(
         .handle_incoming_secret_batch_request(
             request_id,
             secret_requests.clone(),
-            requester_info.clone(),
+            env_report.clone(),
         )
         .await;
 
     info!("Sending SecretBatchResponse for request_id={request_id}");
     let response = GossipMessage::SecretBatchResponse {
         request_id,
-        remaining_requests: Default::default(),
         secrets_box,
     };
 
@@ -557,7 +553,7 @@ async fn handle_secrets_message(
         SecretsMessage::PublishSecretsRequest {
             request_id,
             secret_requests,
-            requester_info,
+            env_report,
         } => {
             debug!(
                 "Publishing secret batch request {request_id}: {} items",
@@ -567,24 +563,19 @@ async fn handle_secrets_message(
             let gossip = GossipMessage::SecretBatchRequest {
                 request_id,
                 secret_requests,
-                requester_info,
+                env_report,
             };
 
             publish_message(swarm, topic, &gossip)?;
         }
         SecretsMessage::PublishSecretsResponse {
             request_id,
-            remaining_requests,
             secrets_box,
         } => {
-            debug!(
-                "Publishing secret batch response {request_id}: {} remaining items",
-                remaining_requests.len()
-            );
+            debug!("Publishing secret batch response {request_id}",);
 
             let gossip = GossipMessage::SecretBatchResponse {
                 request_id,
-                remaining_requests,
                 secrets_box,
             };
 

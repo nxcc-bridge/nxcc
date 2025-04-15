@@ -2,13 +2,19 @@ use tonic::transport::Server;
 use tracing::info;
 
 use crate::config::EnclaveConfig;
-use crate::services::{grpc::EnclaveSecretsService, runner::RunnerService, secrets::Secrets};
+use crate::services::{
+    grpc::{EnclaveRunnerService, EnclaveSecretsService},
+    runner::RunnerService,
+    secrets::Secrets,
+};
+
 use interface::proto::enclave::{
     enclave_secrets_server::EnclaveSecretsServer, runner_server::RunnerServer,
 };
 
 pub async fn start_grpc_server(config: &EnclaveConfig) -> Result<(), Box<dyn std::error::Error>> {
-    let enclave = Secrets::new();
+    let secrets = Secrets::new();
+    let runner_svc = RunnerService::new(secrets.clone());
 
     match config.mode {
         "vsock" => {
@@ -22,10 +28,10 @@ pub async fn start_grpc_server(config: &EnclaveConfig) -> Result<(), Box<dyn std
             ))?;
 
             Server::builder()
-                .add_service(EnclaveSecretsServer::new(EnclaveSecretsService {
-                    enclave: enclave.clone(),
-                }))
-                .add_service(RunnerServer::new(RunnerService))
+                .add_service(EnclaveSecretsServer::new(EnclaveSecretsService::new(
+                    secrets,
+                )))
+                .add_service(RunnerServer::new(EnclaveRunnerService::new(runner_svc)))
                 .serve_with_incoming(listener.incoming())
                 .await?;
         }
@@ -46,22 +52,21 @@ pub async fn start_grpc_server(config: &EnclaveConfig) -> Result<(), Box<dyn std
                 let incoming = UnixListenerStream::new(uds_listener);
 
                 Server::builder()
-                    .add_service(EnclaveSecretsServer::new(EnclaveSecretsService {
-                        enclave: enclave.clone(),
-                    }))
-                    .add_service(RunnerServer::new(RunnerService))
+                    .add_service(EnclaveSecretsServer::new(EnclaveSecretsService::new(
+                        secrets,
+                    )))
+                    .add_service(RunnerServer::new(EnclaveRunnerService::new(runner_svc)))
                     .serve_with_incoming(incoming)
                     .await?;
             }
             #[cfg(not(unix))]
             {
-                unimplemented!("UDS is not supported on non-UNIX platforms");
+                unimplemented!("UDS not supported on this platform");
             }
         }
         other => {
             return Err(format!("Invalid enclave gRPC mode: {}", other).into());
         }
     }
-
     Ok(())
 }

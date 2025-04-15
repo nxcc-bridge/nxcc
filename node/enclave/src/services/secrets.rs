@@ -1,49 +1,40 @@
-use crate::crypto::{Aead, EphemeralSecret, Signer};
-use ed25519_dalek::Signature;
-use interface::types::{AttestationReport, SecretId, SecretsBox};
-use serde::{Deserialize, Serialize};
+use ciborium::{de::from_reader, ser::into_writer};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     sync::{Arc, Mutex},
 };
 
-/// A secret that is stored in plaintext in the enclave.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+use crate::crypto::{Aead, EphemeralSecret, Signer};
+use interface::types::{AttestationReport, PolicyExecutionReport, SecretId, SecretsBox};
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Secret {
     pub id: SecretId,
     pub data: Vec<u8>,
     pub expiry: u64,
 }
 
-#[derive(Debug)]
-pub enum SecretError {
-    ReconstructionFailed,
+/// Authorized ephemeral requests.
+struct AuthEntry {
+    report: PolicyExecutionReport,
+    created_at: u64,
 }
 
-/// Reconstructs a single secret from multiple provided shares.
-pub fn reconstruct_secret(shares: Vec<Secret>) -> Result<Secret, SecretError> {
-    let first = shares.get(0).ok_or(SecretError::ReconstructionFailed)?;
-    for share in &shares[1..] {
-        if share.data != first.data || share.expiry != first.expiry {
-            return Err(SecretError::ReconstructionFailed);
-        }
-    }
-    Ok(first.clone())
-}
-
-/// The enclave's secrets manager.
+/// Holds secrets and ephemeral policy authorizations.
 pub struct Secrets {
     store: Mutex<HashMap<SecretId, Secret>>,
-    x25519_secret: EphemeralSecret,
+    authz: Mutex<VecDeque<AuthEntry>>,
     signer: Signer,
+    x25519_secret: EphemeralSecret,
 }
 
 impl Secrets {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             store: Mutex::new(HashMap::new()),
-            x25519_secret: EphemeralSecret::new(),
+            authz: Mutex::new(VecDeque::new()),
             signer: Signer::new(),
+            x25519_secret: EphemeralSecret::new(),
         })
     }
 
@@ -55,110 +46,184 @@ impl Secrets {
         }
     }
 
-    /// Decrypts and reconstructs secrets from incoming SecretsBoxes.
     pub fn put_secrets(&self, bundles: Vec<(SecretsBox, AttestationReport)>) -> bool {
-        let mut partials_map: HashMap<SecretId, Vec<Secret>> = HashMap::new();
-        for (secrets_box, _) in bundles {
-            let Ok(peer_public) = secrets_box.sender_public_key.as_slice().try_into() else {
-                continue;
+        for (sb, _att) in bundles {
+            let Ok(peer_pub) = sb.sender_public_key.as_slice().try_into() else {
+                return false;
             };
-            let shared_secret = self.x25519_secret.diffie_hellman(&peer_public);
-            let aead = Aead::new(&shared_secret);
-            let Some(plaintext) = aead.decrypt(&secrets_box.encrypted_payload) else {
-                continue;
+            let shared = self.x25519_secret.diffie_hellman(&peer_pub);
+            let aead = Aead::new(&shared);
+            let Some(plaintext) = aead.decrypt(&sb.encrypted_payload) else {
+                return false;
             };
-            let Ok(secrets_list) = ciborium::de::from_reader::<Vec<Secret>, _>(&plaintext[..])
-            else {
-                continue;
+            let items: Vec<Secret> = match from_reader(plaintext.as_slice()) {
+                Ok(v) => v,
+                Err(_) => return false,
             };
-            for secret_part in secrets_list {
-                partials_map
-                    .entry(secret_part.id.clone())
-                    .or_default()
-                    .push(secret_part);
-            }
-        }
-
-        let mut guard = self.store.lock().unwrap();
-        for (id, parts) in partials_map {
-            if let Ok(reconstructed) = reconstruct_secret(parts) {
-                guard.insert(id, reconstructed);
+            let mut guard = self.store.lock().unwrap();
+            for s in items {
+                guard.insert(s.id.clone(), s);
             }
         }
         true
     }
 
-    /// Retrieves secrets by ID, encrypts them into a SecretsBox for the requester.
     pub fn get_secrets(
         &self,
         ids: Vec<SecretId>,
-        _policy_reports: Vec<(Vec<u8>, Vec<u8>)>,
-        requester_ar: AttestationReport,
+        _unused: Vec<()>,
+        requester_att: AttestationReport,
     ) -> SecretsBox {
-        if ids.is_empty() {
+        self.expire_auth();
+        let mut needed = ids.clone();
+        if !self.check_authorizations(&mut needed, &requester_att) {
             return SecretsBox::new_empty();
         }
-        let Ok(requester_pub) = requester_ar.ephemeral_public_key.as_slice().try_into() else {
+        let Ok(pk) = requester_att.ephemeral_public_key.as_slice().try_into() else {
             return SecretsBox::new_empty();
         };
-        let shared_secret = self.x25519_secret.diffie_hellman(&requester_pub);
-        let now = current_unix_time();
-        let guard = self.store.lock().unwrap();
-        let mut gathered = Vec::new();
-        for id in ids {
-            if let Some(stored) = guard.get(&id) {
-                if stored.expiry == 0 || stored.expiry > now {
-                    gathered.push(stored.clone());
+        let shared = self.x25519_secret.diffie_hellman(&pk);
+        let mut results = Vec::new();
+        {
+            let st = self.store.lock().unwrap();
+            let now = current_unix_time();
+            for sid in ids {
+                if let Some(sec) = st.get(&sid) {
+                    if sec.expiry == 0 || sec.expiry > now {
+                        results.push(sec.clone());
+                    }
                 }
             }
         }
-        if gathered.is_empty() {
+        if results.is_empty() {
             return SecretsBox::new_empty();
         }
-        let mut plaintext = Vec::new();
-        if ciborium::ser::into_writer(&gathered, &mut plaintext).is_err() {
+
+        // Serialize with ciborium
+        let mut buffer = Vec::new();
+        if let Err(e) = into_writer(&results, &mut buffer) {
             return SecretsBox::new_empty();
         }
-        let aead = Aead::new(&shared_secret);
-        let ciphertext = aead.encrypt(&plaintext);
-        let signature = self.sign_data(&ciphertext);
+        let aead = Aead::new(&shared);
+        let ciphertext = aead.encrypt(&buffer);
+        let sig = self.signer.sign(&ciphertext);
         SecretsBox {
             encrypted_payload: ciphertext,
-            sender_public_key: self.x25519_public_key(),
-            signature,
+            sender_public_key: self.x25519_secret.public_key().to_vec(),
+            signature: sig.to_bytes().to_vec(),
             alg: "X25519+AES256GCM".to_string(),
         }
     }
 
-    /// Checks whether each SecretId is present and not expired.
     pub fn check_secrets(&self, ids: Vec<SecretId>) -> Vec<(SecretId, bool, u64)> {
-        let guard = self.store.lock().unwrap();
         let now = current_unix_time();
+        let st = self.store.lock().unwrap();
         ids.into_iter()
-            .map(|id| {
-                if let Some(stored) = guard.get(&id) {
-                    let found = stored.expiry == 0 || stored.expiry > now;
-                    (id, found, stored.expiry)
+            .map(|sid| {
+                if let Some(sec) = st.get(&sid) {
+                    let valid = sec.expiry == 0 || sec.expiry > now;
+                    (sid, valid, sec.expiry)
                 } else {
-                    (id, false, 0)
+                    (sid, false, 0)
                 }
             })
             .collect()
     }
 
-    fn x25519_public_key(&self) -> Vec<u8> {
-        self.x25519_secret.public_key().to_vec()
+    pub fn store_authorization(&self, report: PolicyExecutionReport) {
+        if !report.decision {
+            return;
+        }
+        let entry = AuthEntry {
+            report,
+            created_at: current_unix_time(),
+        };
+        let mut guard = self.authz.lock().unwrap();
+        guard.push_back(entry);
     }
 
-    fn sign_data(&self, data: &[u8]) -> Vec<u8> {
-        let sig: Signature = self.signer.sign(data);
-        sig.to_bytes().to_vec()
+    fn expire_auth(&self) {
+        const MAX_AGE_SECS: u64 = 60;
+        let now = current_unix_time();
+        let mut guard = self.authz.lock().unwrap();
+        while let Some(front) = guard.front() {
+            if now.saturating_sub(front.created_at) > MAX_AGE_SECS {
+                guard.pop_front();
+            } else {
+                break;
+            }
+        }
+    }
+
+    /// Each secret ID in `needed_ids` must have a valid ephemeral authorization matching
+    /// the requester's ephemeral key. Once matched, that ID is removed from the entry
+    /// so it cannot be reused. Partial leftover secrets remain in the queue.
+    fn check_authorizations(
+        &self,
+        needed_ids: &mut Vec<SecretId>,
+        att: &AttestationReport,
+    ) -> bool {
+        if needed_ids.is_empty() {
+            return true;
+        }
+        let ephemeral_pk = &att.ephemeral_public_key;
+        let mut guard = self.authz.lock().unwrap();
+
+        // Drain all existing entries, check matches, then re-insert leftover parts if any.
+        let old_entries: Vec<AuthEntry> = guard.drain(..).collect();
+        let mut new_entries = Vec::new();
+
+        for entry in old_entries {
+            let rep = &entry.report;
+            if rep.decision
+                && rep.request.env_report.attestation.ephemeral_public_key == *ephemeral_pk
+            {
+                let mut leftover = Vec::new();
+                for sid in &rep.request.secret_ids {
+                    if let Some(pos) = needed_ids.iter().position(|x| x == sid) {
+                        needed_ids.remove(pos);
+                        if needed_ids.is_empty() {
+                            // Re-inject leftover secrets if any remain in this entry
+                            leftover.clear();
+                            break;
+                        }
+                    } else {
+                        leftover.push(sid.clone());
+                    }
+                }
+                if !leftover.is_empty() {
+                    let mut copy = rep.request.clone();
+                    copy.secret_ids = leftover;
+                    new_entries.push(AuthEntry {
+                        report: PolicyExecutionReport {
+                            request: copy,
+                            decision: true,
+                            timestamp: rep.timestamp,
+                        },
+                        created_at: entry.created_at,
+                    });
+                }
+                // If needed_ids is empty, we can reinsert everything else and return success
+                if needed_ids.is_empty() {
+                    // Reinsert leftover entries
+                    for e in new_entries {
+                        guard.push_back(e);
+                    }
+                    return true;
+                }
+            } else {
+                new_entries.push(entry);
+            }
+        }
+        for e in new_entries {
+            guard.push_back(e);
+        }
+        false
     }
 }
 
-/// Returns the current UNIX time in seconds.
 fn current_unix_time() -> u64 {
-    match std::time::SystemTime::now().duration_since(std::time::SystemTime::UNIX_EPOCH) {
+    match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
         Ok(d) => d.as_secs(),
         Err(_) => 0,
     }

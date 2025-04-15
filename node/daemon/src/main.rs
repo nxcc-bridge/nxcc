@@ -9,6 +9,7 @@ mod policy;
 mod services;
 mod web3;
 
+use grpc::enclave_client;
 use tracing::{Level, info};
 use tracing_subscriber::{EnvFilter, fmt::Subscriber};
 
@@ -49,7 +50,17 @@ async fn main() -> anyhow::Result<()> {
     let (secrets_tx, secrets_rx) = futures::channel::mpsc::channel(64);
     let (notifier_tx, notifier_rx) = futures::channel::mpsc::channel(64);
 
-    let secrets_service = SecretsService::new(secrets_tx.clone()).await;
+    let enclave_client =
+        grpc::enclave_client::EnclaveClient::connect_uds("/tmp/enclave_grpc.sock".to_string())
+            .await
+            .unwrap_or_else(|_| {
+                panic!(
+                    "Failed to create EnclaveClient. Ensure the enclave is running on \
+                     /tmp/enclave_grpc.sock."
+                )
+            });
+
+    let secrets_service = SecretsService::new(secrets_tx.clone(), enclave_client);
 
     {
         let notifier_tx_clone = notifier_tx.clone();

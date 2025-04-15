@@ -1,7 +1,6 @@
 use crate::proto::interface as proto;
 use alloy_primitives::{Address, U256};
 
-/// A remote-verifiable TEE attestation report in domain form.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AttestationReport {
     pub ephemeral_public_key: Vec<u8>,
@@ -17,7 +16,6 @@ impl AttestationReport {
             user_data: p.user_data,
         }
     }
-
     pub fn to_proto(&self) -> proto::AttestationReport {
         let mut out = proto::AttestationReport::default();
         out.ephemeral_public_key = self.ephemeral_public_key.clone();
@@ -27,9 +25,8 @@ impl AttestationReport {
     }
 }
 
-/// An identifier for a secret (chain ID, identity address, identity ID).
 #[derive(
-    Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+    Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord,
 )]
 pub struct SecretId {
     pub chain_id: u64,
@@ -41,24 +38,85 @@ impl SecretId {
     pub fn from_proto(p: proto::SecretIdentifier) -> Self {
         Self {
             chain_id: p.chain_id,
-            identity_address: p
-                .identity_address
-                .parse::<Address>()
-                .expect("Invalid address"),
-            identity_id: p.identity_id.parse::<U256>().expect("Invalid U256"),
+            identity_address: p.identity_address.parse().unwrap(),
+            identity_id: p.identity_id.parse().unwrap(),
         }
     }
-
     pub fn to_proto(&self) -> proto::SecretIdentifier {
         let mut out = proto::SecretIdentifier::default();
         out.chain_id = self.chain_id;
-        out.identity_address = format!("{:#x}", self.identity_address); // Use 0x prefix for consistency
-        out.identity_id = self.identity_id.to_string(); // U256::to_string() is usually sufficient
+        out.identity_address = format!("{:#x}", self.identity_address);
+        out.identity_id = self.identity_id.to_string();
         out
     }
 }
 
-/// The "box" containing one or more secrets, encrypted for some ephemeral pubkey.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ConsumerInfo {
+    pub code_hash: Vec<u8>,
+    pub signature: Vec<u8>,
+}
+
+impl ConsumerInfo {
+    pub fn from_proto(p: proto::ConsumerInfo) -> Self {
+        Self {
+            code_hash: p.code_hash,
+            signature: p.signature,
+        }
+    }
+    pub fn to_proto(&self) -> proto::ConsumerInfo {
+        let mut out = proto::ConsumerInfo::default();
+        out.code_hash = self.code_hash.clone();
+        out.signature = self.signature.clone();
+        out
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SecretRequest {
+    pub secret_id: SecretId,
+    pub consumer: ConsumerInfo,
+}
+
+impl SecretRequest {
+    pub fn from_proto(p: proto::SecretRequest) -> Self {
+        Self {
+            secret_id: SecretId::from_proto(p.secret_id.unwrap_or_default()),
+            consumer: ConsumerInfo::from_proto(p.consumer.unwrap_or_default()),
+        }
+    }
+    pub fn to_proto(&self) -> proto::SecretRequest {
+        let mut out = proto::SecretRequest::default();
+        out.secret_id = Some(self.secret_id.to_proto());
+        out.consumer = Some(self.consumer.to_proto());
+        out
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct EnvReport {
+    pub attestation: AttestationReport,
+    pub operator_signature: Vec<u8>,
+    pub node_id: String,
+}
+
+impl EnvReport {
+    pub fn from_proto(p: proto::EnvReport) -> Self {
+        Self {
+            attestation: AttestationReport::from_proto(p.attestation.unwrap_or_default()),
+            operator_signature: p.operator_signature,
+            node_id: p.node_id,
+        }
+    }
+    pub fn to_proto(&self) -> proto::EnvReport {
+        let mut out = proto::EnvReport::default();
+        out.attestation = Some(self.attestation.to_proto());
+        out.operator_signature = self.operator_signature.clone();
+        out.node_id = self.node_id.clone();
+        out
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SecretsBox {
     pub encrypted_payload: Vec<u8>,
@@ -69,14 +127,13 @@ pub struct SecretsBox {
 
 impl SecretsBox {
     pub fn new_empty() -> Self {
-        SecretsBox {
-            encrypted_payload: Vec::new(),
-            sender_public_key: Vec::new(),
-            signature: Vec::new(),
+        Self {
+            encrypted_payload: vec![],
+            sender_public_key: vec![],
+            signature: vec![],
             alg: "X25519+AES256GCM".to_string(),
         }
     }
-
     pub fn from_proto(p: proto::SecretsBox) -> Self {
         Self {
             encrypted_payload: p.encrypted_payload,
@@ -85,7 +142,6 @@ impl SecretsBox {
             alg: p.alg,
         }
     }
-
     pub fn to_proto(&self) -> proto::SecretsBox {
         let mut out = proto::SecretsBox::default();
         out.encrypted_payload = self.encrypted_payload.clone();
@@ -96,45 +152,18 @@ impl SecretsBox {
     }
 }
 
-/// Minimal data needed to request a secret
+/// A request for the policy runner that references multiple secrets.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct SecretRequest {
-    pub consumer: Vec<u8>,
+pub struct PolicyExecutionRequest {
+    pub secret_ids: Vec<SecretId>,
+    pub consumer: ConsumerInfo,
+    pub env_report: EnvReport,
 }
 
-impl SecretRequest {
-    pub fn from_proto(p: proto::SecretRequest) -> Self {
-        Self {
-            consumer: p.consumer,
-        }
-    }
-
-    pub fn to_proto(&self) -> proto::SecretRequest {
-        let mut out = proto::SecretRequest::default();
-        out.consumer = self.consumer.clone();
-        out
-    }
-}
-
-/// Minimal data describing the requester's environment
+/// The runner’s final judgment about a request.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct SecretRequesterInfo {
-    pub report: Vec<u8>,
-    pub public_key: Vec<u8>,
-}
-
-impl SecretRequesterInfo {
-    pub fn from_proto(p: proto::SecretRequesterInfo) -> Self {
-        Self {
-            report: p.report,
-            public_key: p.public_key,
-        }
-    }
-
-    pub fn to_proto(&self) -> proto::SecretRequesterInfo {
-        let mut out = proto::SecretRequesterInfo::default();
-        out.report = self.report.clone();
-        out.public_key = self.public_key.clone();
-        out
-    }
+pub struct PolicyExecutionReport {
+    pub request: PolicyExecutionRequest,
+    pub decision: bool,
+    pub timestamp: u64,
 }

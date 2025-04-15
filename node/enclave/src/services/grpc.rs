@@ -1,19 +1,26 @@
-use super::secrets::Secrets;
-use interface::{
-    proto::enclave::{
-        CheckSecretsRequest, CheckSecretsResponse, GetReportRequest, GetSecretsEnclaveRequest,
-        GetSecretsEnclaveResponse, PutSecretsRequest, PutSecretsResponse,
-        SecretStatus as ProtoSecretStatus, enclave_secrets_server::EnclaveSecrets,
-    },
-    proto::interface::AttestationReport as ProtoAttestationReport,
-    types::{AttestationReport, SecretId, SecretsBox},
-};
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
-use tracing::debug;
+
+use crate::services::runner::RunnerService;
+use crate::services::secrets::Secrets;
+use interface::{
+    proto::enclave::{
+        CheckSecretsRequest, CheckSecretsResponse, DeliverEventRequest, DeliverEventResponse,
+        GetReportRequest, GetSecretsEnclaveRequest, GetSecretsEnclaveResponse, PutSecretsRequest,
+        PutSecretsResponse, RunWorkerRequest, RunWorkerResponse, SecretStatus as ProtoSecretStatus,
+        enclave_secrets_server::EnclaveSecrets, runner_server::Runner,
+    },
+    types::{AttestationReport, SecretsBox},
+};
 
 pub struct EnclaveSecretsService {
-    pub enclave: Arc<Secrets>,
+    secrets: Arc<Secrets>,
+}
+
+impl EnclaveSecretsService {
+    pub fn new(secrets: Arc<Secrets>) -> Self {
+        Self { secrets }
+    }
 }
 
 #[tonic::async_trait]
@@ -21,10 +28,9 @@ impl EnclaveSecrets for EnclaveSecretsService {
     async fn get_report(
         &self,
         request: Request<GetReportRequest>,
-    ) -> Result<Response<ProtoAttestationReport>, Status> {
+    ) -> Result<Response<interface::proto::interface::AttestationReport>, Status> {
         let req = request.into_inner();
-        debug!("EnclaveSecrets::get_report called");
-        let ar = self.enclave.get_report(req.user_data);
+        let ar = self.secrets.get_report(req.user_data);
         Ok(Response::new(ar.to_proto()))
     }
 
@@ -33,24 +39,19 @@ impl EnclaveSecrets for EnclaveSecretsService {
         request: Request<PutSecretsRequest>,
     ) -> Result<Response<PutSecretsResponse>, Status> {
         let req = request.into_inner();
-        debug!(
-            "EnclaveSecrets::put_secrets received {} bundles",
-            req.secrets_bundles.len()
-        );
         let mut bundles = Vec::new();
-        for sb in req.secrets_bundles {
-            let sb_proto = sb
+        for b in req.secrets_bundles {
+            let sb = b
                 .secrets_box
-                .ok_or_else(|| Status::invalid_argument("missing secrets box"))?;
-            let att_proto = sb
+                .ok_or_else(|| Status::invalid_argument("Missing secrets_box"))?;
+            let att = b
                 .attestation_report
-                .ok_or_else(|| Status::invalid_argument("missing attestation report"))?;
-            bundles.push((
-                SecretsBox::from_proto(sb_proto),
-                AttestationReport::from_proto(att_proto),
-            ));
+                .ok_or_else(|| Status::invalid_argument("Missing att_report"))?;
+            let domain_sb = SecretsBox::from_proto(sb);
+            let domain_att = AttestationReport::from_proto(att);
+            bundles.push((domain_sb, domain_att));
         }
-        let success = self.enclave.put_secrets(bundles);
+        let success = self.secrets.put_secrets(bundles);
         Ok(Response::new(PutSecretsResponse { success }))
     }
 
@@ -59,27 +60,21 @@ impl EnclaveSecrets for EnclaveSecretsService {
         request: Request<GetSecretsEnclaveRequest>,
     ) -> Result<Response<GetSecretsEnclaveResponse>, Status> {
         let req = request.into_inner();
-        debug!(
-            "EnclaveSecrets::get_secrets called with {} requests",
-            req.requests.len()
-        );
         let mut ids = Vec::new();
-        for r in req.requests {
-            let i = r.id.ok_or_else(|| Status::invalid_argument("missing id"))?;
-            ids.push(SecretId::from_proto(i));
+        for sreq in req.requests {
+            if let Some(si) = sreq.id {
+                ids.push(interface::types::SecretId::from_proto(si));
+            }
         }
-        let mut policy_reports = Vec::new();
-        for p in req.policy_reports {
-            policy_reports.push((p.content_hash, p.signature));
-        }
-        let ar = AttestationReport::from_proto(
-            req.requester_attestation
-                .ok_or_else(|| Status::invalid_argument("missing attestation"))?,
-        );
-        let sb = self.enclave.get_secrets(ids, policy_reports, ar);
-        Ok(Response::new(GetSecretsEnclaveResponse {
+        let att = req
+            .requester_attestation
+            .ok_or_else(|| Status::invalid_argument("Missing requester_attestation"))?;
+        let domain_att = AttestationReport::from_proto(att);
+        let sb = self.secrets.get_secrets(ids, vec![], domain_att);
+        let resp = GetSecretsEnclaveResponse {
             secrets_box: Some(sb.to_proto()),
-        }))
+        };
+        Ok(Response::new(resp))
     }
 
     async fn check_secrets(
@@ -87,23 +82,58 @@ impl EnclaveSecrets for EnclaveSecretsService {
         request: Request<CheckSecretsRequest>,
     ) -> Result<Response<CheckSecretsResponse>, Status> {
         let req = request.into_inner();
-        debug!(
-            "EnclaveSecrets::check_secrets called with {} IDs",
-            req.ids.len()
-        );
         let mut ids = Vec::new();
-        for i in req.ids {
-            ids.push(SecretId::from_proto(i));
+        for pid in req.ids {
+            ids.push(interface::types::SecretId::from_proto(pid));
         }
-        let results = self.enclave.check_secrets(ids);
+        let results = self.secrets.check_secrets(ids);
         let mut statuses = Vec::new();
         for (id, found, expiry) in results {
-            statuses.push(ProtoSecretStatus {
-                id: Some(id.to_proto()),
-                found,
-                expiry,
-            });
+            let mut st = ProtoSecretStatus::default();
+            st.id = Some(id.to_proto());
+            st.found = found;
+            st.expiry = expiry;
+            statuses.push(st);
         }
         Ok(Response::new(CheckSecretsResponse { statuses }))
+    }
+}
+
+pub struct EnclaveRunnerService {
+    runner: RunnerService,
+}
+
+impl EnclaveRunnerService {
+    pub fn new(runner: RunnerService) -> Self {
+        Self { runner }
+    }
+}
+
+#[tonic::async_trait]
+impl Runner for EnclaveRunnerService {
+    async fn run_worker(
+        &self,
+        request: Request<RunWorkerRequest>,
+    ) -> Result<Response<RunWorkerResponse>, Status> {
+        let r = request.into_inner();
+        match self.runner.run_worker(r.worker_binary).await {
+            Ok(_) => Ok(Response::new(RunWorkerResponse { accepted: true })),
+            Err(e) => Err(Status::internal(format!("run_worker failed: {e}"))),
+        }
+    }
+
+    async fn deliver_event(
+        &self,
+        request: Request<DeliverEventRequest>,
+    ) -> Result<Response<DeliverEventResponse>, Status> {
+        let r = request.into_inner();
+        match self
+            .runner
+            .deliver_event(r.worker_id, r.event_payload)
+            .await
+        {
+            Ok(_) => Ok(Response::new(DeliverEventResponse { delivered: true })),
+            Err(e) => Err(Status::internal(format!("deliver_event failed: {e}"))),
+        }
     }
 }

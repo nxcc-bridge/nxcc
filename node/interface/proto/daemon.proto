@@ -17,22 +17,16 @@ message BroadcastResponse {
   bool success = 1;
 }
 
-// Secrets service for debugging and testing.
+// Secrets service
 service Secrets {
-  // Retrieve one or more secrets (with attached metadata).
   rpc GetSecrets (GetSecretsRequest) returns (GetSecretsResponse);
 }
 
 message GetSecretsRequest {
-  repeated SecretRequests secret_requests = 1;
-  interface.SecretRequesterInfo requester_info = 2;
-}
-
-message SecretRequests {
-  interface.SecretIdentifier id = 1;
-  repeated interface.SecretRequest requests = 2;
+  repeated interface.SecretRequest secret_requests = 1;
+  interface.EnvReport env_report = 2;
 }
 
 message GetSecretsResponse {
-  interface.SecretsBox secrets_box = 2;
+  interface.SecretsBox secrets_box = 1;
 }

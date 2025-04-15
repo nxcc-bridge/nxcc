@@ -1,177 +1,151 @@
+use hyper_util::rt::TokioIo;
 use interface::{
     proto::enclave::{
-        CheckSecretsRequest, GetReportRequest, GetSecretsEnclaveRequest, PolicyExecutionReport,
-        PutSecretsRequest, PutSecretsResponse, SecretEnclaveRequest,
-        SecretsBundle as ProtoSecretsBundle,
-        enclave_secrets_client::EnclaveSecretsClient as ProtoEnclaveSecretsClient,
+        CheckSecretsRequest, DeliverEventRequest, DeliverEventResponse, GetReportRequest,
+        GetSecretsEnclaveRequest, PutSecretsRequest, PutSecretsResponse, RunWorkerRequest,
+        SecretEnclaveRequest, SecretsBundle as ProtoSecretsBundle,
+        enclave_secrets_client::EnclaveSecretsClient, runner_client::RunnerClient,
     },
     types::{AttestationReport, SecretId, SecretsBox},
 };
-use tokio_vsock::VsockStream;
+use tokio::{net::UnixStream, sync::Mutex};
 use tonic::{
     codegen::http::Uri as HttpUri,
     transport::{Channel, Endpoint, Uri},
 };
-use tracing::debug;
+use tower::service_fn;
 
-#[derive(Clone)]
+use crate::error::AppError;
+
+/// A single client struct for both the secrets and runner services in the enclave.
 pub struct EnclaveClient {
-    inner: ProtoEnclaveSecretsClient<Channel>,
+    secrets_client: Mutex<EnclaveSecretsClient<Channel>>,
+    runner_client: Mutex<RunnerClient<Channel>>,
 }
 
 impl EnclaveClient {
-    /// Create a client that connects via a Unix domain socket
-    pub async fn connect_uds(path: String) -> Result<Self, Box<dyn std::error::Error>> {
-        #[cfg(unix)]
-        {
-            use hyper_util::rt::TokioIo;
-            use tokio::net::UnixStream;
-            use tonic::transport::{Endpoint, Uri};
-            use tower::service_fn;
-
-            // Create an endpoint with a dummy URI (not used for UDS)
-            let channel = Endpoint::try_from("http://[::]:50051")?
-                .connect_with_connector(service_fn(move |_: Uri| {
-                    let path = path.to_string();
-                    async move {
-                        // Connect to the Unix domain socket
-                        let stream = UnixStream::connect(path).await?;
-                        Ok::<_, std::io::Error>(TokioIo::new(stream))
-                    }
-                }))
-                .await?;
-
-            Ok(Self {
-                inner: ProtoEnclaveSecretsClient::new(channel),
-            })
-        }
-
-        #[cfg(not(unix))]
-        {
-            Err("Unix domain sockets are not supported on this platform".into())
-        }
-    }
-
-    /// Create a client that connects via vsock. Requires a custom connector.
-    pub async fn connect_vsock(cid: u32, port: u32) -> Result<Self, Box<dyn std::error::Error>> {
-        use hyper_util::rt::TokioIo;
-        use tonic::transport::{Endpoint, Uri};
-        use tower::service_fn;
-
-        // Create an endpoint with a dummy URI (not used for vsock)
-        let channel = Endpoint::try_from("http://[::]:50051")?
+    pub async fn connect_uds(path: impl Into<String>) -> Result<Self, AppError> {
+        let path = path.into();
+        let channel = Endpoint::try_from("http://[::]:50051")
+            .map_err(|e| AppError::Service(format!("Invalid endpoint: {e}")))?
             .connect_with_connector(service_fn(move |_: Uri| {
-                let cid = cid;
-                let port = port;
+                let p = path.clone();
                 async move {
-                    // Connect to vsock
-                    let addr = tokio_vsock::VsockAddr::new(cid, port);
-                    let stream = tokio_vsock::VsockStream::connect(addr).await?;
+                    let stream = UnixStream::connect(p).await?;
                     Ok::<_, std::io::Error>(TokioIo::new(stream))
                 }
             }))
-            .await?;
+            .await
+            .map_err(|e| AppError::Service(format!("UDS connect error: {e}")))?;
 
         Ok(Self {
-            inner: ProtoEnclaveSecretsClient::new(channel),
+            secrets_client: Mutex::new(EnclaveSecretsClient::new(channel.clone())),
+            runner_client: Mutex::new(RunnerClient::new(channel.clone())),
         })
     }
 
-    pub async fn get_report(&mut self, user_data: Vec<u8>) -> Result<AttestationReport, String> {
+    #[allow(unused)]
+    pub async fn connect_vsock(_cid: u32, _port: u32) -> Result<Self, Box<dyn std::error::Error>> {
+        Err("Vsock connect not implemented".into())
+    }
+
+    // Secrets interface calls
+
+    pub async fn get_report(&self, user_data: Vec<u8>) -> Result<AttestationReport, String> {
+        let mut client = self.secrets_client.lock().await;
         let req = GetReportRequest { user_data };
-        let resp = self
-            .inner
-            .get_report(req)
-            .await
-            .map_err(|e| e.to_string())?;
+        let resp = client.get_report(req).await.map_err(|e| e.to_string())?;
         Ok(AttestationReport::from_proto(resp.into_inner()))
     }
 
     pub async fn put_secrets(
-        &mut self,
+        &self,
         boxes: Vec<(SecretsBox, AttestationReport)>,
     ) -> Result<bool, String> {
         let mut bundles = Vec::new();
         for (sb, att) in boxes {
-            let sb_proto = sb.to_proto();
-            let att_proto = att.to_proto();
             bundles.push(ProtoSecretsBundle {
-                secrets_box: Some(sb_proto),
-                attestation_report: Some(att_proto),
+                secrets_box: Some(sb.to_proto()),
+                attestation_report: Some(att.to_proto()),
             });
         }
-
         let req = PutSecretsRequest {
             secrets_bundles: bundles,
         };
-        let resp: PutSecretsResponse = self
-            .inner
-            .put_secrets(req)
-            .await
-            .map_err(|e| e.to_string())?
-            .into_inner();
-        Ok(resp.success)
+        let mut client = self.secrets_client.lock().await;
+        let resp = client.put_secrets(req).await.map_err(|e| e.to_string())?;
+        Ok(resp.into_inner().success)
     }
 
-    /// get_secrets for the provided IDs. The policy reports are ignored in this demo.
     pub async fn get_secrets(
-        &mut self,
-        ids: Vec<SecretId>,
-        policy_reports: Vec<(Vec<u8>, Vec<u8>)>,
-        requester_report: AttestationReport,
+        &self,
+        secret_ids: Vec<SecretId>,
+        _unused: Vec<()>,
+        att: AttestationReport,
     ) -> Result<SecretsBox, String> {
         let mut requests = Vec::new();
-        for id in ids {
+        for sid in secret_ids {
             requests.push(SecretEnclaveRequest {
-                id: Some(id.to_proto()),
+                id: Some(sid.to_proto()),
             });
         }
-        let pr_proto = policy_reports
-            .iter()
-            .map(|(h, s)| PolicyExecutionReport {
-                content_hash: h.clone(),
-                signature: s.clone(),
-            })
-            .collect();
-
         let req = GetSecretsEnclaveRequest {
             requests,
-            policy_reports: pr_proto,
-            requester_attestation: Some(requester_report.to_proto()),
+            requester_attestation: Some(att.to_proto()),
+            policy_reports: vec![], // not used yet
         };
-
-        let resp = self
-            .inner
-            .get_secrets(req)
-            .await
-            .map_err(|e| e.to_string())?;
-        let r = resp.into_inner();
-        match r.secrets_box {
-            Some(pb) => Ok(SecretsBox::from_proto(pb)),
-            None => Err("Enclave returned no secrets_box".to_string()),
+        let mut client = self.secrets_client.lock().await;
+        let resp = client.get_secrets(req).await.map_err(|e| e.to_string())?;
+        let out = resp.into_inner();
+        if let Some(box_proto) = out.secrets_box {
+            Ok(SecretsBox::from_proto(box_proto))
+        } else {
+            Err("Enclave returned no SecretsBox".to_string())
         }
     }
 
     pub async fn check_secrets(
-        &mut self,
+        &self,
         ids: Vec<SecretId>,
     ) -> Result<Vec<(SecretId, bool, u64)>, String> {
-        let proto_ids = ids.iter().map(|id| id.to_proto()).collect();
-
+        let mut proto_ids = Vec::new();
+        for sid in ids.iter() {
+            proto_ids.push(sid.to_proto());
+        }
         let req = CheckSecretsRequest { ids: proto_ids };
-        let resp = self
-            .inner
-            .check_secrets(req)
-            .await
-            .map_err(|e| e.to_string())?;
-        let r = resp.into_inner();
+        let mut client = self.secrets_client.lock().await;
+        let resp = client.check_secrets(req).await.map_err(|e| e.to_string())?;
+        let statuses = resp.into_inner().statuses;
         let mut out = Vec::new();
-        for st in r.statuses {
-            if let Some(pid) = st.id {
-                let domain_id = SecretId::from_proto(pid);
-                out.push((domain_id, st.found, st.expiry));
+        for st in statuses {
+            if let Some(proto_id) = st.id {
+                let sid = SecretId::from_proto(proto_id);
+                out.push((sid, st.found, st.expiry));
             }
         }
         Ok(out)
+    }
+
+    // Runner interface calls
+
+    pub async fn run_worker(&self, worker_binary: Vec<u8>) -> Result<(), String> {
+        let req = RunWorkerRequest { worker_binary };
+        let mut client = self.runner_client.lock().await;
+        client.run_worker(req).await.map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub async fn deliver_event(&self, worker_id: String, payload: Vec<u8>) -> Result<(), String> {
+        let req = DeliverEventRequest {
+            worker_id,
+            event_payload: payload,
+        };
+        let mut client = self.runner_client.lock().await;
+        let _resp: DeliverEventResponse = client
+            .deliver_event(req)
+            .await
+            .map_err(|e| e.to_string())?
+            .into_inner();
+        Ok(())
     }
 }

@@ -4,93 +4,72 @@ use std::{
 };
 
 use futures::channel::mpsc;
-use interface::types::{
-    AttestationReport, SecretId, SecretRequest, SecretRequesterInfo, SecretsBox,
-};
+use interface::types::{AttestationReport, EnvReport, SecretId, SecretRequest, SecretsBox};
 use tokio::sync::{Mutex, oneshot};
-use tracing::{debug, error, warn};
 
-use crate::{
-    error::AppError, grpc::enclave_client::EnclaveClient, network::SecretsMessage,
-    policy::ManifestChecker, web3::gateways::GatewayManager,
-};
+use crate::{error::AppError, grpc::enclave_client::EnclaveClient, network::SecretsMessage};
 
-/// Each inbound secrets request from the gRPC layer is mapped to these domain types.
 pub struct SecretsService {
     p2p_secrets_sender: mpsc::Sender<SecretsMessage>,
+    enclave_client: Mutex<EnclaveClient>,
     pending: Mutex<HashMap<u64, PendingRequest>>,
     request_counter: Mutex<u64>,
-    gateway_manager: GatewayManager,
-    manifest_checker: ManifestChecker,
-    enclave_client: tokio::sync::Mutex<EnclaveClient>,
 }
 
 struct PendingRequest {
     requested_ids: HashMap<SecretId, Vec<SecretRequest>>,
-    requester_info: SecretRequesterInfo,
-    threshold: usize,
+    env_report: EnvReport,
     collected: Vec<SecretsBox>,
+    threshold: usize,
     responder: oneshot::Sender<Result<SecretsBox, AppError>>,
 }
 
 impl SecretsService {
-    pub async fn new(p2p_secrets_sender: mpsc::Sender<SecretsMessage>) -> Arc<Self> {
+    pub fn new(
+        p2p_secrets_sender: mpsc::Sender<SecretsMessage>,
+        enclave_client: EnclaveClient,
+    ) -> Arc<Self> {
         Arc::new(Self {
             p2p_secrets_sender,
+            enclave_client: Mutex::new(enclave_client),
             pending: Mutex::new(HashMap::new()),
             request_counter: Mutex::new(0),
-            gateway_manager: GatewayManager::new(),
-            manifest_checker: ManifestChecker,
-            enclave_client: tokio::sync::Mutex::new(
-                EnclaveClient::connect_uds("/tmp/enclave_grpc.sock".to_string())
-                    .await
-                    .unwrap_or_else(|_| {
-                        panic!(
-                            "Failed to create EnclaveClient. Ensure the enclave is running on \
-                             /tmp/enclave_grpc.sock."
-                        )
-                    }),
-            ),
         })
     }
 
-    /// Invoked by the daemon's gRPC `get_secrets` method to fetch and return secrets.
-    /// The daemon simply relays requests and responses; all encryption is in the enclave.
+    /// Main entry point for secret retrieval.
     pub async fn get_secrets(
-        self: &Arc<Self>,
+        &self,
         secret_requests: HashMap<SecretId, Vec<SecretRequest>>,
-        requester_info: SecretRequesterInfo,
+        env_report: EnvReport,
     ) -> Result<SecretsBox, AppError> {
-        let (local, missing) = self.get_local_secrets(&secret_requests).await?;
-
-        // If all secrets are stored in the local enclave, retrieve them immediately
+        let (local_ids, missing) = self.check_local(&secret_requests).await?;
         if missing.is_empty() {
-            debug!("All requested secrets found locally.");
-            let att = attestation_report_from_requester(&requester_info);
+            let att = env_report.attestation.clone();
             let mut encl = self.enclave_client.lock().await;
-            return encl.get_secrets(local, vec![], att).await.map_err(|e| {
-                AppError::Service(format!("Failed to fetch secrets from enclave: {e}"))
-            });
+            let sb = encl
+                .get_secrets(local_ids, vec![], att)
+                .await
+                .map_err(|e| AppError::Service(format!("Enclave get_secrets: {e}")))?;
+            return Ok(sb);
         }
 
-        // Some or all secrets are missing, so request them from peers
         let request_id = {
             let mut rc = self.request_counter.lock().await;
             *rc += 1;
             *rc
         };
-        let threshold = 1;
         let (tx, rx) = oneshot::channel();
 
         {
-            let mut pending_guard = self.pending.lock().await;
-            pending_guard.insert(
+            let mut guard = self.pending.lock().await;
+            guard.insert(
                 request_id,
                 PendingRequest {
                     requested_ids: missing.clone(),
-                    requester_info: requester_info.clone(),
-                    threshold,
+                    env_report: env_report.clone(),
                     collected: Vec::new(),
+                    threshold: 1,
                     responder: tx,
                 },
             );
@@ -101,64 +80,50 @@ impl SecretsService {
             .try_send(SecretsMessage::PublishSecretsRequest {
                 request_id,
                 secret_requests: BTreeMap::from_iter(missing.into_iter()),
-                requester_info: requester_info.clone(),
-            })?;
+                env_report: env_report.clone(),
+            })
+            .map_err(|e| AppError::Service(format!("Failed to publish secrets request: {e}")))?;
 
         let p2p_box = match rx.await {
             Ok(Ok(sb)) => sb,
             Ok(Err(e)) => return Err(e),
-            Err(e) => {
-                return Err(AppError::Service(format!("Pending request dropped: {}", e)));
-            }
+            Err(e) => return Err(AppError::Service(format!("oneshot canceled: {e}"))),
         };
 
-        // Store the newly acquired secrets in our local enclave
         {
             let mut encl = self.enclave_client.lock().await;
-            let local_att_report = encl
-                .get_report(Vec::new())
+            let local_report = encl
+                .get_report(vec![])
                 .await
-                .map_err(|e| AppError::Service(format!("Failed to get enclave report: {e}")))?;
-
-            let success = encl
-                .put_secrets(vec![(p2p_box.clone(), local_att_report)])
+                .map_err(|e| AppError::Service(format!("Enclave get_report: {e}")))?;
+            encl.put_secrets(vec![(p2p_box.clone(), local_report)])
                 .await
-                .map_err(|e| AppError::Service(format!("put_secrets failed: {e}")))?;
-            if !success {
-                return Err(AppError::Service(
-                    "Enclave put_secrets returned false".into(),
-                ));
-            }
+                .map_err(|e| AppError::Service(format!("Enclave put_secrets: {e}")))?;
         }
 
-        // Now that we've stored the newly received secrets, retrieve all of them for the caller
-        let mut all_ids = Vec::new();
-        all_ids.extend(local);
-        // The above `local` is a Vec<SecretId> of items found in local enclave
-        // The remote items were just put, so we can retrieve them as well
-        let att = attestation_report_from_requester(&requester_info);
+        let att = env_report.attestation.clone();
         let mut encl = self.enclave_client.lock().await;
-        encl.get_secrets(all_ids, vec![], att)
+        let sb = encl
+            .get_secrets(local_ids, vec![], att)
             .await
-            .map_err(|e| AppError::Service(format!("Failed to get secrets from enclave: {e}")))
+            .map_err(|e| AppError::Service(format!("Final get_secrets: {e}")))?;
+        Ok(sb)
     }
 
-    /// Called when we receive a P2P response from a peer containing a SecretsBox.
+    /// Called when we receive a p2p secrets response.
     pub async fn handle_incoming_secret_batch_response(
         &self,
         request_id: u64,
         secrets_box: SecretsBox,
     ) -> Result<(), AppError> {
-        let finalize_data = {
+        let finalize = {
             let mut lock = self.pending.lock().await;
-            if let Some(pend) = lock.get_mut(&request_id) {
-                pend.collected.push(secrets_box);
-
-                if pend.collected.len() >= pend.threshold {
-                    let boxes = pend.collected.clone();
-                    let responder =
-                        std::mem::replace(&mut pend.responder, tokio::sync::oneshot::channel().0);
-                    Some((boxes, responder, request_id))
+            if let Some(p) = lock.get_mut(&request_id) {
+                p.collected.push(secrets_box);
+                if p.collected.len() >= p.threshold {
+                    let merged = self.merge_boxes(p.collected.clone())?;
+                    let responder = std::mem::replace(&mut p.responder, oneshot::channel().0);
+                    Some((merged, responder, request_id))
                 } else {
                     None
                 }
@@ -167,168 +132,135 @@ impl SecretsService {
             }
         };
 
-        if let Some((boxes, responder, req_id)) = finalize_data {
-            let merged = self.merge_secrets_boxes(boxes).map_err(AppError::Service)?;
-
-            {
-                let mut lock = self.pending.lock().await;
-                lock.remove(&req_id);
-            }
-
-            let _ = responder.send(Ok(merged));
+        if let Some((sb, responder, req_id)) = finalize {
+            let mut lock = self.pending.lock().await;
+            lock.remove(&req_id);
+            let _ = responder.send(Ok(sb));
         }
-
         Ok(())
     }
 
-    /// Called when we receive a P2P secrets request from another peer.
-    /// We gather secrets from our local enclave and return them in a SecretsBox.
+    /// Called when we receive a p2p secrets request. Return a SecretsBox if local secrets are found.
     pub async fn handle_incoming_secret_batch_request(
         &self,
-        request_id: u64,
+        _request_id: u64,
         secret_requests: BTreeMap<SecretId, Vec<SecretRequest>>,
-        requester_info: SecretRequesterInfo,
+        env_report: EnvReport,
     ) -> SecretsBox {
-        debug!(
-            "Handling secrets request {} with {} items",
-            request_id,
-            secret_requests.len()
-        );
-        let found_secrets = self.gather_secrets_for_peer(secret_requests).await;
-        if found_secrets.is_empty() {
-            debug!("No local secrets found for request {request_id}");
+        let found = self.gather_local(&secret_requests).await;
+        if found.is_empty() {
             return SecretsBox::new_empty();
         }
-
-        // Create an attestation with ephemeral public key for the local enclave
+        let att = env_report.attestation.clone();
         let mut encl = self.enclave_client.lock().await;
-        let local_report = match encl.get_report(Vec::new()).await {
-            Ok(r) => r,
-            Err(_) => AttestationReport {
-                ephemeral_public_key: vec![],
-                block_hashes: vec![],
-                user_data: vec![],
-            },
-        };
-
-        // Forward the request to the local enclave for encryption to the requester's ephemeral key
-        let pol_reports = vec![];
-        encl.get_secrets(
-            found_secrets,
-            pol_reports,
-            attestation_report_from_requester(&requester_info),
-        )
-        .await
-        .unwrap_or_else(|e| {
-            warn!("Failed to retrieve secrets from enclave: {e}");
-            SecretsBox::new_empty()
-        })
+        match encl.get_secrets(found, vec![], att).await {
+            Ok(sb) => sb,
+            Err(_) => SecretsBox::new_empty(),
+        }
     }
 
-    /// Called if a request times out or is canceled.
     pub async fn timeout_pending_request(&self, request_id: u64) -> Result<(), AppError> {
         let mut lock = self.pending.lock().await;
-        if let Some(pend) = lock.remove(&request_id) {
-            if pend.collected.is_empty() {
-                let _ = pend
+        if let Some(p) = lock.remove(&request_id) {
+            if p.collected.is_empty() {
+                let _ = p
                     .responder
                     .send(Err(AppError::Service("No responses received".into())));
-            } else if pend.collected.len() < pend.threshold {
-                let _ = pend
+            } else if p.collected.len() < p.threshold {
+                let _ = p
                     .responder
-                    .send(Err(AppError::Service("Threshold not reached".into())));
+                    .send(Err(AppError::Service("Threshold not met".into())));
             } else {
-                match self.merge_secrets_boxes(pend.collected) {
-                    Ok(sb) => {
-                        let _ = pend.responder.send(Ok(sb));
-                    }
-                    Err(e) => {
-                        let _ = pend.responder.send(Err(AppError::Service(e)));
-                    }
-                }
+                let merged = self.merge_boxes(p.collected)?;
+                let _ = p.responder.send(Ok(merged));
             }
         }
         Ok(())
     }
 
-    /// Checks which secrets are already in the local enclave. Returns (found, missing).
-    async fn get_local_secrets(
+    /// Check which secrets are locally available/unexpired in the enclave.
+    async fn check_local(
         &self,
-        secret_requests: &HashMap<SecretId, Vec<SecretRequest>>,
+        requests: &HashMap<SecretId, Vec<SecretRequest>>,
     ) -> Result<(Vec<SecretId>, HashMap<SecretId, Vec<SecretRequest>>), AppError> {
-        let requested_ids: Vec<SecretId> = secret_requests.keys().cloned().collect();
-        if requested_ids.is_empty() {
+        let mut all_ids = Vec::new();
+        for sid in requests.keys() {
+            all_ids.push(sid.clone());
+        }
+        if all_ids.is_empty() {
             return Ok((Vec::new(), HashMap::new()));
         }
-
         let mut encl = self.enclave_client.lock().await;
-        let check_results = encl
-            .check_secrets(requested_ids.clone())
+        let statuses = encl
+            .check_secrets(all_ids.clone())
             .await
-            .map_err(|e| AppError::Service(format!("Error checking secrets in enclave: {}", e)))?;
+            .map_err(|e| AppError::Service(format!("check_secrets: {e}")))?;
 
-        let mut local_found_ids = HashSet::new();
-        for (id, found, _expiry) in check_results {
-            if found {
-                local_found_ids.insert(id);
+        let now = current_unix_time();
+        let mut local_set = HashSet::new();
+        for (sid, found, expiry) in statuses {
+            if found && (expiry == 0 || expiry > now) {
+                local_set.insert(sid);
             }
         }
 
-        let mut local_found_vec = Vec::new();
+        let mut local_ids = Vec::new();
         let mut missing = HashMap::new();
-
-        for (id, reqs) in secret_requests {
-            if local_found_ids.contains(id) {
-                local_found_vec.push(id.clone());
+        for (sid, reqs) in requests {
+            if local_set.contains(sid) {
+                local_ids.push(sid.clone());
             } else {
-                missing.insert(id.clone(), reqs.clone());
+                missing.insert(sid.clone(), reqs.clone());
             }
         }
-
-        Ok((local_found_vec, missing))
+        Ok((local_ids, missing))
     }
 
-    /// Gathers secrets from our local enclave for a peer's request.
-    async fn gather_secrets_for_peer(
+    /// Gather local secrets for an inbound request from a peer.
+    async fn gather_local(
         &self,
-        requests: BTreeMap<SecretId, Vec<SecretRequest>>,
+        requests: &BTreeMap<SecretId, Vec<SecretRequest>>,
     ) -> Vec<SecretId> {
-        let requested_ids: Vec<SecretId> = requests.keys().cloned().collect();
-        if requested_ids.is_empty() {
+        let mut all_ids = Vec::new();
+        for sid in requests.keys() {
+            all_ids.push(sid.clone());
+        }
+        if all_ids.is_empty() {
             return Vec::new();
         }
 
         let mut encl = self.enclave_client.lock().await;
-        match encl.check_secrets(requested_ids).await {
-            Ok(results) => results
-                .into_iter()
-                .filter_map(|(id, found, _)| if found { Some(id) } else { None })
-                .collect(),
-            Err(e) => {
-                error!("Failed to check secrets in enclave for peer request: {e}");
-                Vec::new()
+        match encl.check_secrets(all_ids.clone()).await {
+            Ok(statuses) => {
+                let now = current_unix_time();
+                statuses
+                    .into_iter()
+                    .filter_map(|(sid, found, expiry)| {
+                        if found && (expiry == 0 || expiry > now) {
+                            Some(sid)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
             }
+            Err(_) => Vec::new(),
         }
     }
 
-    /// Merges multiple SecretsBoxes. This sample merges by taking the first non-empty box.
-    /// A real threshold scheme could be more complex.
-    fn merge_secrets_boxes(&self, boxes: Vec<SecretsBox>) -> Result<SecretsBox, String> {
-        for b in boxes {
-            if !b.encrypted_payload.is_empty() {
-                return Ok(b);
+    fn merge_boxes(&self, boxes: Vec<SecretsBox>) -> Result<SecretsBox, AppError> {
+        for sb in boxes {
+            if !sb.encrypted_payload.is_empty() {
+                return Ok(sb);
             }
         }
         Ok(SecretsBox::new_empty())
     }
 }
 
-/// Converts a requester's info into an AttestationReport so we can pass ephemeral key/user data
-/// to the enclave. This does not perform cryptographic verification here.
-fn attestation_report_from_requester(info: &SecretRequesterInfo) -> AttestationReport {
-    AttestationReport {
-        ephemeral_public_key: info.public_key.clone(),
-        block_hashes: vec![],
-        user_data: info.report.clone(),
+fn current_unix_time() -> u64 {
+    match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        Ok(d) => d.as_secs(),
+        Err(_) => 0,
     }
 }

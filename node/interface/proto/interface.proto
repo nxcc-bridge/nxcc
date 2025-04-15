@@ -2,14 +2,14 @@ syntax = "proto3";
 
 package interface;
 
-// A remote-verifiable TEE attestation report with ephemeral key, user data, etc.
+// Common types shared across daemon/enclave.
+
 message AttestationReport {
   bytes ephemeral_public_key = 1;
   repeated bytes block_hashes = 2;
   bytes user_data = 3;
 }
 
-// An AEAD-encrypted "box" containing secrets.
 message SecretsBox {
   bytes encrypted_payload = 1;
   bytes sender_public_key = 2;
@@ -17,22 +17,38 @@ message SecretsBox {
   string alg = 4;
 }
 
-// An identifier for a particular secret. For example, referencing an on-chain Identity token.
 message SecretIdentifier {
   uint64 chain_id = 1;
   string identity_address = 2;
   string identity_id = 3;
 }
 
-// A request for secret usage from some consumer (like a worker).
-message SecretRequest {
-  bytes consumer = 1;
+// Identifies the code or contract requesting secrets.
+message ConsumerInfo {
+  bytes code_hash = 1;
+  bytes signature = 2;
 }
 
-// Information about the requesting enclave (public key, attestation).
-message SecretRequesterInfo {
-  // The attestation data from the requester's enclave.
-  bytes report = 1;
-  // The ephemeral public key used for encryption.
-  bytes public_key = 2;
+message SecretRequest {
+  SecretIdentifier secret_id = 1;
+  ConsumerInfo consumer = 2;
+}
+
+message EnvReport {
+  AttestationReport attestation = 1;
+  bytes operator_signature = 2;
+  string node_id = 3;
+}
+
+// For policy runner usage.
+message PolicyExecutionRequest {
+  repeated SecretIdentifier secret_ids = 1;
+  ConsumerInfo consumer = 2;
+  EnvReport env_report = 3;
+}
+
+message PolicyExecutionReport {
+  PolicyExecutionRequest request = 1;
+  bool decision = 2;
+  uint64 timestamp = 3;
 }
