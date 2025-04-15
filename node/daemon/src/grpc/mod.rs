@@ -6,13 +6,16 @@ use tonic::transport::Server;
 use tracing::info;
 
 use crate::{
-    config::GrpcConfig, error::AppError, grpc::secrets::SecretsDebugGrpc,
+    config::GrpcConfig,
+    error::AppError,
+    grpc::{enclave_client::EnclaveClient, secrets::SecretsDebugGrpc},
     services::secrets::SecretsService,
 };
 
 pub async fn start_grpc_server(
     config: &GrpcConfig,
     secrets_service: std::sync::Arc<SecretsService>,
+    enclave_client: EnclaveClient,
     mut shutdown: tokio::sync::broadcast::Receiver<()>,
 ) -> Result<(), AppError> {
     match config.mode.as_str() {
@@ -29,7 +32,10 @@ pub async fn start_grpc_server(
             let incoming = listener.incoming();
 
             Server::builder()
-                .add_service(SecretsServer::new(SecretsDebugGrpc::new(secrets_service)))
+                .add_service(SecretsServer::new(SecretsDebugGrpc::new(
+                    secrets_service,
+                    enclave_client, // Pass client
+                )))
                 .serve_with_incoming_shutdown(incoming, async {
                     let _ = shutdown.recv().await;
                 })
@@ -75,7 +81,10 @@ pub async fn start_grpc_server(
                 let uds_listener = UnixListener::bind(uds_path)
                     .map_err(|e| AppError::Service(format!("Failed to bind UDS: {}", e)))?;
                 let incoming = UnixListenerStream::new(uds_listener);
-                let svc = SecretsServer::new(SecretsDebugGrpc::new(secrets_service));
+                let svc = SecretsServer::new(SecretsDebugGrpc::new(
+                    secrets_service,
+                    enclave_client, // Pass client
+                ));
 
                 Server::builder()
                     .add_service(svc)

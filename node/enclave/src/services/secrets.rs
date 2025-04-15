@@ -99,11 +99,8 @@ impl Secrets {
             return SecretsBox::new_empty();
         }
 
-        // Serialize with ciborium
         let mut buffer = Vec::new();
-        if let Err(e) = into_writer(&results, &mut buffer) {
-            return SecretsBox::new_empty();
-        }
+        into_writer(&results, &mut buffer).unwrap();
         let aead = Aead::new(&shared);
         let ciphertext = aead.encrypt(&buffer);
         let sig = self.signer.sign(&ciphertext);

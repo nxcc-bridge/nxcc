@@ -17,7 +17,9 @@ use crate::{
     config::Config,
     identity::{create_ephemeral_identity, get_or_create_identity},
     network::NetworkManager,
+    policy::ManifestChecker,
     services::secrets::SecretsService,
+    web3::gateways::GatewayManager,
 };
 
 #[tokio::main]
@@ -53,14 +55,24 @@ async fn main() -> anyhow::Result<()> {
     let enclave_client =
         grpc::enclave_client::EnclaveClient::connect_uds("/tmp/enclave_grpc.sock".to_string())
             .await
-            .unwrap_or_else(|_| {
+            .unwrap_or_else(|e| {
                 panic!(
-                    "Failed to create EnclaveClient. Ensure the enclave is running on \
-                     /tmp/enclave_grpc.sock."
+                    "Failed to create EnclaveClient: {}. Ensure the enclave is running on \
+                     /tmp/enclave_grpc.sock.",
+                    e
                 )
             });
 
-    let secrets_service = SecretsService::new(secrets_tx.clone(), enclave_client);
+    // Instantiate dependencies for SecretsService
+    let gateway_manager = GatewayManager::new();
+    let manifest_checker = ManifestChecker;
+
+    let secrets_service = SecretsService::new(
+        secrets_tx.clone(),
+        enclave_client.clone(), // Clone enclave client
+        gateway_manager,
+        manifest_checker,
+    );
 
     {
         let notifier_tx_clone = notifier_tx.clone();
@@ -73,6 +85,7 @@ async fn main() -> anyhow::Result<()> {
         local_key,
         config.clone(),
         secrets_service.clone(),
+        enclave_client.clone(), // Pass enclave client to NetworkManager
         notifier_rx,
         secrets_rx,
     )
@@ -83,10 +96,16 @@ async fn main() -> anyhow::Result<()> {
     {
         let grpc_config = config.grpc.clone();
         let secrets_service_clone = secrets_service.clone();
+        // Pass enclave client to gRPC server for the final get_secrets call
+        let enclave_client_clone = enclave_client.clone();
         tokio::spawn(async move {
-            if let Err(e) =
-                crate::grpc::start_grpc_server(&grpc_config, secrets_service_clone, shutdown_rx)
-                    .await
+            if let Err(e) = crate::grpc::start_grpc_server(
+                &grpc_config,
+                secrets_service_clone,
+                enclave_client_clone, // Pass enclave client here
+                shutdown_rx,
+            )
+            .await
             {
                 tracing::error!("gRPC server error: {e}");
             }

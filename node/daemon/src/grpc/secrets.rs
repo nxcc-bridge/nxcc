@@ -1,21 +1,25 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use interface::{
     proto::daemon::{GetSecretsRequest, GetSecretsResponse, secrets_server::Secrets},
     types::{EnvReport, SecretId, SecretRequest, SecretsBox},
 };
 use tonic::{Request, Response, Status};
-use tracing::debug;
+use tracing::{debug, error, info};
 
-use crate::services::secrets::SecretsService;
+use crate::{grpc::enclave_client::EnclaveClient, services::secrets::SecretsService};
 
 pub struct SecretsDebugGrpc {
-    secrets_service: std::sync::Arc<SecretsService>,
+    secrets_service: Arc<SecretsService>,
+    enclave_client: EnclaveClient,
 }
 
 impl SecretsDebugGrpc {
-    pub fn new(secrets_service: std::sync::Arc<SecretsService>) -> Self {
-        Self { secrets_service }
+    pub fn new(secrets_service: Arc<SecretsService>, enclave_client: EnclaveClient) -> Self {
+        Self {
+            secrets_service,
+            enclave_client,
+        }
     }
 }
 
@@ -26,8 +30,8 @@ impl Secrets for SecretsDebugGrpc {
         request: Request<GetSecretsRequest>,
     ) -> Result<Response<GetSecretsResponse>, Status> {
         let req = request.into_inner();
-        debug!(
-            "Received gRPC get_secrets with {} request items",
+        info!(
+            "Received gRPC get_secrets request with {} secret requests",
             req.secret_requests.len()
         );
 
@@ -36,24 +40,66 @@ impl Secrets for SecretsDebugGrpc {
             .ok_or_else(|| Status::invalid_argument("Missing EnvReport"))?;
         let env_report = EnvReport::from_proto(env_proto);
 
-        let mut grouped = HashMap::new();
+        let mut grouped_requests = HashMap::new();
+        let mut all_secret_ids = Vec::new(); // Collect all requested IDs for the final fetch
         for proto_req in req.secret_requests {
             let sr = SecretRequest::from_proto(proto_req);
-            grouped
+            all_secret_ids.push(sr.secret_id.clone());
+            grouped_requests
                 .entry(sr.secret_id.clone())
                 .or_insert_with(Vec::new)
                 .push(sr);
         }
+        all_secret_ids.dedup(); // Ensure unique IDs
 
-        let secrets_box: SecretsBox = self
+        // Call the internal service method. This ensures secrets are fetched/stored.
+        // It returns Ok(()) on success, Err otherwise.
+        match self
             .secrets_service
-            .get_secrets(grouped, env_report)
+            .clone() // Clone Arc<SecretsService>
+            .get_secrets(grouped_requests, env_report.clone()) // Pass cloned env_report
             .await
-            .map_err(|e| Status::internal(format!("SecretsService error: {:?}", e)))?;
-
-        let resp = GetSecretsResponse {
-            secrets_box: Some(secrets_box.to_proto()),
-        };
-        Ok(Response::new(resp))
+        {
+            Ok(()) => {
+                info!(
+                    "Internal get_secrets succeeded. Fetching final SecretsBox from enclave for \
+                     {} secrets.",
+                    all_secret_ids.len()
+                );
+                // If successful, call the enclave's get_secrets to get the actual box
+                // for the original caller.
+                match self
+                    .enclave_client
+                    .get_secrets(all_secret_ids, vec![], env_report.attestation) // Use original attestation
+                    .await
+                {
+                    Ok(secrets_box) => {
+                        info!("Successfully retrieved final SecretsBox from enclave.");
+                        let resp = GetSecretsResponse {
+                            secrets_box: Some(secrets_box.to_proto()),
+                        };
+                        Ok(Response::new(resp))
+                    }
+                    Err(e) => {
+                        error!(
+                            "Internal get_secrets succeeded, but final enclave get_secrets \
+                             failed: {}",
+                            e
+                        );
+                        Err(Status::internal(format!(
+                            "Failed to retrieve secrets from enclave after fetch: {}",
+                            e
+                        )))
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Internal get_secrets failed: {:?}", e);
+                Err(Status::internal(format!(
+                    "SecretsService failed to get secrets: {:?}",
+                    e
+                )))
+            }
+        }
     }
 }
