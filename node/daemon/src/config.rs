@@ -14,11 +14,16 @@ pub struct Config {
     pub config: Option<PathBuf>,
 
     /// If provided, load or create a keypair at this path. Otherwise use ephemeral mode.
+    #[arg(long)]
     pub identity_path: Option<PathBuf>,
 
     /// Enable verbose logging
     #[arg(short, long, default_value_t = false)]
     pub verbose: bool,
+
+    /// Directory to cache downloaded policies. Defaults to a system temp directory.
+    #[arg(long)]
+    pub policy_cache_dir: Option<PathBuf>,
 
     /// Network configuration
     #[serde(default)]

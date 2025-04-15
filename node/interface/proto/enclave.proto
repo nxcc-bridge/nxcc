@@ -30,7 +30,7 @@ message PutSecretsRequest {
 
 message SecretsBundle {
   interface.SecretsBox secrets_box = 1;
-  interface.AttestationReport attestation_report = 2;
+  interface.EnvReport env_report = 2;
 }
 
 message PutSecretsResponse {
@@ -40,7 +40,7 @@ message PutSecretsResponse {
 message GetSecretsEnclaveRequest {
   repeated SecretEnclaveRequest requests = 1;
   repeated PolicyExecutionReport policy_reports = 2;
-  interface.AttestationReport requester_attestation = 3;
+  interface.EnvReport requester_env_report = 3; // Changed from AttestationReport
 }
 
 message SecretEnclaveRequest {

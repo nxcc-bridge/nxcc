@@ -10,7 +10,7 @@ use interface::{
         PutSecretsResponse, RunWorkerRequest, RunWorkerResponse, SecretStatus as ProtoSecretStatus,
         enclave_secrets_server::EnclaveSecrets, runner_server::Runner,
     },
-    types::{AttestationReport, SecretsBox},
+    types::{AttestationReport, EnvReport, SecretId, SecretsBox},
 };
 
 pub struct EnclaveSecretsService {
@@ -44,12 +44,12 @@ impl EnclaveSecrets for EnclaveSecretsService {
             let proto_sb = b
                 .secrets_box
                 .ok_or_else(|| Status::invalid_argument("Missing secrets_box"))?;
-            let proto_att = b
-                .attestation_report
-                .ok_or_else(|| Status::invalid_argument("Missing att_report"))?;
+            let proto_env_report = b
+                .env_report
+                .ok_or_else(|| Status::invalid_argument("Missing env_report"))?;
             let sb = SecretsBox::from_proto(proto_sb);
-            let att = AttestationReport::from_proto(proto_att);
-            bundles.push((sb, att));
+            let env_report = EnvReport::from_proto(proto_env_report);
+            bundles.push((sb, env_report)); // Store EnvReport
         }
         let success = self.secrets.put_secrets(bundles);
         Ok(Response::new(PutSecretsResponse { success }))
@@ -63,14 +63,14 @@ impl EnclaveSecrets for EnclaveSecretsService {
         let mut ids = Vec::new();
         for sreq in req.requests {
             if let Some(si) = sreq.id {
-                ids.push(interface::types::SecretId::from_proto(si));
+                ids.push(SecretId::from_proto(si));
             }
         }
-        let proto_att = req
-            .requester_attestation
-            .ok_or_else(|| Status::invalid_argument("Missing requester_attestation"))?;
-        let att = AttestationReport::from_proto(proto_att);
-        let sb = self.secrets.get_secrets(ids, vec![], att);
+        let proto_env_report = req
+            .requester_env_report
+            .ok_or_else(|| Status::invalid_argument("Missing requester_env_report"))?;
+        let env_report = EnvReport::from_proto(proto_env_report);
+        let sb = self.secrets.get_secrets(ids, env_report);
         let resp = GetSecretsEnclaveResponse {
             secrets_box: Some(sb.to_proto()),
         };
@@ -84,7 +84,7 @@ impl EnclaveSecrets for EnclaveSecretsService {
         let req = request.into_inner();
         let mut ids = Vec::new();
         for pid in req.ids {
-            ids.push(interface::types::SecretId::from_proto(pid));
+            ids.push(SecretId::from_proto(pid));
         }
         let results = self.secrets.check_secrets(ids);
         let mut statuses = Vec::new();

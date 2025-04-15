@@ -123,6 +123,7 @@ pub struct SecretsBox {
     pub sender_public_key: Vec<u8>,
     pub signature: Vec<u8>,
     pub alg: String,
+    pub contained_secret_ids: Vec<SecretId>,
 }
 
 impl SecretsBox {
@@ -132,22 +133,35 @@ impl SecretsBox {
             sender_public_key: vec![],
             signature: vec![],
             alg: "X25519+AES256GCM".to_string(),
+            contained_secret_ids: vec![],
         }
     }
+
     pub fn from_proto(p: proto::SecretsBox) -> Self {
         Self {
             encrypted_payload: p.encrypted_payload,
             sender_public_key: p.sender_public_key,
             signature: p.signature,
             alg: p.alg,
+            contained_secret_ids: p
+                .contained_secret_ids
+                .into_iter()
+                .map(SecretId::from_proto)
+                .collect(),
         }
     }
+
     pub fn to_proto(&self) -> proto::SecretsBox {
         let mut out = proto::SecretsBox::default();
         out.encrypted_payload = self.encrypted_payload.clone();
         out.sender_public_key = self.sender_public_key.clone();
         out.signature = self.signature.clone();
         out.alg = self.alg.clone();
+        out.contained_secret_ids = self
+            .contained_secret_ids
+            .iter()
+            .map(|id| id.to_proto())
+            .collect();
         out
     }
 }

@@ -9,6 +9,8 @@ mod policy;
 mod services;
 mod web3;
 
+use std::sync::Arc;
+
 use grpc::enclave_client;
 use tracing::{Level, info};
 use tracing_subscriber::{EnvFilter, fmt::Subscriber};
@@ -17,7 +19,7 @@ use crate::{
     config::Config,
     identity::{create_ephemeral_identity, get_or_create_identity},
     network::NetworkManager,
-    policy::ManifestChecker,
+    policy::PolicyManager,
     services::secrets::SecretsService,
     web3::gateways::GatewayManager,
 };
@@ -65,13 +67,12 @@ async fn main() -> anyhow::Result<()> {
 
     // Instantiate dependencies for SecretsService
     let gateway_manager = GatewayManager::new();
-    let manifest_checker = ManifestChecker;
+    let policy_manager = Arc::new(PolicyManager::new(gateway_manager, &config).await?);
 
     let secrets_service = SecretsService::new(
         secrets_tx.clone(),
         enclave_client.clone(), // Clone enclave client
-        gateway_manager,
-        manifest_checker,
+        policy_manager.clone(),
     );
 
     {
@@ -85,7 +86,6 @@ async fn main() -> anyhow::Result<()> {
         local_key,
         config.clone(),
         secrets_service.clone(),
-        enclave_client.clone(), // Pass enclave client to NetworkManager
         notifier_rx,
         secrets_rx,
     )

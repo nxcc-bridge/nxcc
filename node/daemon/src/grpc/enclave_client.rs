@@ -6,7 +6,7 @@ use interface::{
         SecretEnclaveRequest, SecretsBundle as ProtoSecretsBundle,
         enclave_secrets_client::EnclaveSecretsClient, runner_client::RunnerClient,
     },
-    types::{AttestationReport, SecretId, SecretsBox},
+    types::{AttestationReport, EnvReport, SecretId, SecretsBox},
 };
 use tokio::net::UnixStream;
 use tonic::{
@@ -61,13 +61,13 @@ impl EnclaveClient {
 
     pub async fn put_secrets(
         &self,
-        boxes: Vec<(SecretsBox, AttestationReport)>,
+        bundles_with_reports: Vec<(SecretsBox, EnvReport)>,
     ) -> Result<bool, String> {
         let mut bundles = Vec::new();
-        for (sb, att) in boxes {
+        for (sb, env_report) in bundles_with_reports {
             bundles.push(ProtoSecretsBundle {
                 secrets_box: Some(sb.to_proto()),
-                attestation_report: Some(att.to_proto()),
+                env_report: Some(env_report.to_proto()),
             });
         }
         let req = PutSecretsRequest {
@@ -81,8 +81,7 @@ impl EnclaveClient {
     pub async fn get_secrets(
         &self,
         secret_ids: Vec<SecretId>,
-        _unused: Vec<()>,
-        att: AttestationReport,
+        env_report: EnvReport,
     ) -> Result<SecretsBox, String> {
         let mut requests = Vec::new();
         for sid in secret_ids {
@@ -92,7 +91,7 @@ impl EnclaveClient {
         }
         let req = GetSecretsEnclaveRequest {
             requests,
-            requester_attestation: Some(att.to_proto()),
+            requester_env_report: Some(env_report.to_proto()),
             policy_reports: vec![], // not used yet
         };
         let mut client = self.secrets_client.clone();

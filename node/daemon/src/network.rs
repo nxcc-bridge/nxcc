@@ -7,9 +7,8 @@ use std::{
 
 use futures::{StreamExt, channel::mpsc};
 use interface::{
-    policy::PolicyBundle, // Assuming PolicyBundle is defined here or elsewhere
-    proto::interface::AttestationReport as ProtoAttestationReport,
-    types::{AttestationReport, EnvReport, SecretId, SecretRequest, SecretsBox},
+    policy::PolicyBundle,
+    types::{EnvReport, SecretId, SecretRequest, SecretsBox},
 };
 use libp2p::{
     Multiaddr, Swarm,
@@ -42,7 +41,7 @@ pub enum SecretsMessage {
     PublishSecretsResponse {
         request_id: u64,
         secrets_box: SecretsBox,
-        attestation_report: AttestationReport,
+        env_report: EnvReport,
     },
 }
 
@@ -56,7 +55,7 @@ enum GossipMessage {
     SecretBatchResponse {
         request_id: u64,
         secrets_box: SecretsBox,
-        attestation_report: AttestationReport,
+        env_report: EnvReport,
     },
     Notification {
         content: String,
@@ -126,7 +125,6 @@ pub struct NetworkManager {
     notifier_receiver: mpsc::Receiver<NotifierMessage>,
     secrets_receiver: mpsc::Receiver<SecretsMessage>,
     secrets_service: Arc<SecretsService>,
-    enclave_client: EnclaveClient,
 }
 
 impl NetworkManager {
@@ -134,7 +132,6 @@ impl NetworkManager {
         local_key: libp2p::identity::Keypair,
         config: Config,
         secrets_service: Arc<SecretsService>,
-        enclave_client: EnclaveClient,
         notifier_receiver: mpsc::Receiver<NotifierMessage>,
         secrets_receiver: mpsc::Receiver<SecretsMessage>,
     ) -> Result<Self, AppError> {
@@ -144,7 +141,6 @@ impl NetworkManager {
             notifier_receiver,
             secrets_receiver,
             secrets_service,
-            enclave_client,
         })
     }
 
@@ -174,7 +170,6 @@ impl NetworkManager {
         let secrets_service = Arc::clone(&self.secrets_service);
         let notifier_rx = std::mem::replace(&mut self.notifier_receiver, mpsc::channel(1).1);
         let secrets_rx = std::mem::replace(&mut self.secrets_receiver, mpsc::channel(1).1);
-        let enclave_client = self.enclave_client.clone(); // Clone for the network loop
 
         // Subscribe to a global "secrets" topic for gossip
         let secrets_topic = gossipsub::IdentTopic::new("secrets");
@@ -186,7 +181,6 @@ impl NetworkManager {
                 notifier_rx,
                 secrets_rx,
                 secrets_service,
-                enclave_client, // Pass client
                 secrets_topic,
                 shutdown,
             )
@@ -305,14 +299,13 @@ async fn run_network_loop(
     mut notifier_rx: mpsc::Receiver<NotifierMessage>,
     mut secrets_rx: mpsc::Receiver<SecretsMessage>,
     secrets_service: Arc<SecretsService>,
-    enclave_client: EnclaveClient,
     topic: gossipsub::IdentTopic,
     mut shutdown: tokio::sync::broadcast::Receiver<()>,
 ) {
     loop {
         tokio::select! {
             event = swarm.select_next_some() => {
-                handle_swarm_event(event, &mut swarm, &topic, &secrets_service, &enclave_client).await; // Pass client
+                handle_swarm_event(event, &mut swarm, &topic, &secrets_service).await;
             },
 
             msg = notifier_rx.next() => {
@@ -325,7 +318,8 @@ async fn run_network_loop(
 
             msg = secrets_rx.next() => {
                 if let Some(msg) = msg {
-                    if let Err(e) = handle_secrets_message(msg, &mut swarm, &topic).await {
+                    // Need secrets_service to construct the response message
+                    if let Err(e) = handle_secrets_message(msg, &mut swarm, &topic, &secrets_service).await {
                         error!("Failed to handle secrets message: {e}");
                     }
                 }
@@ -343,20 +337,12 @@ async fn handle_swarm_event(
     swarm: &mut Swarm<AppBehaviour>,
     topic: &gossipsub::IdentTopic,
     secrets_service: &Arc<SecretsService>,
-    enclave_client: &EnclaveClient,
 ) {
     match event {
         SwarmEvent::Behaviour(app_event) => match app_event {
             AppEvent::Mdns(mdns_event) => handle_mdns_event(mdns_event, swarm),
             AppEvent::Gossipsub(gossipsub_event) => {
-                handle_gossipsub_event(
-                    gossipsub_event,
-                    swarm,
-                    topic,
-                    secrets_service,
-                    enclave_client, // Pass client
-                )
-                .await
+                handle_gossipsub_event(gossipsub_event, swarm, topic, secrets_service).await
             }
             AppEvent::Identify(identify_event) => handle_identify_event(identify_event),
             AppEvent::Ping(ping_event) => handle_ping_event(ping_event),
@@ -406,7 +392,6 @@ async fn handle_gossipsub_event(
     swarm: &mut Swarm<AppBehaviour>,
     topic: &gossipsub::IdentTopic,
     secrets_service: &Arc<SecretsService>,
-    enclave_client: &EnclaveClient,
 ) {
     match event {
         gossipsub::Event::Subscribed { peer_id, topic } => {
@@ -420,15 +405,7 @@ async fn handle_gossipsub_event(
             message_id: _,
             message,
         } => {
-            handle_gossip_message(
-                message,
-                propagation_source,
-                swarm,
-                topic,
-                secrets_service,
-                enclave_client, // Pass client
-            )
-            .await;
+            handle_gossip_message(message, propagation_source, swarm, topic, secrets_service).await;
         }
         e => {
             debug!("unhandled gossip message received: {e:?}");
@@ -442,7 +419,6 @@ async fn handle_gossip_message(
     swarm: &mut Swarm<AppBehaviour>,
     topic: &gossipsub::IdentTopic,
     secrets_service: &Arc<SecretsService>,
-    enclave_client: &EnclaveClient,
 ) {
     match ciborium::de::from_reader::<GossipMessage, _>(&message.data[..]) {
         Ok(msg) => match msg {
@@ -459,7 +435,6 @@ async fn handle_gossip_message(
                     swarm,
                     topic,
                     secrets_service,
-                    enclave_client, // Pass client
                 )
                 .await
                 {
@@ -469,18 +444,14 @@ async fn handle_gossip_message(
             GossipMessage::SecretBatchResponse {
                 request_id,
                 secrets_box,
-                attestation_report, // Extract attestation
+                env_report,
             } => {
                 info!(
                     "Received SecretBatchResponse from peer={} for request_id={}",
                     propagation_source, request_id
                 );
                 if let Err(e) = secrets_service
-                    .handle_incoming_secret_batch_response(
-                        request_id,
-                        secrets_box,
-                        attestation_report, // Pass attestation
-                    )
+                    .handle_incoming_secret_batch_response(request_id, secrets_box, env_report)
                     .await
                 {
                     error!("Error handling secrets batch response: {e:?}")
@@ -502,12 +473,11 @@ async fn handle_gossip_message(
 async fn handle_secret_batch_request(
     request_id: u64,
     secret_requests: BTreeMap<SecretId, Vec<SecretRequest>>,
-    env_report: EnvReport,
+    requester_env_report: EnvReport, // Renamed for clarity
     propagation_source: libp2p::PeerId,
     swarm: &mut Swarm<AppBehaviour>,
     topic: &gossipsub::IdentTopic,
     secrets_service: &Arc<SecretsService>,
-    enclave_client: &EnclaveClient,
 ) -> Result<(), AppError> {
     info!(
         "Received SecretBatchRequest from peer={propagation_source} with request_id={request_id}, \
@@ -515,32 +485,33 @@ async fn handle_secret_batch_request(
         secret_requests.len()
     );
 
-    let secrets_box = secrets_service
+    let maybe_secrets_box = secrets_service
         .handle_incoming_secret_batch_request(
             request_id,
             secret_requests.clone(),
-            env_report.clone(),
+            requester_env_report.clone(),
         )
         .await;
 
-    // Only send a response if we found some secrets
-    if !secrets_box.encrypted_payload.is_empty() {
+    if let Some(secrets_box) = maybe_secrets_box {
         info!(
             "Found local secrets for request_id={request_id}, sending SecretBatchResponse to \
              network"
         );
 
-        // Get our own attestation report to send back
-        // Use empty user_data for now, might need context later
-        let local_attestation_report = enclave_client
-            .get_report(vec![])
-            .await
-            .map_err(|e| AppError::Service(format!("Failed to get local attestation: {e}")))?;
+        // TODO: Need a way to get the *current node's* EnvReport.
+        // This requires access to the operator key for signing and the node ID.
+        // For now, we'll re-use the requester's report as a placeholder,
+        // which is INCORRECT but allows compilation.
+        // In a real scenario, the NetworkManager or a shared context
+        // would need to provide this.
+        let local_env_report = requester_env_report; // Placeholder!
+        warn!("Using placeholder EnvReport for response - needs implementation!");
 
         let response = GossipMessage::SecretBatchResponse {
             request_id,
             secrets_box,
-            attestation_report: local_attestation_report, // Include our attestation
+            env_report: local_env_report,
         };
 
         publish_message(swarm, topic, &response)?;
@@ -614,6 +585,7 @@ async fn handle_secrets_message(
     msg: SecretsMessage,
     swarm: &mut Swarm<AppBehaviour>,
     topic: &gossipsub::IdentTopic,
+    _secrets_service: &Arc<SecretsService>, // May need this later for constructing responses
 ) -> Result<(), AppError> {
     match msg {
         SecretsMessage::PublishSecretsRequest {
@@ -637,17 +609,17 @@ async fn handle_secrets_message(
         SecretsMessage::PublishSecretsResponse {
             request_id,
             secrets_box,
-            attestation_report, // Include attestation
+            env_report,
         } => {
             debug!(
-                "Publishing secret batch response {request_id} (attestation included)",
+                "Publishing secret batch response {request_id} (EnvReport included)",
                 request_id = request_id
             );
 
             let gossip = GossipMessage::SecretBatchResponse {
                 request_id,
                 secrets_box,
-                attestation_report, // Include attestation
+                env_report,
             };
 
             publish_message(swarm, topic, &gossip)?;

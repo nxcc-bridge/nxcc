@@ -9,15 +9,15 @@ use std::{
 
 use futures::channel::mpsc;
 use interface::{
-    policy::{PolicyBundle, PolicyManifest},
-    types::{AttestationReport, EnvReport, SecretId, SecretRequest, SecretsBox},
+    policy::PolicyBundle,
+    types::{EnvReport, SecretId, SecretRequest, SecretsBox},
 };
 use tokio::sync::{Mutex, RwLock, oneshot};
 use tracing::{debug, error, info, warn};
 
 use crate::{
     error::AppError, grpc::enclave_client::EnclaveClient, network::SecretsMessage,
-    policy::ManifestChecker, web3::gateways::GatewayManager,
+    policy::PolicyManager,
 };
 
 // Timeout for waiting for P2P responses
@@ -28,9 +28,7 @@ const RESPONSE_THRESHOLD: usize = 1;
 pub struct SecretsService {
     p2p_secrets_sender: mpsc::Sender<SecretsMessage>,
     enclave_client: EnclaveClient,
-    gateway_manager: GatewayManager,
-    manifest_checker: ManifestChecker,
-    policy_cache: RwLock<HashMap<SecretId, PolicyBundle>>,
+    policy_manager: Arc<PolicyManager>,
     pending: Mutex<HashMap<u64, PendingRequest>>,
     request_counter: AtomicU64,
 }
@@ -38,8 +36,8 @@ pub struct SecretsService {
 struct PendingRequest {
     // All secret IDs originally requested that were missing locally
     requested_ids: HashSet<SecretId>,
-    // Bundles received from peers
-    collected_bundles: Vec<(SecretsBox, AttestationReport)>,
+    // Bundles received from peers, along with their EnvReport
+    collected_bundles: Vec<(SecretsBox, EnvReport)>,
     // Count of responses received
     response_count: usize,
     // Threshold for number of responses needed for the request
@@ -52,15 +50,12 @@ impl SecretsService {
     pub fn new(
         p2p_secrets_sender: mpsc::Sender<SecretsMessage>,
         enclave_client: EnclaveClient,
-        gateway_manager: GatewayManager,
-        manifest_checker: ManifestChecker,
+        policy_manager: Arc<PolicyManager>,
     ) -> Arc<Self> {
         Arc::new(Self {
             p2p_secrets_sender,
             enclave_client,
-            gateway_manager,
-            manifest_checker,
-            policy_cache: RwLock::new(HashMap::new()),
+            policy_manager,
             pending: Mutex::new(HashMap::new()),
             request_counter: AtomicU64::new(0),
         })
@@ -94,39 +89,31 @@ impl SecretsService {
             return Ok(());
         }
 
-        // 2. Fetch and cache policies for missing secrets
-        // 3. Check policy manifests
+        // 2. Fetch and validate policies for missing secrets using PolicyManager
         let mut policies = HashMap::new();
         let missing_ids: HashSet<SecretId> = missing_requests.keys().cloned().collect();
         for secret_id in &missing_ids {
-            match self.get_policy(secret_id).await {
+            match self.policy_manager.get_policy(secret_id).await {
                 Ok(policy) => {
-                    // Check manifest
-                    if let Err(e) = self.manifest_checker.check_manifest(&policy.manifest) {
-                        error!(
-                            "Manifest check failed for policy of secret {:?}: {}",
-                            secret_id, e
-                        );
-                        return Err(AppError::Service(format!(
-                            "Policy manifest check failed for {:?}: {}",
-                            secret_id, e
-                        )));
-                    }
-                    debug!("Manifest check passed for policy of secret {:?}", secret_id);
+                    // PolicyManager already checked the manifest internally
+                    debug!("Policy validated for secret {:?}", secret_id);
                     policies.insert(secret_id.clone(), policy);
                 }
                 Err(e) => {
-                    error!("Failed to get policy for secret {:?}: {}", secret_id, e);
-                    return Err(e); // Propagate policy fetch/parse error
+                    error!(
+                        "Failed to get or validate policy for secret {:?}: {}",
+                        secret_id, e
+                    );
+                    return Err(e); // Propagate policy fetch/validation error
                 }
             }
         }
         info!(
-            "Successfully fetched and checked manifests for {} policies.",
+            "Successfully fetched and validated policies for {} missing secrets.",
             policies.len()
         );
 
-        // 4. Request missing secrets from P2P network
+        // 3. Request missing secrets from P2P network
         let request_id = self.request_counter.fetch_add(1, Ordering::Relaxed) + 1;
         let (tx, rx) = oneshot::channel();
 
@@ -168,7 +155,7 @@ impl SecretsService {
             .try_send(SecretsMessage::PublishSecretsRequest {
                 request_id,
                 secret_requests: BTreeMap::from_iter(missing_requests.clone().into_iter()),
-                env_report: env_report.clone(),
+                env_report: env_report.clone(), // Send the original requester's EnvReport
             })
             .map_err(|e| AppError::Service(format!("Failed to publish secrets request: {e}")))?;
 
@@ -178,7 +165,7 @@ impl SecretsService {
             missing_ids.len()
         );
 
-        // 5. Wait for P2P process completion (threshold met or timeout)
+        // 4. Wait for P2P process completion (threshold met or timeout)
         match rx.await {
             Ok(Ok(())) => {
                 info!("Successfully processed request {}", request_id);
@@ -198,94 +185,12 @@ impl SecretsService {
         }
     }
 
-    /// Fetches policy from cache or network.
-    async fn get_policy(&self, secret_id: &SecretId) -> Result<PolicyBundle, AppError> {
-        // Check cache first
-        if let Some(policy) = self.policy_cache.read().await.get(secret_id) {
-            debug!("Policy cache hit for secret {:?}", secret_id);
-            return Ok(policy.clone());
-        }
-        debug!("Policy cache miss for secret {:?}", secret_id);
-
-        // Fetch from network
-        let policy_url = self
-            .gateway_manager
-            .get_policy_url(
-                secret_id.chain_id,
-                secret_id.identity_address,
-                secret_id.identity_id,
-            )
-            .await?;
-
-        info!(
-            "Fetching policy for secret {:?} from URL: {}",
-            secret_id, policy_url
-        );
-
-        // Handle mock URLs for testing/dev
-        if policy_url.starts_with("mock://") {
-            warn!("Using mock policy for secret {:?}", secret_id);
-            // Create a dummy policy bundle
-            let mock_manifest = PolicyManifest {
-                version: "1.0".to_string(),
-                name: format!("Mock Policy for {:?}", secret_id),
-                description: "A dummy policy for testing".to_string(),
-                allowed_consumers: vec![], // Adjust as needed
-                execution_constraints: interface::policy::ExecutionConstraints {
-                    max_memory_mb: 128,
-                    max_execution_time_ms: 1000,
-                    allowed_network_calls: false,
-                },
-            };
-            let mock_policy = PolicyBundle {
-                manifest: mock_manifest,
-                executable: b"mock_executable_code".to_vec(),
-            };
-            // Cache the mock policy
-            self.policy_cache
-                .write()
-                .await
-                .insert(secret_id.clone(), mock_policy.clone());
-            return Ok(mock_policy);
-        }
-
-        // Fetch the actual policy content
-        let client = reqwest::Client::new();
-        let response = client.get(&policy_url).send().await.map_err(|e| {
-            AppError::Network(format!("Failed to fetch policy from {}: {}", policy_url, e))
-        })?;
-
-        if !response.status().is_success() {
-            return Err(AppError::Network(format!(
-                "Failed to fetch policy from {}: Status {}",
-                policy_url,
-                response.status()
-            )));
-        }
-
-        let policy: PolicyBundle = response.json().await.map_err(|e| {
-            AppError::Service(format!(
-                "Failed to parse policy JSON from {}: {}",
-                policy_url, e
-            ))
-        })?;
-
-        // Cache the fetched policy
-        self.policy_cache
-            .write()
-            .await
-            .insert(secret_id.clone(), policy.clone());
-        info!("Successfully fetched and cached policy for {:?}", secret_id);
-
-        Ok(policy)
-    }
-
     /// Called when we receive a p2p secrets response.
     pub async fn handle_incoming_secret_batch_response(
         self: &Arc<Self>,
         request_id: u64,
         secrets_box: SecretsBox,
-        attestation_report: AttestationReport,
+        env_report: EnvReport, // Now receives EnvReport
     ) -> Result<(), AppError> {
         let mut lock = self.pending.lock().await;
         if let Some(p) = lock.get_mut(&request_id) {
@@ -294,16 +199,17 @@ impl SecretsService {
                 request_id, p.response_count, p.threshold
             );
 
-            // 6. Run policy check against responder (TODO)
+            // TODO: Run policy check against responder
             // This requires:
-            // - The policy for the secret(s) inside the box (we don't know which ones yet).
-            // - The responder's EnvReport (we only have AttestationReport currently).
+            // - The policy for the secret(s) inside the box (use secrets_box.contained_secret_ids).
+            // - The responder's EnvReport (received as parameter).
             // - Integration with the RunnerService/EnclaveClient runner part.
             // For now, we assume the response is valid if received.
             let is_valid_response = true; // Placeholder
 
             if is_valid_response {
-                p.collected_bundles.push((secrets_box, attestation_report));
+                // Store the EnvReport along with the SecretsBox
+                p.collected_bundles.push((secrets_box, env_report));
                 p.response_count += 1;
                 info!(
                     "Added valid response bundle to request {}. New count: {}",
@@ -349,38 +255,40 @@ impl SecretsService {
         &self,
         _request_id: u64,
         secret_requests: BTreeMap<SecretId, Vec<SecretRequest>>,
-        env_report: EnvReport,
-    ) -> SecretsBox {
+        requester_env_report: EnvReport, // The EnvReport of the node asking for secrets
+    ) -> Option<SecretsBox> {
+        // Return Option<SecretsBox> instead of just SecretsBox
         let found_ids = self.gather_local(&secret_requests).await;
         if found_ids.is_empty() {
             debug!("No local secrets found for incoming request.");
-            return SecretsBox::new_empty();
+            return None;
         }
         debug!(
             "Found {} local secrets for incoming request.",
             found_ids.len()
         );
 
-        // TODO: Policy check - Should we check if the *requester* (env_report) is allowed
+        // TODO: Policy check - Should we check if the *requester* (requester_env_report) is allowed
         // by the policy to receive these secrets before sending? This might require
-        // fetching policies here as well. For now, assume allowed if found locally.
+        // fetching policies here using self.policy_manager.get_policy(&id).
+        // For now, assume allowed if found locally.
 
-        let att = env_report.attestation.clone();
+        // Pass the *requester's* EnvReport to the enclave's get_secrets
         match self
             .enclave_client
-            .get_secrets(found_ids, vec![], att)
+            .get_secrets(found_ids, requester_env_report)
             .await
         {
             Ok(sb) => {
                 info!("Returning secrets box for incoming request.");
-                sb
+                Some(sb)
             }
             Err(e) => {
                 error!(
                     "Failed to get secrets from enclave for incoming request: {}",
                     e
                 );
-                SecretsBox::new_empty()
+                None
             }
         }
     }
@@ -439,12 +347,13 @@ impl SecretsService {
                 return Ok(());
             }
 
-            // 7. Store valid secrets in the enclave
+            // 7. Store valid secrets in the enclave using put_secrets with EnvReports
             info!(
                 "Calling put_secrets for request {} with {} bundles.",
                 request_id,
                 p.collected_bundles.len()
             );
+            // Pass the collected (SecretsBox, EnvReport) tuples directly
             match self.enclave_client.put_secrets(p.collected_bundles).await {
                 Ok(success) => {
                     if !success {
