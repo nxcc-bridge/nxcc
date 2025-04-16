@@ -6,7 +6,7 @@ use std::{
 };
 
 use futures::{StreamExt, channel::mpsc};
-use interface::{
+use nxcc_interface::{
     policy::PolicyBundle,
     types::{EnvReport, SecretId, SecretRequest, SecretsBox},
 };

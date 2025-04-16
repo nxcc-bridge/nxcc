@@ -1,5 +1,5 @@
 use crate::services::{runner::RunnerService, secrets::Secrets};
-use interface::{
+use nxcc_interface::{
     proto::enclave::{
         CheckSecretsRequest,
         CheckSecretsResponse,
@@ -39,7 +39,7 @@ impl EnclaveSecrets for EnclaveSecretsService {
     async fn get_report(
         &self,
         request: Request<GetReportRequest>,
-    ) -> Result<Response<interface::proto::interface::AttestationReport>, Status> {
+    ) -> Result<Response<nxcc_interface::proto::interface::AttestationReport>, Status> {
         let user_data = request.into_inner().user_data;
         debug!(
             "gRPC GetReport request with user_data size {}",

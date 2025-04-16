@@ -1541,40 +1541,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "daemon"
-version = "0.1.0"
-dependencies = [
- "alloy-contract",
- "alloy-primitives",
- "alloy-provider",
- "alloy-sol-types",
- "alloy-transport-http",
- "anyhow",
- "ciborium",
- "clap",
- "figment",
- "futures",
- "hyper-util",
- "interface",
- "libp2p",
- "prost",
- "rand 0.9.0",
- "reqwest",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.12",
- "tokio",
- "tokio-stream",
- "tokio-vsock",
- "tonic",
- "tower 0.5.2",
- "tracing",
- "tracing-subscriber",
- "url",
-]
-
-[[package]]
 name = "darling"
 version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1857,34 +1823,6 @@ dependencies = [
  "sec1",
  "serdect",
  "subtle",
- "zeroize",
-]
-
-[[package]]
-name = "enclave"
-version = "0.1.0"
-dependencies = [
- "aes-gcm-siv",
- "alloy-primitives",
- "chrono",
- "ciborium",
- "ed25519-dalek",
- "futures",
- "hex",
- "interface",
- "once_cell",
- "rand 0.8.5",
- "rand_core 0.6.4",
- "serde",
- "sha2",
- "thiserror 1.0.69",
- "tokio",
- "tokio-stream",
- "tokio-vsock",
- "tonic",
- "tracing",
- "tracing-subscriber",
- "x25519-dalek",
  "zeroize",
 ]
 
@@ -2880,17 +2818,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "interface"
-version = "0.1.0"
-dependencies = [
- "alloy-primitives",
- "prost",
- "serde",
- "tonic",
- "tonic-build",
-]
-
-[[package]]
 name = "ipconfig"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3805,6 +3732,79 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.100",
+]
+
+[[package]]
+name = "nxcc-daemon"
+version = "0.1.0"
+dependencies = [
+ "alloy-contract",
+ "alloy-primitives",
+ "alloy-provider",
+ "alloy-sol-types",
+ "alloy-transport-http",
+ "anyhow",
+ "ciborium",
+ "clap",
+ "figment",
+ "futures",
+ "hyper-util",
+ "libp2p",
+ "nxcc-interface",
+ "prost",
+ "rand 0.9.0",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.12",
+ "tokio",
+ "tokio-stream",
+ "tokio-vsock",
+ "tonic",
+ "tower 0.5.2",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+]
+
+[[package]]
+name = "nxcc-interface"
+version = "0.1.0"
+dependencies = [
+ "alloy-primitives",
+ "prost",
+ "serde",
+ "tonic",
+ "tonic-build",
+]
+
+[[package]]
+name = "nxcc-platform-enclave"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm-siv",
+ "alloy-primitives",
+ "chrono",
+ "ciborium",
+ "ed25519-dalek",
+ "futures",
+ "hex",
+ "nxcc-interface",
+ "once_cell",
+ "rand 0.8.5",
+ "rand_core 0.6.4",
+ "serde",
+ "sha2",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-stream",
+ "tokio-vsock",
+ "tonic",
+ "tracing",
+ "tracing-subscriber",
+ "x25519-dalek",
+ "zeroize",
 ]
 
 [[package]]

@@ -6,7 +6,7 @@ use std::{
     time::SystemTime,
 };
 
-use interface::{
+use nxcc_interface::{
     policy::{PolicyBundle, PolicyManifest},
     types::SecretId,
 };
@@ -137,7 +137,7 @@ impl PolicyManager {
                 name: format!("Mock Policy for {:?}", secret_id),
                 description: "A dummy policy for testing".to_string(),
                 allowed_consumers: vec![], // Adjust as needed
-                execution_constraints: interface::policy::ExecutionConstraints {
+                execution_constraints: nxcc_interface::policy::ExecutionConstraints {
                     max_memory_mb: 128,
                     max_execution_time_ms: 1000,
                     allowed_network_calls: false,

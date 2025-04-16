@@ -1,6 +1,6 @@
 use crate::services::secrets::Secrets;
 use ciborium::de::from_reader;
-use interface::types::{PolicyExecutionReport, PolicyExecutionRequest};
+use nxcc_interface::types::{PolicyExecutionReport, PolicyExecutionRequest};
 use std::sync::Arc;
 use tracing::{debug, error, info};
 

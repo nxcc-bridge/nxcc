@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use interface::proto::enclave::{
+use nxcc_interface::proto::enclave::{
     DeliverEventRequest, RunWorkerRequest, runner_client::RunnerClient,
 };
 

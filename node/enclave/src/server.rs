@@ -9,7 +9,7 @@ use crate::services::{
     secrets::Secrets,
 };
 
-use interface::proto::enclave::{
+use nxcc_interface::proto::enclave::{
     enclave_secrets_server::EnclaveSecretsServer, runner_server::RunnerServer,
 };
 

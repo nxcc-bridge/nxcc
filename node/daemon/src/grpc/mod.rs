@@ -1,7 +1,7 @@
 pub mod enclave_client;
 pub mod secrets;
 
-use interface::proto::daemon::secrets_server::SecretsServer;
+use nxcc_interface::proto::daemon::secrets_server::SecretsServer;
 use tonic::transport::Server;
 use tracing::info;
 

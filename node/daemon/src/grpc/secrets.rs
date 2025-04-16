@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use interface::{
+use nxcc_interface::{
     proto::daemon::{GetSecretsRequest, GetSecretsResponse, secrets_server::Secrets},
     types::{EnvReport, FromProto as _, IntoProto as _, SecretId, SecretRequest, SecretsBox},
 };

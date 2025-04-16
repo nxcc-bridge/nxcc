@@ -1,5 +1,5 @@
 use hyper_util::rt::TokioIo;
-use interface::{
+use nxcc_interface::{
     proto::enclave::{
         CheckSecretsRequest, DeliverEventRequest, DeliverEventResponse, GetReportRequest,
         GetSecretsEnclaveRequest, PutSecretsRequest, PutSecretsResponse, RunWorkerRequest,

@@ -3,7 +3,7 @@ use aes_gcm_siv::{
     aead::{Aead, KeyInit, OsRng, generic_array::GenericArray},
 };
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
-use interface::types::{AttestationReport, SecretId, SecretsBox};
+use nxcc_interface::types::{AttestationReport, SecretId, SecretsBox};
 use sha2::{Digest, Sha256};
 use std::convert::TryInto;
 use thiserror::Error;
