@@ -1,6 +1,7 @@
-use crate::proto::interface as proto;
 use alloy_primitives::{Address, U256};
 use serde::{Deserialize, Serialize};
+
+use crate::proto::interface as proto;
 
 /// Trait for converting a type to its Protocol Buffers representation
 pub trait IntoProto<P> {

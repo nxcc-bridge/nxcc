@@ -1,7 +1,9 @@
-use crate::crypto::{
-    KeyExchangeKeyPair, SigningKeyPair, decrypt_secrets_box, encrypt_secrets_box,
-    generate_attestation,
+use std::{
+    collections::{HashMap, hash_map::DefaultHasher},
+    hash::{Hash, Hasher},
+    sync::{Arc, RwLock},
 };
+
 use chrono::Utc;
 use ed25519_dalek::VerifyingKey;
 use nxcc_interface::types::{
@@ -9,13 +11,13 @@ use nxcc_interface::types::{
 };
 use once_cell::sync::Lazy;
 use sha2::Digest as _;
-use std::{
-    collections::{HashMap, hash_map::DefaultHasher},
-    hash::{Hash, Hasher},
-    sync::{Arc, RwLock},
-};
 use tracing::{debug, error, info, warn};
 use x25519_dalek::PublicKey;
+
+use crate::crypto::{
+    KeyExchangeKeyPair, SigningKeyPair, decrypt_secrets_box, encrypt_secrets_box,
+    generate_attestation,
+};
 
 /// Represents a secret stored in the enclave's memory.
 #[derive(Clone, Debug)]

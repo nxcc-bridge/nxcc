@@ -1,4 +1,5 @@
-use crate::services::{runner::RunnerService, secrets::Secrets};
+use std::sync::Arc;
+
 use nxcc_interface::{
     proto::enclave::{
         CheckSecretsRequest,
@@ -18,9 +19,10 @@ use nxcc_interface::{
     },
     types::{EnvReport, FromProto, IntoProto, SecretId, SecretsBox},
 };
-use std::sync::Arc;
 use tonic::{Request, Response, Status};
 use tracing::{debug, error};
+
+use crate::services::{runner::RunnerService, secrets::Secrets};
 
 // --- Secrets Service Implementation ---
 

@@ -1,3 +1,5 @@
+use std::convert::TryInto;
+
 use aes_gcm_siv::{
     AeadCore as _, Aes256GcmSiv,
     aead::{Aead, KeyInit, OsRng, generic_array::GenericArray},
@@ -5,7 +7,6 @@ use aes_gcm_siv::{
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use nxcc_interface::types::{AttestationReport, SecretId, SecretsBox};
 use sha2::{Digest, Sha256};
-use std::convert::TryInto;
 use thiserror::Error;
 use x25519_dalek::{PublicKey, SharedSecret, StaticSecret};
 use zeroize::Zeroize;
@@ -299,8 +300,9 @@ pub fn generate_attestation(ephemeral_kx_pk: &PublicKey, user_data: Vec<u8>) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use alloy_primitives::{Address, U256};
+
+    use super::*;
 
     #[test]
     fn test_key_exchange_aead() {

@@ -1,16 +1,18 @@
 use std::sync::Arc;
-use tonic::transport::Server;
-use tracing::info;
-
-use crate::config::EnclaveConfig;
-use crate::services::{
-    grpc::{EnclaveRunnerService, EnclaveSecretsService},
-    runner::RunnerService,
-    secrets::Secrets,
-};
 
 use nxcc_interface::proto::enclave::{
     enclave_secrets_server::EnclaveSecretsServer, runner_server::RunnerServer,
+};
+use tonic::transport::Server;
+use tracing::info;
+
+use crate::{
+    config::EnclaveConfig,
+    services::{
+        grpc::{EnclaveRunnerService, EnclaveSecretsService},
+        runner::RunnerService,
+        secrets::Secrets,
+    },
 };
 
 pub async fn start_grpc_server(config: &EnclaveConfig) -> Result<(), Box<dyn std::error::Error>> {
@@ -44,6 +46,7 @@ pub async fn start_grpc_server(config: &EnclaveConfig) -> Result<(), Box<dyn std
             #[cfg(unix)]
             {
                 use std::{io::ErrorKind, path::Path};
+
                 use tokio::net::{UnixListener, UnixStream};
                 use tokio_stream::wrappers::UnixListenerStream;
 

@@ -1,3 +1,16 @@
+#[cfg(feature = "uds")]
+use std::io::ErrorKind;
+use std::{
+    error::Error,
+    fmt,
+    future::Future,
+    path::Path,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+    time::Duration,
+};
+
 use nxcc_interface::{
     proto::{
         interface as proto_interface,
@@ -14,31 +27,22 @@ use rcgen::{
     Certificate as RcgenCertificate, CertificateParams, DistinguishedName, DnType, KeyPair,
     date_time_ymd,
 };
-use std::future::Future;
-use std::pin::Pin;
-use std::task::{Context, Poll};
-use std::time::Duration;
-use std::{error::Error, fmt, path::Path, sync::Arc};
 use thiserror::Error;
+#[cfg(feature = "uds")]
+use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Mutex;
-use tonic::body::BoxBody;
-use tonic::codegen::http;
+#[cfg(feature = "uds")]
+use tokio_stream::wrappers::UnixListenerStream;
+#[cfg(feature = "vsock")]
+use tokio_vsock::{VsockAddr, VsockListener};
 use tonic::{
     Request, Response, Status,
+    body::BoxBody,
+    codegen::http,
     transport::{Certificate, ClientTlsConfig, Identity, Server, ServerTlsConfig},
 };
 use tower::{Layer, Service};
 use tracing::{debug, error, info, warn};
-
-#[cfg(feature = "uds")]
-use std::io::ErrorKind;
-#[cfg(feature = "uds")]
-use tokio::net::{UnixListener, UnixStream};
-#[cfg(feature = "uds")]
-use tokio_stream::wrappers::UnixListenerStream;
-
-#[cfg(feature = "vsock")]
-use tokio_vsock::{VsockAddr, VsockListener};
 
 /// Error type returned by `VmRuntime` implementations.
 #[derive(Error, Debug)]
@@ -583,7 +587,11 @@ pub fn create_client_tls_config(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::{
+        collections::HashMap,
+        sync::{Arc, Mutex as StdMutex},
+    };
+
     use nxcc_interface::{
         proto::vm::{
             GetAttestationRequest, InvokeWorkerRequest, StartWorkerRequest, StopWorkerRequest,
@@ -591,13 +599,11 @@ mod tests {
         },
         types::{AttestationReport, FromProto as _},
     };
-    use std::{
-        collections::HashMap,
-        sync::{Arc, Mutex as StdMutex},
-    };
     use tokio::net::TcpListener;
     use tokio_stream::wrappers::TcpListenerStream;
     use tonic::transport::Endpoint;
+
+    use super::*;
 
     // ===== Mock runtime (remains the same) =====
     #[derive(Debug, Clone)]

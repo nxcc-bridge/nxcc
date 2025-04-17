@@ -1,8 +1,10 @@
-use crate::services::secrets::Secrets;
+use std::sync::Arc;
+
 use ciborium::de::from_reader;
 use nxcc_interface::types::{PolicyExecutionReport, PolicyExecutionRequest};
-use std::sync::Arc;
 use tracing::{debug, error, info};
+
+use crate::services::secrets::Secrets;
 
 /// Orchestrates policy worker logic. In reality, it would dispatch to a WASM or execution enclave.
 pub struct RunnerService {
