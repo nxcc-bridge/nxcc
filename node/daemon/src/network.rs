@@ -6,16 +6,16 @@ use std::{
 };
 
 use futures::{StreamExt, channel::mpsc};
-use nxcc_interface::{
-    policy::PolicyBundle,
-    types::{EnvReport, SecretId, SecretRequest, SecretsBox},
-};
 use libp2p::{
     Multiaddr, Swarm,
     core::multiaddr::Protocol,
     gossipsub, identify, kad, mdns, noise, ping,
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux,
+};
+use nxcc_interface::{
+    policy::PolicyBundle,
+    types::{EnvReport, SecretId, SecretRequest, SecretsBox},
 };
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, trace, warn};

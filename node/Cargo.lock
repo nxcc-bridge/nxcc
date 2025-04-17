@@ -3810,6 +3810,20 @@ dependencies = [
 [[package]]
 name = "nxcc-vm-base"
 version = "0.1.0"
+dependencies = [
+ "futures",
+ "hyper-util",
+ "nxcc-interface",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tokio-vsock",
+ "tonic",
+ "tower 0.5.2",
+ "tracing",
+ "uuid",
+]
 
 [[package]]
 name = "nxcc-workerd-vm"

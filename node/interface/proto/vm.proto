@@ -6,7 +6,7 @@ import "interface.proto";
 
 /// VmService defines the interface for controlling and interacting with worker
 /// instances running within the execution enclave (VM).
-service VmService {
+service Vm {
   /// Starts a new worker instance based on the provided configuration.
   rpc StartWorker(StartWorkerRequest) returns (StartWorkerResponse);
 

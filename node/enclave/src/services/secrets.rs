@@ -4,7 +4,9 @@ use crate::crypto::{
 };
 use chrono::Utc;
 use ed25519_dalek::VerifyingKey;
-use nxcc_interface::types::{AttestationReport, EnvReport, PolicyExecutionReport, SecretId, SecretsBox};
+use nxcc_interface::types::{
+    AttestationReport, EnvReport, PolicyExecutionReport, SecretId, SecretsBox,
+};
 use once_cell::sync::Lazy;
 use sha2::Digest as _;
 use std::{

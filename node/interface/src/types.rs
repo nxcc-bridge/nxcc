@@ -1,5 +1,6 @@
 use crate::proto::interface as proto;
 use alloy_primitives::{Address, U256};
+use serde::{Deserialize, Serialize};
 
 /// Trait for converting a type to its Protocol Buffers representation
 pub trait IntoProto<P> {
@@ -11,7 +12,7 @@ pub trait FromProto<P> {
     fn from_proto(proto: P) -> Self;
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttestationReport {
     pub ephemeral_public_key: Vec<u8>,
     pub block_hashes: Vec<Vec<u8>>,
@@ -38,9 +39,7 @@ impl IntoProto<proto::AttestationReport> for AttestationReport {
     }
 }
 
-#[derive(
-    Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord,
-)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SecretId {
     pub chain_id: u64,
     pub identity_address: Address,
@@ -67,7 +66,7 @@ impl IntoProto<proto::SecretIdentifier> for SecretId {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConsumerInfo {
     pub code_hash: Vec<u8>,
     pub signature: Vec<u8>,
@@ -91,7 +90,7 @@ impl IntoProto<proto::ConsumerInfo> for ConsumerInfo {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecretRequest {
     pub secret_id: SecretId,
     pub consumer: ConsumerInfo,
@@ -115,7 +114,7 @@ impl IntoProto<proto::SecretRequest> for SecretRequest {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnvReport {
     pub attestation: AttestationReport,
     pub operator_signature: Vec<u8>,
@@ -142,7 +141,7 @@ impl IntoProto<proto::EnvReport> for EnvReport {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecretsBox {
     pub encrypted_payload: Vec<u8>,
     pub sender_public_key: Vec<u8>, // This is the sender's *ephemeral key exchange* public key
@@ -196,7 +195,7 @@ impl IntoProto<proto::SecretsBox> for SecretsBox {
 }
 
 /// A request for the policy runner that references multiple secrets.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PolicyExecutionRequest {
     pub secret_ids: Vec<SecretId>,
     pub consumer: ConsumerInfo,
@@ -225,7 +224,7 @@ impl IntoProto<proto::PolicyExecutionRequest> for PolicyExecutionRequest {
 
 /// The runner's final judgment about a request. This structure is used internally within the enclave
 /// between the runner and secrets service. It's distinct from the proto message used for gRPC transport.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PolicyExecutionReport {
     pub request: PolicyExecutionRequest,
     pub decision: bool,
