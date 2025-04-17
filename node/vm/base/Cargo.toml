@@ -5,17 +5,21 @@ edition = "2024"
 
 [dependencies]
 nxcc-interface = { path = "../../interface" }
+pem = "3.0.5"
+rcgen = "0.13.2"
 thiserror = "1.0.63"
 tokio = { version = "1.44.1", features = ["rt-multi-thread", "macros", "net", "sync"] }
 tokio-stream = { version = "0.1.17", optional = true }
 tokio-vsock = { version = "0.7.0", features = ["tonic012"], optional = true }
-tonic = { version = "0.12.3", features = ["transport"] }
+tonic = { version = "0.12.3", features = ["tls", "transport"] }
+tower = "0.5.2"
 tracing = "0.1.41"
 
 [features]
 default = ["uds"]
 uds = ["tokio-stream"]
 vsock = ["tokio-vsock"]
+tcp = []
 
 [dev-dependencies]
 futures = "0.3.31"

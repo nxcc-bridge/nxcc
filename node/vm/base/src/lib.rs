@@ -10,10 +10,25 @@ use nxcc_interface::{
     },
     types::{AttestationReport, IntoProto as _},
 };
+use rcgen::{
+    Certificate as RcgenCertificate, CertificateParams, DistinguishedName, DnType, KeyPair,
+    date_time_ymd,
+};
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use std::time::Duration;
 use std::{error::Error, fmt, path::Path, sync::Arc};
 use thiserror::Error;
-use tonic::{Request, Response, Status, transport::Server};
-use tracing::{debug, error, info};
+use tokio::sync::Mutex;
+use tonic::body::BoxBody;
+use tonic::codegen::http;
+use tonic::{
+    Request, Response, Status,
+    transport::{Certificate, ClientTlsConfig, Identity, Server, ServerTlsConfig},
+};
+use tower::{Layer, Service};
+use tracing::{debug, error, info, warn};
 
 #[cfg(feature = "uds")]
 use std::io::ErrorKind;
@@ -113,6 +128,148 @@ pub trait VmRuntime: Send + Sync + 'static {
     async fn get_attestation(&self, user_data: Vec<u8>) -> Result<AttestationReport, VmError>;
 }
 
+/// Bounded client state - stores the DER certificate of the first client that connects
+#[derive(Clone)]
+struct BoundClient {
+    inner: Arc<Mutex<Option<Vec<u8>>>>,
+}
+
+impl BoundClient {
+    fn new() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    async fn bind_client(&self, cert_der: Vec<u8>) -> bool {
+        let mut state = self.inner.lock().await;
+        if state.is_none() {
+            *state = Some(cert_der);
+            true
+        } else {
+            false
+        }
+    }
+
+    async fn is_bound_client(&self, cert_der: &[u8]) -> bool {
+        let state = self.inner.lock().await;
+        if let Some(bound_cert) = &*state {
+            bound_cert == cert_der
+        } else {
+            // If no client is bound yet, any client can potentially bind
+            // The binding logic is handled in bind_client
+            // Here, we just check if the *current* request matches the *already* bound client
+            // If nothing is bound, this specific client isn't the bound one (yet).
+            false
+        }
+    }
+}
+
+/// ClientBindingLayer enforces binding to the first client that connects
+#[derive(Clone)]
+struct ClientBindingLayer {
+    bound_client: BoundClient,
+}
+
+impl ClientBindingLayer {
+    fn new(bound_client: BoundClient) -> Self {
+        Self { bound_client }
+    }
+}
+
+impl<S> Layer<S> for ClientBindingLayer {
+    type Service = ClientBindingService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        ClientBindingService {
+            inner,
+            bound_client: self.bound_client.clone(),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct ClientBindingService<S> {
+    inner: S,
+    bound_client: BoundClient,
+}
+
+impl<S> Service<http::Request<BoxBody>> for ClientBindingService<S>
+where
+    S: Service<http::Request<BoxBody>, Response = http::Response<BoxBody>> + Send + 'static + Clone,
+    S::Future: Send + 'static,
+    S::Error: Into<Box<dyn Error + Send + Sync>> + Send,
+{
+    type Response = S::Response;
+    type Error = Box<dyn Error + Send + Sync>;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx).map_err(Into::into)
+    }
+
+    fn call(&mut self, req: http::Request<BoxBody>) -> Self::Future {
+        // Correctly extract the peer certificate DER bytes
+        let client_cert_der = req
+            .extensions()
+            .get::<tonic::transport::server::TlsConnectInfo<tonic::transport::server::TcpConnectInfo>>() // Use TcpConnectInfo or appropriate type
+            .and_then(|tls_info| tls_info.peer_certs())
+            .and_then(|certs| certs.first().cloned())
+            .map(|cert| cert.as_ref().to_vec()); // Convert CertificateDer<'a> to Vec<u8>
+
+        let bound_client = self.bound_client.clone();
+        let inner = self.inner.clone();
+        let mut inner = std::mem::replace(&mut self.inner, inner);
+
+        Box::pin(async move {
+            match client_cert_der {
+                Some(cert_bytes) => {
+                    // Check if this client is already the bound client
+                    if bound_client.is_bound_client(&cert_bytes).await {
+                        // This is the bound client, let the request proceed
+                        inner.call(req).await.map_err(Into::into)
+                    } else {
+                        // Attempt to bind this client (only succeeds if no client is bound yet)
+                        if bound_client.bind_client(cert_bytes).await {
+                            // This was the first client, now bound
+                            info!("First client connected and bound to service");
+                            inner.call(req).await.map_err(Into::into)
+                        } else {
+                            // A *different* client is already bound, reject this one
+                            warn!("Rejected request from non-bound client");
+                            let status =
+                                Status::permission_denied("Service is bound to another client");
+                            // Create a valid HTTP response for gRPC status
+                            let response = http::Response::builder()
+                                .status(http::StatusCode::FORBIDDEN) // Or appropriate HTTP status
+                                .header("content-type", "application/grpc")
+                                .header("grpc-status", status.code().to_string())
+                                .header("grpc-message", status.message())
+                                .body(BoxBody::default())
+                                .unwrap(); // Handle error appropriately
+                            Ok(response) // Return Ok(response) for Layer errors that map to gRPC status
+                        }
+                    }
+                }
+                None => {
+                    // No client certificate, reject
+                    error!("Rejected request with no client certificate");
+                    let status = Status::unauthenticated("Client certificate required");
+                    // Create a valid HTTP response for gRPC status
+                    let response = http::Response::builder()
+                        .status(http::StatusCode::UNAUTHORIZED) // Or appropriate HTTP status
+                        .header("content-type", "application/grpc")
+                        .header("grpc-status", status.code().to_string())
+                        .header("grpc-message", status.message())
+                        .body(BoxBody::default())
+                        .unwrap(); // Handle error appropriately
+                    Ok(response) // Return Ok(response) for Layer errors that map to gRPC status
+                }
+            }
+        })
+    }
+}
+
 /// Internal struct that wraps a `VmRuntime` implementation and handles gRPC calls.
 struct VmServiceGrpc<T: VmRuntime> {
     runtime: Arc<T>,
@@ -153,6 +310,7 @@ impl<T: VmRuntime> Vm for VmServiceGrpc<T> {
             }
             Err(e) => {
                 error!("Failed to start worker: {}", e);
+                // Return Ok with success=false for application-level errors
                 Ok(Response::new(StartWorkerResponse {
                     instance_id: String::new(),
                     success: false,
@@ -182,6 +340,7 @@ impl<T: VmRuntime> Vm for VmServiceGrpc<T> {
             }
             Err(e) => {
                 error!("Failed to stop worker: {}", e);
+                // Return Ok with success=false for application-level errors
                 Ok(Response::new(StopWorkerResponse {
                     success: false,
                     error_message: e.to_string(),
@@ -216,6 +375,7 @@ impl<T: VmRuntime> Vm for VmServiceGrpc<T> {
             }
             Err(e) => {
                 error!("Failed to invoke worker: {}", e);
+                // Return Ok with success=false for application-level errors
                 Ok(Response::new(InvokeWorkerResponse {
                     result: Vec::new(),
                     success: false,
@@ -245,8 +405,7 @@ impl<T: VmRuntime> Vm for VmServiceGrpc<T> {
             }
             Err(e) => {
                 error!("Failed to get attestation: {}", e);
-                // Unlike other methods, attestation failure might be more critical,
-                // so return an internal error status.
+                // Return Err for internal/unrecoverable errors
                 Err(Status::internal(format!(
                     "Failed to get attestation: {}",
                     e
@@ -265,15 +424,41 @@ pub enum ServerConfig {
     /// Listen on VSOCK at the specified CID and port.
     #[cfg(feature = "vsock")]
     Vsock { cid: u32, port: u32 },
+    /// Listen on TCP at the specified address
+    #[cfg(feature = "tcp")]
+    Tcp { addr: std::net::SocketAddr },
 }
 
-/// Starts the gRPC server for the VM service.
+/// Generate a self-signed certificate for mTLS using modern rcgen
+fn generate_self_signed_cert() -> Result<(String, String), Box<dyn Error + Send + Sync>> {
+    // Create parameters for the certificate
+    let mut params = CertificateParams::new(vec!["localhost".to_string()])?;
+
+    // Set validity period (optional, defaults are usually fine)
+    // params.not_before = date_time_ymd(2023, 1, 1);
+    // params.not_after = date_time_ymd(2033, 12, 31);
+
+    // Set distinguished name (required)
+    let mut distinguished_name = DistinguishedName::new();
+    distinguished_name.push(DnType::CommonName, "localhost");
+    params.distinguished_name = distinguished_name;
+
+    // Generate a key pair
+    let key_pair = KeyPair::generate()?; // Or specify algorithm: KeyPair::generate(&rcgen::PKCS_ECDSA_P256_SHA256)?;
+
+    // Sign the certificate using the key pair
+    let cert = params.self_signed(&key_pair)?;
+
+    Ok((cert.pem(), key_pair.serialize_pem()))
+}
+
+/// Starts the gRPC server for the VM service with mTLS.
 ///
 /// This function takes ownership of the runtime implementation and runs the
 /// server indefinitely until an error occurs or the process is terminated.
 ///
 /// # Arguments
-/// * `config` - The server listening configuration (UDS or VSOCK).
+/// * `config` - The server listening configuration (UDS, VSOCK, or TCP).
 /// * `runtime` - An Arc-wrapped implementation of the `VmRuntime` trait.
 ///
 /// # Errors
@@ -282,42 +467,52 @@ pub async fn run_vm_server<T: VmRuntime>(
     config: ServerConfig,
     runtime: Arc<T>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    // Generate server's self-signed certificate for mTLS
+    let (server_cert_pem, server_key_pem) = generate_self_signed_cert()?;
+    let server_identity = Identity::from_pem(server_cert_pem.clone(), server_key_pem);
+
+    // Create bound client state for client binding
+    let bound_client = BoundClient::new();
+
+    // Create the client binding layer
+    let client_binding_layer = ClientBindingLayer::new(bound_client);
+
+    // Create the gRPC service
     let grpc_service = VmServiceGrpc::new(runtime);
-    let server_builder = Server::builder().add_service(VmServer::new(grpc_service));
+
+    // Create server CA certificate (using its own cert as CA for self-signed mTLS)
+    let server_ca_cert = Certificate::from_pem(server_cert_pem);
+
+    // Configure TLS with client certificate verification
+    // client_auth_optional(true) allows the connection initially,
+    // but our ClientBindingLayer will enforce the cert presence and binding.
+    let server_tls_config = ServerTlsConfig::new()
+        .identity(server_identity)
+        .client_ca_root(server_ca_cert)
+        .client_auth_optional(true); // Layer enforces non-optional
+
+    // Build the server with TLS and the client binding layer
+    let server_builder = Server::builder()
+        .tls_config(server_tls_config)?
+        .layer(client_binding_layer)
+        .add_service(VmServer::new(grpc_service));
 
     match config {
         #[cfg(feature = "uds")]
         ServerConfig::Uds { path } => {
             info!("VM gRPC Server listening on UDS: {}", path);
             let path = Path::new(&path);
+            // Clean up existing socket file if necessary
             if path.exists() {
-                match UnixStream::connect(path).await {
-                    Ok(_) => {
-                        return Err(format!(
-                            "UDS path {} already in use by a running server.",
-                            path.display()
-                        )
-                        .into());
-                    }
-                    Err(e) if e.kind() == ErrorKind::ConnectionRefused => {
-                        info!("Removing stale UDS file: {}", path.display());
-                        std::fs::remove_file(path)?;
-                    }
-                    Err(e) => {
-                        return Err(format!(
-                            "Error checking existing UDS {}: {}",
-                            path.display(),
-                            e
-                        )
-                        .into());
-                    }
-                }
+                warn!("Removing existing UDS file: {}", path.display());
+                std::fs::remove_file(path)?;
             }
 
             let listener = UnixListener::bind(path)?;
             let incoming = UnixListenerStream::new(listener);
-
+            info!("UDS Server started.");
             server_builder.serve_with_incoming(incoming).await?;
+            info!("UDS Server stopped. Cleaning up socket file.");
             let _ = std::fs::remove_file(path); // Clean up on shutdown
         }
         #[cfg(feature = "vsock")]
@@ -327,17 +522,63 @@ pub async fn run_vm_server<T: VmRuntime>(
                 cid, port
             );
             let listener = VsockListener::bind(VsockAddr::new(cid, port))?;
+            info!("VSOCK Server started.");
             server_builder
                 .serve_with_incoming(listener.incoming())
                 .await?;
+            info!("VSOCK Server stopped.");
         }
-        #[cfg(not(any(feature = "uds", feature = "vsock")))]
+        #[cfg(feature = "tcp")]
+        ServerConfig::Tcp { addr } => {
+            info!("VM gRPC Server listening on TCP: {}", addr);
+            info!("TCP Server started.");
+            server_builder.serve(addr).await?;
+            info!("TCP Server stopped.");
+        }
+        #[cfg(not(any(feature = "uds", feature = "vsock", feature = "tcp")))]
         _ => {
-            return Err("No server transport feature (uds or vsock) enabled.".into());
+            return Err("No server transport feature (uds, vsock, or tcp) enabled.".into());
         }
     }
 
     Ok(())
+}
+
+/// Client configuration for connecting to the VM gRPC service with mTLS.
+#[derive(Clone, Debug)]
+pub struct ClientConfig {
+    /// Server address URI (e.g., "http://localhost:50051", "unix:/path/to/socket").
+    pub server_uri: String,
+    /// Timeout for connection attempts.
+    pub timeout: Duration,
+    /// The server's root CA certificate (DER format). In our self-signed case, this is the server's own certificate.
+    pub server_ca_cert_der: Vec<u8>,
+    /// The client's certificate (DER format).
+    pub client_cert_der: Vec<u8>,
+    /// The client's private key (DER format).
+    pub client_key_der: Vec<u8>,
+}
+
+/// Generate client TLS configuration using provided certificates and keys.
+pub fn create_client_tls_config(
+    server_ca_cert_pem: String,
+    client_cert_pem: Vec<u8>,
+    client_key_pem: Vec<u8>,
+    domain_name: &str, // e.g., "localhost"
+) -> Result<ClientTlsConfig, Box<dyn Error + Send + Sync>> {
+    // Create client identity
+    let client_identity = Identity::from_pem(client_cert_pem, client_key_pem);
+
+    // Create server CA certificate object
+    let server_ca_cert = Certificate::from_pem(server_ca_cert_pem);
+
+    // Create client TLS config, validating the server using its cert as CA
+    let client_tls_config = ClientTlsConfig::new()
+        .identity(client_identity)
+        .ca_certificate(server_ca_cert)
+        .domain_name(domain_name); // Must match CN or SAN in server cert
+
+    Ok(client_tls_config)
 }
 
 #[cfg(test)]
@@ -346,17 +587,19 @@ mod tests {
     use nxcc_interface::{
         proto::vm::{
             GetAttestationRequest, InvokeWorkerRequest, StartWorkerRequest, StopWorkerRequest,
-            vm_server::Vm,
+            vm_client::VmClient, vm_server::Vm,
         },
         types::{AttestationReport, FromProto as _},
     };
     use std::{
         collections::HashMap,
-        sync::{Arc, Mutex},
+        sync::{Arc, Mutex as StdMutex},
     };
-    use tonic::Request;
+    use tokio::net::TcpListener;
+    use tokio_stream::wrappers::TcpListenerStream;
+    use tonic::transport::Endpoint;
 
-    // ===== Mock runtime (rich variant from suite #1, plus a helper for deterministic ids) =====
+    // ===== Mock runtime (remains the same) =====
     #[derive(Debug, Clone)]
     struct MockWorkerState {
         worker_id: String,
@@ -380,17 +623,17 @@ mod tests {
 
     #[derive(Debug, Clone)]
     struct MockVmRuntime {
-        state: Arc<Mutex<MockVmRuntimeState>>,
+        state: Arc<StdMutex<MockVmRuntimeState>>,
     }
 
     impl MockVmRuntime {
         fn new() -> Self {
             Self {
-                state: Arc::new(Mutex::new(MockVmRuntimeState::default())),
+                state: Arc::new(StdMutex::new(MockVmRuntimeState::default())),
             }
         }
 
-        /* ------------- helpers copied from suite #1 ------------- */
+        /* ------------- helpers copied from suite #1 ------------- */
         fn set_next_start_worker_result(&self, r: Result<String, VmError>) {
             self.state.lock().unwrap().next_start_worker_result = Some(r);
         }
@@ -514,7 +757,141 @@ mod tests {
         (VmServiceGrpc::new(rt.clone()), rt)
     }
 
-    // ======= TESTS ================================================================
+    // ===== Test the mTLS and client binding functionality =====
+    #[tokio::test]
+    #[cfg(feature = "tcp")] // Only run this test if TCP feature is enabled
+    async fn test_mtls_client_binding() -> Result<(), Box<dyn Error + Send + Sync>> {
+        // Setup server
+        let addr = "127.0.0.1:0"; // Use port 0 for OS to pick an available port
+        let listener = TcpListener::bind(addr).await?;
+        let server_addr = listener.local_addr()?;
+        let server_uri = format!("https://{}", server_addr); // Use https for TLS
+        let domain = "localhost"; // Domain name for certs and TLS config
+
+        let (_, runtime) = setup();
+
+        // Generate server certificate
+        let (server_cert_der, server_key_der) = generate_self_signed_cert()?;
+        let server_identity = Identity::from(server_cert_der.clone(), server_key_der.clone())?;
+
+        // Create server CA certificate object (using its own cert)
+        let server_ca_cert = Certificate::from_der(server_cert_der.clone())?;
+
+        // Configure server TLS
+        let server_tls_config = ServerTlsConfig::new()
+            .identity(server_identity)
+            .client_ca_root(server_ca_cert.clone()) // Use the server's cert as the CA root
+            .client_auth_optional(true); // Layer will enforce non-optional
+
+        // Create bound client state
+        let bound_client = BoundClient::new();
+        let client_binding_layer = ClientBindingLayer::new(bound_client);
+
+        // Start server in background
+        let server_handle = tokio::spawn(async move {
+            Server::builder()
+                .tls_config(server_tls_config)
+                .unwrap()
+                .layer(client_binding_layer)
+                .add_service(VmServer::new(VmServiceGrpc::new(runtime)))
+                .serve_with_incoming(TcpListenerStream::new(listener))
+                .await
+        });
+
+        // Wait briefly for server to start
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        // --- Client 1 Setup ---
+        let (client1_cert_der, client1_key_der) = generate_self_signed_cert()?;
+        let client1_tls_config = create_client_tls_config(
+            server_cert_der.clone(), // Server's cert is the CA
+            client1_cert_der.clone(),
+            client1_key_der.clone(),
+            domain,
+        )?;
+        let client1_endpoint = Endpoint::new(server_uri.clone())?
+            .tls_config(client1_tls_config)?
+            .connect_timeout(Duration::from_secs(5));
+
+        // --- Client 2 Setup ---
+        let (client2_cert_der, client2_key_der) = generate_self_signed_cert()?;
+        let client2_tls_config = create_client_tls_config(
+            server_cert_der.clone(), // Server's cert is the CA
+            client2_cert_der.clone(),
+            client2_key_der.clone(),
+            domain,
+        )?;
+        let client2_endpoint = Endpoint::new(server_uri.clone())?
+            .tls_config(client2_tls_config)?
+            .connect_timeout(Duration::from_secs(5));
+
+        // --- Test Logic ---
+        // Connect first client
+        let mut client1 = VmClient::connect(client1_endpoint).await?;
+        info!("Client 1 connected");
+
+        // First client should be able to make a request (and bind)
+        let response1 = client1
+            .get_attestation(Request::new(GetAttestationRequest {
+                user_data: vec![1, 2, 3],
+            }))
+            .await;
+        info!("Client 1 GetAttestation result: {:?}", response1);
+        assert!(
+            response1.is_ok(),
+            "Client 1 initial request failed: {:?}",
+            response1.err()
+        );
+        assert!(response1.unwrap().into_inner().report.is_some());
+        info!("Client 1 GetAttestation successful");
+
+        // Connect second client
+        let mut client2 = VmClient::connect(client2_endpoint).await?;
+        info!("Client 2 connected");
+
+        // Second client should NOT be able to make requests
+        let result2 = client2
+            .get_attestation(Request::new(GetAttestationRequest {
+                user_data: vec![4, 5, 6],
+            }))
+            .await;
+        info!("Client 2 GetAttestation result: {:?}", result2);
+        assert!(result2.is_err(), "Client 2 request unexpectedly succeeded");
+        let status = result2.unwrap_err();
+        assert_eq!(
+            status.code(),
+            tonic::Code::PermissionDenied,
+            "Client 2 error code mismatch"
+        );
+        assert!(
+            status.message().contains("bound to another client"),
+            "Client 2 error message mismatch"
+        );
+        info!("Client 2 GetAttestation correctly rejected");
+
+        // First client should still be able to make requests
+        let response3 = client1
+            .start_worker(Request::new(StartWorkerRequest {
+                worker_id: "test-worker".to_string(),
+                worker_code: vec![10, 20, 30],
+                config: vec![],
+            }))
+            .await;
+        info!("Client 1 StartWorker result: {:?}", response3);
+        assert!(
+            response3.is_ok(),
+            "Client 1 second request failed: {:?}",
+            response3.err()
+        );
+        assert!(response3.unwrap().into_inner().success);
+        info!("Client 1 StartWorker successful");
+
+        // Cleanup
+        server_handle.abort();
+        Ok(())
+    }
+
+    // ======= Other TESTS (should remain largely the same) ========================
 
     /* ---------- start_worker ---------- */
     #[tokio::test]
@@ -756,5 +1133,40 @@ mod tests {
         let disp = vm_err.to_string();
         assert!(disp.contains("outer"));
         assert!(disp.contains("inner"));
+    }
+
+    #[tokio::test]
+    async fn test_bound_client() {
+        let bound_client = BoundClient::new();
+
+        // Bind first client
+        let cert1 = vec![1, 2, 3];
+        assert!(bound_client.bind_client(cert1.clone()).await);
+
+        // Same client should be recognized
+        assert!(bound_client.is_bound_client(&cert1).await);
+
+        // Different client should be rejected
+        let cert2 = vec![4, 5, 6];
+        assert!(!bound_client.is_bound_client(&cert2).await);
+
+        // Cannot bind second client
+        assert!(!bound_client.bind_client(cert2.clone()).await);
+
+        // Original client should still be recognized
+        assert!(bound_client.is_bound_client(&cert1).await);
+    }
+
+    #[test]
+    fn test_generate_self_signed_cert() {
+        let result = generate_self_signed_cert();
+        assert!(result.is_ok());
+
+        let (cert_pem, key_pem) = result.unwrap();
+        assert!(!cert_pem.is_empty());
+        assert!(!key_pem.is_empty());
+
+        // Should be able to create identity
+        let _identity_result = Identity::from_pem(cert_pem, key_pem);
     }
 }
