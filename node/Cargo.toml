@@ -3,5 +3,7 @@ members = [
     "interface",
     "daemon",
     "enclave",
+    "vm/base",
+    "vm/workerd",
 ]
 resolver = "3"

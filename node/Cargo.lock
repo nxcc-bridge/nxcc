@@ -3808,6 +3808,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "nxcc-vm-base"
+version = "0.1.0"
+
+[[package]]
+name = "nxcc-workerd-vm"
+version = "0.1.0"
+
+[[package]]
 name = "nybbles"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
