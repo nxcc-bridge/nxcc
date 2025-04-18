@@ -2,7 +2,22 @@ syntax = "proto3";
 
 package vm;
 
-import "interface.proto";
+import "interface.proto"; // Assuming this contains interface.AttestationReport
+
+// --- Enums ---
+
+/// Represents the possible states of a worker instance.
+enum WorkerStatus {
+  WORKER_STATUS_UNSPECIFIED = 0; // Default, should not be used explicitly
+  WORKER_STATUS_STARTING = 1;    // Worker is initializing
+  WORKER_STATUS_RUNNING = 2;     // Worker is active and ready for invocations
+  WORKER_STATUS_STOPPING = 3;    // Worker is shutting down
+  WORKER_STATUS_STOPPED = 4;     // Worker has stopped cleanly
+  WORKER_STATUS_ERROR = 5;       // Worker encountered an error and is likely stopped
+}
+
+
+// --- Service Definition ---
 
 /// VmService defines the interface for controlling and interacting with worker
 /// instances running within the execution enclave (VM).
@@ -18,33 +33,86 @@ service Vm {
 
   /// Retrieves a remote attestation report from the execution enclave.
   rpc GetAttestation(GetAttestationRequest) returns (GetAttestationResponse);
+
+  /// Retrieves the current status of a specific worker instance.
+  rpc GetWorkerStatus(GetWorkerStatusRequest) returns (GetWorkerStatusResponse);
+
+  /// Retrieves the IDs of all currently running worker instances.
+  rpc ListRunningWorkers(ListRunningWorkersRequest) returns (ListRunningWorkersResponse);
+
+  /// Retrieves debug logs from a specific worker instance.
+  rpc GetWorkerLogs(GetWorkerLogsRequest) returns (GetWorkerLogsResponse);
 }
+
+
+// --- Configuration Messages ---
+
+/// Configuration data that is considered untrusted and may originate
+/// from external sources. It's typically accessible by the worker code.
+message UntrustedConfig {
+  /// User-provided data, often in JSON format, passed to the worker.
+  string userdata_json = 1;
+  /// Advanced VM-specific configuration options (e.g., kernel parameters, device mappings).
+  /// Keys and values are implementation-defined.
+  map<string, string> advanced_vm_config = 2;
+}
+
+/// Resource limits for the worker instance.
+message Limits {
+  /// Maximum memory allocation in Megabytes (MB).
+  uint64 memory_mb = 1;
+  /// Number of virtual CPU cores allocated.
+  uint32 cpu_count = 2;
+  /// Maximum allowed execution time in seconds (0 for unlimited).
+  uint64 max_runtime_seconds = 3;
+  // Add other limits as needed (e.g., network bandwidth, disk I/O)
+}
+
+/// Configuration data that is considered trusted, typically provisioned
+/// by the platform operator and potentially influencing the execution environment
+/// setup rather than being directly exposed to the worker code.
+message TrustedConfig {
+  /// Cryptographic keys to be provisioned securely. Each 'bytes' entry
+  /// is expected to contain an efficient serialized representation of a
+  /// JSON Web Key (JWK), such as the UTF-8 encoded JSON string.
+  /// The specific serialization format should be agreed upon by the communicating parties.
+  repeated bytes crypto_keys = 1;
+  /// Resource limits enforced by the execution environment.
+  Limits limits = 2;
+}
+
+
+// --- StartWorker Messages ---
 
 /// Request to start a new worker instance.
 message StartWorkerRequest {
   /// An identifier for the type of worker (e.g., hash of code or config name).
-  string worker_id = 1;
+  string worker_id = 1; // Note: This is the *type* ID, not the instance ID.
   /// The worker program code or a reference to it.
   bytes worker_code = 2;
-  /// Configuration specific to the worker instance (e.g., environment variables, resource limits).
-  /// The format is specific to the VM implementation (e.g., JSON, Cap'n Proto).
-  bytes config = 3;
+  /// Untrusted configuration accessible by the worker.
+  UntrustedConfig untrusted_config = 3;
+  /// Trusted configuration influencing the execution environment.
+  TrustedConfig trusted_config = 4;
 }
 
 /// Response after attempting to start a worker instance.
 message StartWorkerResponse {
   /// Unique identifier assigned to the successfully started worker instance.
-  string instance_id = 1;
-  /// Indicates if the worker was started successfully.
+  string id = 1;
+  /// Indicates if the worker was started successfully (or is starting).
   bool success = 2;
   /// Optional error message if starting failed.
   string error_message = 3;
 }
 
+
+// --- StopWorker Messages ---
+
 /// Request to stop a specific worker instance.
 message StopWorkerRequest {
   /// The unique identifier of the worker instance to stop.
-  string instance_id = 1;
+  string id = 1;
 }
 
 /// Response after attempting to stop a worker instance.
@@ -55,10 +123,13 @@ message StopWorkerResponse {
   string error_message = 2;
 }
 
+
+// --- InvokeWorker Messages ---
+
 /// Request to invoke a function or send data to a worker instance.
 message InvokeWorkerRequest {
   /// The unique identifier of the worker instance to invoke.
-  string instance_id = 1;
+  string id = 1;
   /// The payload/data to send to the worker instance.
   bytes payload = 2;
 }
@@ -73,6 +144,9 @@ message InvokeWorkerResponse {
   string error_message = 3;
 }
 
+
+// --- GetAttestation Messages ---
+
 /// Request to get an attestation report from the execution enclave.
 message GetAttestationRequest {
   /// Optional user data to be included in the attestation report's quote.
@@ -83,4 +157,61 @@ message GetAttestationRequest {
 message GetAttestationResponse {
   /// The attestation report generated by the execution enclave.
   interface.AttestationReport report = 1;
+}
+
+
+// --- GetWorkerStatus Messages ---
+
+/// Request to retrieve the status of a specific worker instance.
+message GetWorkerStatusRequest {
+  /// The unique identifier of the worker instance to query.
+  string id = 1;
+}
+
+/// Response containing the status of a specific worker instance.
+message GetWorkerStatusResponse {
+  /// The unique identifier of the worker instance.
+  string id = 1;
+  /// The current status of the worker.
+  WorkerStatus status = 2;
+  /// Indicates if the status was retrieved successfully (e.g., worker instance found).
+  bool success = 3;
+  /// Optional error message if status retrieval failed (e.g., instance not found).
+  string error_message = 4;
+  // Optionally add more status details like uptime, resource usage, etc.
+}
+
+
+// --- ListRunningWorkers Messages ---
+
+/// Request to retrieve the IDs of all currently running worker instances.
+/// No parameters needed for a simple listing.
+message ListRunningWorkersRequest {
+}
+
+/// Response containing the IDs of all running worker instances.
+message ListRunningWorkersResponse {
+  /// A list of unique identifiers for the currently running worker instances.
+  repeated string ids = 1;
+}
+
+
+// --- GetWorkerLogs Messages ---
+
+/// Request to retrieve debug logs from a specific worker instance.
+message GetWorkerLogsRequest {
+  /// The unique identifier of the worker instance whose logs are requested.
+  string id = 1;
+  // Optionally add parameters like max_lines, since_timestamp, log_level etc.
+}
+
+/// Response containing the debug logs from a specific worker instance.
+message GetWorkerLogsResponse {
+  /// The retrieved logs, typically as a single string.
+  /// Consider streaming responses for very large logs in a real implementation.
+  string logs = 1;
+  /// Indicates if the logs were retrieved successfully.
+  bool success = 2;
+  /// Optional error message if log retrieval failed (e.g., instance not found, logging disabled).
+  string error_message = 3;
 }
