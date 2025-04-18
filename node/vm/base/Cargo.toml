@@ -5,7 +5,6 @@ edition = "2024"
 
 [dependencies]
 nxcc-interface = { path = "../../interface" }
-pem = "3.0.5"
 rcgen = "0.13.2"
 thiserror = "1.0.63"
 tokio = { version = "1.44.1", features = ["rt-multi-thread", "macros", "net", "sync"] }
@@ -22,8 +21,5 @@ vsock = ["tokio-vsock"]
 tcp = []
 
 [dev-dependencies]
-futures = "0.3.31"
-hyper-util = { version = "0.1.11", features = ["tokio"] }
-tokio-util = { version = "0.7.11", features = ["io"] }
-tower = "0.5.2"
-uuid = { version = "1.10.0", features = ["v4"] }
+http = "1.1.0"
+rcgen = { version = "0.13.2", features = ["pem", "x509-parser"] }
