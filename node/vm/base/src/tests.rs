@@ -1,15 +1,16 @@
+/// src/tests.rs
 use std::{collections::HashMap, error::Error, sync::Arc};
 
 use nxcc_interface::proto::vm::{TrustedConfig, UntrustedConfig, WorkerStatus};
 use tokio::net::TcpListener;
 use tokio_stream::wrappers::TcpListenerStream;
-use tonic::transport::Server;
+use tonic::transport::{Certificate, ClientTlsConfig, Identity, Server};
 
 use crate::{
     binding::BoundClient,
     client::{ClientError, VmServiceClient},
     server::{VmError, VmRuntime, VmServiceGrpc},
-    tls::{create_server_tls_config, generate_ca_cert, generate_signed_cert},
+    tls::MtlsCertificates, // Use the new struct
 };
 
 /// A mock VM runtime implementation for the *server side* of this E2E test.
@@ -81,23 +82,11 @@ impl VmRuntime for E2EMockVmRuntime {
 /// Run a fully in-memory test of the VM server and client binding layer.
 #[tokio::test]
 async fn test_e2e_with_client_binding() -> Result<(), Box<dyn Error>> {
-    // 1. Generate CA and Certs
-    let (dummy_ca_cert, dummy_ca_key) = generate_ca_cert().unwrap();
-    let dummy_ca_cert_pem = dummy_ca_cert.pem();
-    let (server_cert_pem, server_key_pem) =
-        generate_signed_cert("localhost", &dummy_ca_cert, &dummy_ca_key).unwrap();
-    let (client1_cert_pem, client1_key_pem) =
-        generate_signed_cert("client1", &dummy_ca_cert, &dummy_ca_key).unwrap();
-    let (client2_cert_pem, client2_key_pem) =
-        generate_signed_cert("client2", &dummy_ca_cert, &dummy_ca_key).unwrap();
+    // 1. Generate CA and Certs using the simplified API
+    let certs = MtlsCertificates::new()?;
 
     // 2. Configure server TLS
-    let server_tls_config = create_server_tls_config(
-        server_cert_pem.clone(),
-        server_key_pem,
-        dummy_ca_cert_pem.clone(),
-    )
-    .unwrap();
+    let server_tls_config = certs.server_tls_config()?;
 
     // 3. Start listener and server with E2EMockVmRuntime
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -108,7 +97,7 @@ async fn test_e2e_with_client_binding() -> Result<(), Box<dyn Error>> {
     let server_bound_client = bound_client.clone(); // Clone for the server
     let server_handle = tokio::spawn(async move {
         Server::builder()
-            .tls_config(server_tls_config)
+            .tls_config(server_tls_config) // Use generated config
             .unwrap()
             .layer(crate::binding::ClientBindingLayer::new(server_bound_client))
             .add_service(nxcc_interface::proto::vm::vm_server::VmServer::new(
@@ -120,15 +109,9 @@ async fn test_e2e_with_client_binding() -> Result<(), Box<dyn Error>> {
     });
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await; // Allow server to start
 
-    // 4. Create first client connection using VmServiceClient
-    let mut client1 = VmServiceClient::connect(
-        server_addr,
-        client1_cert_pem.clone(),
-        client1_key_pem.clone(),
-        dummy_ca_cert_pem.clone(),
-        "localhost".to_string(),
-    )
-    .await?;
+    // 4. Create first client connection using VmServiceClient and generated config
+    let client1_tls_config = certs.client_tls_config()?;
+    let mut client1 = VmServiceClient::connect(server_addr, client1_tls_config.clone()).await?; // Clone config for potential reuse
 
     // 5. Test first client operations (StartWorker)
     let untrusted_config = UntrustedConfig {
@@ -171,15 +154,8 @@ async fn test_e2e_with_client_binding() -> Result<(), Box<dyn Error>> {
     assert!(logs_result.is_ok(), "First client GetWorkerLogs failed");
     assert!(logs_result.unwrap().contains(&worker_id));
 
-    // 9. Create a new connection for the first client
-    let mut client1_reconnect = VmServiceClient::connect(
-        server_addr,
-        client1_cert_pem.clone(),
-        client1_key_pem.clone(),
-        dummy_ca_cert_pem.clone(),
-        "localhost".to_string(),
-    )
-    .await?;
+    // 9. Create a new connection for the first client (reuse TLS config)
+    let mut client1_reconnect = VmServiceClient::connect(server_addr, client1_tls_config).await?;
 
     // 10. Verify the first client can still call methods after reconnecting (InvokeWorker)
     let invoke_result = client1_reconnect
@@ -191,17 +167,18 @@ async fn test_e2e_with_client_binding() -> Result<(), Box<dyn Error>> {
     );
     assert_eq!(invoke_result.unwrap(), vec![7, 8, 9]); // Mock echoes
 
-    // 11. Create a second client with a different certificate
-    let mut client2 = VmServiceClient::connect(
-        server_addr,
-        client2_cert_pem.clone(),
-        client2_key_pem.clone(),
-        dummy_ca_cert_pem.clone(),
-        "localhost".to_string(),
-    )
-    .await?;
+    // 11. Create a second client with a *different* certificate signed by the *same* CA
+    let client2_bundle = certs.generate_additional_client_cert("client2")?;
+    let client2_identity = Identity::from_pem(&client2_bundle.cert_pem, &client2_bundle.key_pem);
+    let ca_cert = Certificate::from_pem(&certs.ca_pem);
+    let client2_tls_config = ClientTlsConfig::new()
+        .identity(client2_identity)
+        .ca_certificate(ca_cert)
+        .domain_name("localhost"); // Still need domain name
 
-    // 12. Verify the second client cannot call methods (GetAttestation)
+    let mut client2 = VmServiceClient::connect(server_addr, client2_tls_config).await?;
+
+    // 12. Verify the second client cannot call methods (GetAttestation) because binding layer rejects it
     let result = client2.get_attestation(vec![10, 11, 12]).await;
     assert!(result.is_err(), "Second client should be rejected");
     match result.err().unwrap() {

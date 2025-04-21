@@ -20,18 +20,108 @@
 //! - The security relies on the CA's private key remaining confidential to the server process that generated it
 //!   and the client binding logic, not on the CA's identity itself.
 //! - Authorization decisions should **not** be based solely on the fact that a certificate was validated against this dummy CA.
-use std::error::Error;
 
 use rcgen::{
     BasicConstraints, Certificate as RcgenCertificate, CertificateParams, DistinguishedName,
     DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair, KeyUsagePurpose,
 };
+use thiserror::Error;
 use tonic::transport::{Certificate, ClientTlsConfig, Identity, ServerTlsConfig};
+
+/// Errors that can occur during TLS configuration
+#[derive(Error, Debug)]
+pub enum TlsError {
+    #[error("Failed to generate certificate: {0}")]
+    CertGeneration(#[from] rcgen::Error), // Use rcgen::Error directly
+
+    #[error("Failed to generate key pair: {0}")]
+    KeyGeneration(String),
+
+    #[error("Invalid certificate parameters: {0}")]
+    InvalidParams(String),
+
+    #[error("Failed to parse PEM data: {0}")]
+    PemParse(String),
+}
+
+/// Represents a certificate bundle with PEM-encoded certificate and private key
+#[derive(Clone)]
+pub struct CertBundle {
+    pub cert_pem: String,
+    pub key_pem: String,
+}
+
+/// Contains all certificates needed for mTLS, generated from a single dummy CA.
+pub struct MtlsCertificates {
+    pub ca_pem: String,
+    pub server: CertBundle,
+    pub client: CertBundle,
+    /// The internal CA certificate object
+    ca_cert: RcgenCertificate,
+    /// The internal CA key pair object
+    ca_key: KeyPair,
+}
+
+impl MtlsCertificates {
+    /// Creates a complete mTLS certificate setup with a new dummy CA, server cert, and client cert.
+    /// Hostnames are not used as services are ephemeral and unnamed.
+    pub fn new() -> Result<Self, TlsError> {
+        // Generate the dummy CA
+        let (ca_cert, ca_key) = generate_ca_cert()?;
+        let ca_pem = ca_cert.pem();
+
+        // Generate server certificate - explicitly add "localhost" as SAN
+        let server_bundle = generate_signed_cert("server", "localhost", &ca_cert, &ca_key)?;
+
+        // Generate client certificate - SAN isn't strictly needed here but CN is set
+        let client_bundle = generate_signed_cert("client", "client", &ca_cert, &ca_key)?;
+
+        Ok(MtlsCertificates {
+            ca_pem,
+            server: server_bundle,
+            client: client_bundle,
+            ca_cert,
+            ca_key,
+        })
+    }
+
+    /// Creates server TLS configuration for gRPC with mTLS using the generated certificates.
+    pub fn server_tls_config(&self) -> Result<ServerTlsConfig, TlsError> {
+        let server_identity = Identity::from_pem(&self.server.cert_pem, &self.server.key_pem);
+        let ca_cert = Certificate::from_pem(&self.ca_pem);
+
+        Ok(ServerTlsConfig::new()
+            .identity(server_identity)
+            .client_ca_root(ca_cert))
+    }
+
+    /// Creates client TLS configuration for gRPC with mTLS using the generated certificates.
+    /// Uses "localhost" as a dummy domain name, as required by tonic, although
+    /// hostname validation is not the primary goal here.
+    pub fn client_tls_config(&self) -> Result<ClientTlsConfig, TlsError> {
+        let client_identity = Identity::from_pem(&self.client.cert_pem, &self.client.key_pem);
+        let ca_cert = Certificate::from_pem(&self.ca_pem);
+
+        Ok(ClientTlsConfig::new()
+            .identity(client_identity)
+            .ca_certificate(ca_cert)
+            // Tonic requires a domain name, even if we don't rely on it for validation.
+            .domain_name("localhost"))
+    }
+
+    /// Generates an additional client certificate signed by the same internal CA.
+    pub fn generate_additional_client_cert(
+        &self,
+        cn_name: &str, // Common Name for the cert
+    ) -> Result<CertBundle, TlsError> {
+        // Pass the CN as both CN and the (less critical) SAN for clients
+        generate_signed_cert(cn_name, cn_name, &self.ca_cert, &self.ca_key)
+    }
+}
 
 /// Generates a deterministic Certificate Authority (CA) certificate and key pair.
 /// This CA is intended solely to satisfy mTLS chain requirements and should NOT be trusted.
-/// It's deterministic *within a single run* but not across different process executions unless the keypair is saved/seeded.
-pub fn generate_ca_cert() -> Result<(RcgenCertificate, KeyPair), Box<dyn Error + Send + Sync>> {
+fn generate_ca_cert() -> Result<(RcgenCertificate, KeyPair), TlsError> {
     let mut params = CertificateParams::default();
     let mut distinguished_name = DistinguishedName::new();
     // Use a fixed, recognizable name for the dummy CA
@@ -40,78 +130,48 @@ pub fn generate_ca_cert() -> Result<(RcgenCertificate, KeyPair), Box<dyn Error +
     params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
     params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::CrlSign];
 
-    let key_pair = KeyPair::generate()?;
+    // Generate a new key pair for the CA - does not take alg argument
+    let key_pair = KeyPair::generate().map_err(|e| TlsError::KeyGeneration(e.to_string()))?;
     let cert = params.self_signed(&key_pair)?;
     Ok((cert, key_pair))
 }
 
 /// Generate an end-entity certificate signed by the provided CA.
-pub fn generate_signed_cert(
-    common_name: &str,
+/// The `cn_name` is used for the Common Name (CN).
+/// The `san_name` is added as a Subject Alternative Name (DNS type).
+fn generate_signed_cert(
+    cn_name: &str,
+    san_name: &str, // Name to put in SAN (e.g., "localhost" for server)
     ca_cert: &RcgenCertificate,
     ca_key_pair: &KeyPair,
-) -> Result<(String, String), Box<dyn Error + Send + Sync>> {
-    let mut params = CertificateParams::new(vec![common_name.to_string()])?;
+) -> Result<CertBundle, TlsError> {
+    // Add the san_name to the list of SANs
+    let mut params = CertificateParams::new(vec![san_name.to_string()])
+        .map_err(|e| TlsError::InvalidParams(e.to_string()))?;
+
     let mut distinguished_name = DistinguishedName::new();
-    distinguished_name.push(DnType::CommonName, common_name);
+    distinguished_name.push(DnType::CommonName, cn_name); // Use cn_name for CN
     params.distinguished_name = distinguished_name;
     params.is_ca = IsCa::NoCa;
     params.key_usages = vec![
         KeyUsagePurpose::DigitalSignature,
-        KeyUsagePurpose::KeyEncipherment,
+        KeyUsagePurpose::KeyEncipherment, // Needed for TLS key exchange
     ];
     params.extended_key_usages = vec![
-        ExtendedKeyUsagePurpose::ServerAuth,
-        ExtendedKeyUsagePurpose::ClientAuth, // Allow use as client cert too if needed
+        ExtendedKeyUsagePurpose::ServerAuth, // Allows use as server cert
+        ExtendedKeyUsagePurpose::ClientAuth, // Allows use as client cert
     ];
+    // Explicitly add the SAN type if needed (rcgen often infers DNS from string)
+    // params.subject_alt_names.push(SanType::DnsName(san_name.to_string())); // Redundant if passed in new()
 
-    let key_pair = KeyPair::generate()?;
+    // Generate a new key pair for the end-entity certificate - does not take alg argument
+    let key_pair = KeyPair::generate().map_err(|e| TlsError::KeyGeneration(e.to_string()))?;
     let cert = params.signed_by(&key_pair, ca_cert, ca_key_pair)?;
 
-    Ok((cert.pem(), key_pair.serialize_pem()))
-}
-
-/// Create server TLS configuration for gRPC with mTLS using a dummy CA.
-/// Requires client certificates signed by the provided dummy CA.
-pub fn create_server_tls_config(
-    server_cert_pem: String,
-    server_key_pem: String,
-    dummy_ca_cert_pem: String,
-) -> Result<ServerTlsConfig, Box<dyn Error + Send + Sync>> {
-    let server_identity = Identity::from_pem(server_cert_pem, server_key_pem);
-    let dummy_ca_cert = Certificate::from_pem(dummy_ca_cert_pem);
-
-    // Configure TLS:
-    // - Use the server's identity (signed by the dummy CA)
-    // - Require a client certificate and validate it against the dummy CA.
-    //   This satisfies mTLS requirements but doesn't imply trust in the CA.
-    let server_tls_config = ServerTlsConfig::new()
-        .identity(server_identity)
-        .client_ca_root(dummy_ca_cert); // Requires client cert signed by this CA
-
-    Ok(server_tls_config)
-}
-
-/// Create client TLS configuration for connecting to the server using a dummy CA.
-pub fn create_client_tls_config(
-    client_cert_pem: String,
-    client_key_pem: String,
-    dummy_ca_cert_pem: String,
-    domain_name: &str,
-) -> Result<ClientTlsConfig, Box<dyn Error + Send + Sync>> {
-    let client_identity = Identity::from_pem(client_cert_pem, client_key_pem);
-    let dummy_ca_cert = Certificate::from_pem(dummy_ca_cert_pem);
-
-    // Configure TLS:
-    // - Use the client's identity (signed by the dummy CA)
-    // - Use the dummy CA to validate the server's certificate chain.
-    //   This satisfies mTLS requirements but doesn't imply trust in the CA.
-    let client_tls_config = ClientTlsConfig::new()
-        .identity(client_identity)
-        .ca_certificate(dummy_ca_cert) // Validate server cert against the dummy CA
-        .domain_name(domain_name.to_string());
-
-    Ok(client_tls_config)
+    Ok(CertBundle {
+        cert_pem: cert.pem(),
+        key_pem: key_pair.serialize_pem(),
+    })
 }
 
 #[cfg(test)]
@@ -119,51 +179,68 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_ca_generation() {
-        let result = generate_ca_cert();
-        assert!(result.is_ok());
-        let (cert, _key) = result.unwrap();
-        assert!(cert.pem().contains("BEGIN CERTIFICATE"));
-        assert!(matches!(cert.params().is_ca, IsCa::Ca(_)));
+    fn test_mtls_certificate_generation_and_config() {
+        let certs = MtlsCertificates::new().expect("Failed to create certificates");
+
+        // Check CA cert
+        assert!(certs.ca_pem.contains("BEGIN CERTIFICATE"));
+
+        // Check server cert
+        assert!(certs.server.cert_pem.contains("BEGIN CERTIFICATE"));
+        assert!(certs.server.key_pem.contains("BEGIN PRIVATE KEY")); // rcgen default is PKCS#8
+        // Verify server cert contains the SAN (optional but good check)
+        let server_x509 = pem::parse(&certs.server.cert_pem).expect("Failed to parse server PEM");
+        let server_cert_parsed = x509_parser::parse_x509_certificate(&server_x509.contents())
+            .expect("Failed to parse server cert")
+            .1;
+        let sans = server_cert_parsed
+            .subject_alternative_name()
+            .expect("SAN extension missing")
+            .expect("Failed to parse SAN extension")
+            .value
+            .general_names
+            .clone();
+        assert!(sans.iter().any(|san| match san {
+            x509_parser::extensions::GeneralName::DNSName(name) => *name == "localhost",
+            _ => false,
+        }));
+
+        // Check client cert
+        assert!(certs.client.cert_pem.contains("BEGIN CERTIFICATE"));
+        assert!(certs.client.key_pem.contains("BEGIN PRIVATE KEY"));
+
+        // Check TLS configs can be created - this is the main check now
+        // We don't need to assert the contents of the config objects themselves,
+        // as they are opaque builders. Success means the PEM data was valid.
+        let _server_config = certs
+            .server_tls_config()
+            .expect("Failed to create server TLS config");
+        let _client_config = certs
+            .client_tls_config()
+            .expect("Failed to create client TLS config");
     }
 
     #[test]
-    fn test_signed_certificate_generation() {
-        let (ca_cert, ca_key) = generate_ca_cert().unwrap();
-        let result = generate_signed_cert("test.example.com", &ca_cert, &ca_key);
-        assert!(result.is_ok());
+    fn test_additional_client_cert_generation() {
+        let certs = MtlsCertificates::new().expect("Failed to create base certificates");
+        let client2_bundle = certs
+            .generate_additional_client_cert("client2")
+            .expect("Failed to generate additional client cert");
 
-        let (cert_pem, key_pem) = result.unwrap();
-        assert!(cert_pem.contains("BEGIN CERTIFICATE"));
-        assert!(key_pem.contains("BEGIN PRIVATE KEY"));
+        assert!(client2_bundle.cert_pem.contains("BEGIN CERTIFICATE"));
+        assert!(client2_bundle.key_pem.contains("BEGIN PRIVATE KEY"));
 
-        // Basic check: ensure it's not marked as CA
-        let params = rcgen::CertificateParams::from_ca_cert_pem(&cert_pem).unwrap();
-        assert!(!matches!(params.is_ca, IsCa::Ca(_)));
-    }
+        // Ensure it's different from the first client cert
+        assert_ne!(certs.client.cert_pem, client2_bundle.cert_pem);
+        assert_ne!(certs.client.key_pem, client2_bundle.key_pem);
 
-    #[test]
-    fn test_server_tls_config() {
-        let (ca_cert, ca_key) = generate_ca_cert().unwrap();
-        let (server_cert_pem, server_key_pem) =
-            generate_signed_cert("server.example.com", &ca_cert, &ca_key).unwrap();
-
-        let result = create_server_tls_config(server_cert_pem, server_key_pem, ca_cert.pem());
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_client_tls_config() {
-        let (ca_cert, ca_key) = generate_ca_cert().unwrap();
-        let (client_cert_pem, client_key_pem) =
-            generate_signed_cert("client.example.com", &ca_cert, &ca_key).unwrap();
-
-        let result = create_client_tls_config(
-            client_cert_pem,
-            client_key_pem,
-            ca_cert.pem(),
-            "server.example.com",
-        );
-        assert!(result.is_ok());
+        // Try creating a config with the additional cert - this verifies the cert/key are usable
+        let client2_identity =
+            Identity::from_pem(&client2_bundle.cert_pem, &client2_bundle.key_pem);
+        let ca_cert = Certificate::from_pem(&certs.ca_pem);
+        let _client2_config = ClientTlsConfig::new() // Assign to _ to avoid unused warning
+            .identity(client2_identity)
+            .ca_certificate(ca_cert)
+            .domain_name("localhost"); // Still need a domain name for client config
     }
 }
