@@ -1,5 +1,6 @@
-use std::path::PathBuf;
+use std::{io, path::PathBuf, time::Duration};
 
+use nxcc_interface::proto::vm::WorkerStatus;
 use nxcc_vm_base::server::VmError;
 use thiserror::Error;
 
@@ -62,21 +63,35 @@ pub enum WorkerdVmError {
 
     #[error("Worker is not in a runnable state: {0:?}")]
     WorkerNotRunnable(nxcc_interface::proto::vm::WorkerStatus),
+
+    #[error("Worker '{instance_id}' failed to become ready within {timeout:?}. Logs:\n{logs}")]
+    StartupTimeout {
+        instance_id: String,
+        timeout: Duration,
+        logs: String,
+    },
+
+    #[error(
+        "Worker '{instance_id}' started but exited prematurely with status {final_status:?}. \
+         Logs:\n{logs}"
+    )]
+    StartupFailedPrematureExit {
+        instance_id: String,
+        final_status: WorkerStatus,
+        logs: String,
+    },
+
+    // Add other specific errors from config_builder, etc.
+    #[error("Configuration build error: {0}")]
+    ConfigBuildError(String), // Example
+
+    #[error("Code detection error: {0}")]
+    CodeDetectionError(String), // Example
 }
 
 impl From<WorkerdVmError> for VmError {
     fn from(e: WorkerdVmError) -> Self {
         // Simple conversion for now, could add more context mapping later
-        VmError::new(e.to_string())
-    }
-}
-
-// Helper to box hyper errors for UdsCommunicationFailed
-impl From<hyper::Error> for WorkerdVmError {
-    fn from(e: hyper::Error) -> Self {
-        WorkerdVmError::UdsCommunicationFailed {
-            path: PathBuf::from("unknown"), // Path should be added contextually
-            source: Box::new(e),
-        }
+        VmError::with_source(e.to_string(), e)
     }
 }
