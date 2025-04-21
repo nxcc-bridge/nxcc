@@ -46,10 +46,9 @@ impl fmt::Display for VmError {
 /// Trait defining the interface for a specific VM/runtime implementation.
 #[tonic::async_trait]
 pub trait VmRuntime: Send + Sync + 'static {
-    /// Starts a new worker instance.
+    /// Starts a new vm instance returning the ID.
     async fn start_worker(
         &self,
-        worker_id: String,
         worker_code: Vec<u8>,
         untrusted_config: nxcc_interface::proto::vm::UntrustedConfig,
         trusted_config: nxcc_interface::proto::vm::TrustedConfig,
@@ -123,7 +122,6 @@ impl<T: VmRuntime> Vm for VmServiceGrpc<T> {
         match self
             .runtime
             .start_worker(
-                req.worker_id,
                 req.worker_code,
                 untrusted_config,
                 trusted_config,

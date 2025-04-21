@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 nxcc-interface = { path = "../../interface" }
 rcgen = "0.13.2"
-thiserror = "1.0.63"
+thiserror = "2.0.12"
 tokio = { version = "1.44.1", features = ["rt-multi-thread", "macros", "net", "sync"] }
 tokio-stream = { version = "0.1.17", optional = true }
 tokio-vsock = { version = "0.7.0", features = ["tonic012"], optional = true }
