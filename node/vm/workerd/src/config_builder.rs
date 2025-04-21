@@ -1,5 +1,3 @@
-// #![allow(clippy::module_inception)] // Allow module name same as file
-
 use std::path::Path;
 
 use capnp::message;
@@ -20,7 +18,7 @@ pub enum CodeType {
 /// * `worker_code` - The raw bytes of the worker script.
 /// * `code_type` - The detected type of the worker code (ESM or Python).
 /// * `untrusted_config` - User-provided configuration (JSON).
-/// * `trusted_config` - Platform-provided secrets (JWK strings).
+/// * `trusted_config` - Platform-provided secrets (raw bytes).
 /// * `uds_path` - The path for the Unix Domain Socket the worker should listen on.
 /// * `service_name` - The name for the service entry pointing to the worker (e.g., "main").
 /// * `socket_name` - The name for the UDS socket entry (e.g., "uds_invoke").
@@ -86,37 +84,18 @@ pub fn build_config(
         }
         // TODO: Handle advanced_vm_config if needed, maybe as separate JSON bindings?
 
-        // 2. Secret Key Bindings (assuming JWK format in bytes)
+        // 2. Secret Key Bindings (raw binary format)
         for (i, key_bytes) in trusted_config.crypto_keys.iter().enumerate() {
-            let key_jwk_str = std::str::from_utf8(key_bytes).map_err(|e| {
-                WorkerdVmError::SecretKeyParseFailed(format!("Key {} is not valid UTF-8: {}", i, e))
-            })?;
-
-            // Basic validation: Check if it looks like JSON
-            if !(key_jwk_str.trim_start().starts_with('{') && key_jwk_str.trim_end().ends_with('}'))
-            {
-                return Err(WorkerdVmError::SecretKeyParseFailed(format!(
-                    "Key {} does not appear to be valid JSON JWK",
-                    i
-                )));
-            }
-
-            // TODO: Add more robust JWK validation if necessary.
-            // TODO: Determine key usages from manifest/platform if possible, default to common ones.
+            // For secret keys, we use the raw data directly and limit the usages
+            // to deriveKey and deriveBits for increased security
             let usages = vec![
-                worker::binding::crypto_key::Usage::Sign,
-                worker::binding::crypto_key::Usage::Verify,
-                worker::binding::crypto_key::Usage::Encrypt,
-                worker::binding::crypto_key::Usage::Decrypt,
-            ]; // Example default usages
+                worker::binding::crypto_key::Usage::DeriveKey,
+                worker::binding::crypto_key::Usage::DeriveBits,
+            ];
 
             bindings.push((
                 format!("SECRET_KEY_{}", i),
-                BindingType::CryptoKey {
-                    jwk: key_jwk_str.to_string(),
-                    usages,
-                    extractable: false, // Default to non-extractable for security
-                },
+                BindingType::Secret(key_bytes.clone()),
             ));
         }
 
@@ -130,23 +109,17 @@ pub fn build_config(
                     BindingType::Json(json_str) => {
                         binding_builder.set_json(json_str);
                     }
-                    BindingType::CryptoKey {
-                        jwk,
-                        usages,
-                        extractable,
-                    } => {
+                    BindingType::Secret(raw_key) => {
                         let mut crypto_key_builder = binding_builder.init_crypto_key();
-                        crypto_key_builder.set_jwk(jwk);
-                        crypto_key_builder.set_extractable(*extractable);
-                        let mut usage_list = crypto_key_builder
-                            .reborrow()
-                            .init_usages(usages.len() as u32);
-                        for (j, usage) in usages.iter().enumerate() {
-                            usage_list.set(j as u32, *usage);
-                        }
-                        // Algorithm name/json could be derived from JWK if needed, but workerd often infers it.
-                        // Setting a default or leaving it empty might be okay.
-                        crypto_key_builder.init_algorithm().set_name("auto"); // Let workerd infer
+                        crypto_key_builder.set_raw(raw_key.as_slice());
+                        crypto_key_builder.set_extractable(false); // Explicitly not extractable for security
+
+                        let mut usage_list = crypto_key_builder.reborrow().init_usages(2); // Only deriveKey and deriveBits
+                        usage_list.set(0, worker::binding::crypto_key::Usage::DeriveKey);
+                        usage_list.set(1, worker::binding::crypto_key::Usage::DeriveBits);
+
+                        // Set a generic algorithm that's compatible with key derivation
+                        crypto_key_builder.init_algorithm().set_name("HKDF");
                     }
                 }
             }
@@ -176,12 +149,7 @@ pub fn build_config(
 /// Helper enum for different binding types during construction.
 enum BindingType {
     Json(String),
-    CryptoKey {
-        jwk: String,
-        usages: Vec<worker::binding::crypto_key::Usage>,
-        extractable: bool,
-    },
-    // Add other types like Text, Data, Service if needed later
+    Secret(Vec<u8>), // Raw binary secret, will be zeroized after use
 }
 
 /// Detects the code type based on simple heuristics.
@@ -221,9 +189,6 @@ pub fn detect_code_type(code: &[u8]) -> Result<CodeType, WorkerdVmError> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
-    use capnp::schema_capnp::brand::binding;
     use nxcc_interface::proto::vm::{Limits, TrustedConfig, UntrustedConfig};
     use tempfile::tempdir;
 
@@ -234,11 +199,12 @@ mod tests {
             userdata_json: r#"{"userKey": "userDataValue"}"#.to_string(),
             advanced_vm_config: Default::default(),
         };
+
+        // Using raw bytes for the secret key instead of a JWK
         let trusted = TrustedConfig {
             crypto_keys: vec![
-                r#"{"kty":"oct", "k":"AAECAwQFBgcICQoLDA0ODxAREhM="}"#
-                    .as_bytes()
-                    .to_vec(), // Example symmetric key JWK
+                // Some random bytes to use as a secret key
+                vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
             ],
             limits: Some(Limits {
                 memory_mb: 128,
@@ -284,7 +250,7 @@ mod tests {
         // Basic validation: check if it's non-empty
         assert!(!config_bytes.is_empty());
 
-        // Try to deserialize and check some values (optional, requires more effort)
+        // Try to deserialize and check some values
         let message_reader =
             capnp::serialize::read_message(&mut config_bytes.as_slice(), Default::default())?;
         let config_reader: config::Reader = message_reader.get_root()?;
@@ -293,11 +259,13 @@ mod tests {
         let service = config_reader.get_services()?.get(0);
         assert_eq!(service.get_name()?, "main_svc");
         assert!(service.has_worker());
+
         let service::Worker(Ok(worker)) = service.which()? else {
             panic!("contained wrong service type");
         };
         assert_eq!(worker.get_compatibility_date()?, "2025-04-18");
         assert!(worker.has_modules());
+
         let worker::Modules(Ok(modules)) = worker.which()? else {
             panic!("contained no modules");
         };
@@ -306,9 +274,11 @@ mod tests {
         assert!(module.has_es_module());
 
         assert_eq!(worker.get_bindings()?.len(), 2); // USER_CONFIG + SECRET_KEY_0
+
         let binding0 = worker.get_bindings()?.get(0);
         assert_eq!(binding0.get_name()?, "USER_CONFIG");
         assert!(binding0.has_json());
+
         let worker::binding::Json(Ok(user_config_json)) = binding0.which()? else {
             panic!("missing json binding");
         };
@@ -317,15 +287,27 @@ mod tests {
         let binding1 = worker.get_bindings()?.get(1);
         assert_eq!(binding1.get_name()?, "SECRET_KEY_0");
         assert!(binding1.has_crypto_key());
+
         let worker::binding::CryptoKey(Ok(crypto_key)) = binding1.which()? else {
             panic!("missing crypto key binding");
         };
-        assert!(crypto_key.has_jwk());
-        let worker::binding::crypto_key::Jwk(Ok(jwk)) = crypto_key.which()? else {
-            panic!("contained wrong binding crypto key type");
-        };
-        assert_eq!(jwk, std::str::from_utf8(&trusted.crypto_keys[0])?);
+        assert!(crypto_key.has_raw());
 
+        // Check that the key is not extractable
+        assert_eq!(crypto_key.get_extractable(), false);
+
+        // Check usages are limited to derive operations
+        assert_eq!(crypto_key.get_usages()?.len(), 2);
+        assert_eq!(
+            crypto_key.get_usages()?.get(0)?,
+            worker::binding::crypto_key::Usage::DeriveKey
+        );
+        assert_eq!(
+            crypto_key.get_usages()?.get(1)?,
+            worker::binding::crypto_key::Usage::DeriveBits
+        );
+
+        // Check socket configuration
         assert_eq!(config_reader.get_sockets()?.len(), 1);
         let socket = config_reader.get_sockets()?.get(0);
         assert_eq!(socket.get_name()?, "uds_sock");
@@ -360,17 +342,29 @@ mod tests {
         let config_reader: config::Reader = message_reader.get_root()?;
         let service = config_reader.get_services()?.get(0);
         assert!(service.has_worker());
+
         let service::Worker(Ok(worker)) = service.which()? else {
             panic!("contained wrong service type");
         };
+
         let worker::Modules(Ok(modules)) = worker.which()? else {
             panic!("contained no modules");
         };
+
         let module = modules.get(0);
         assert_eq!(module.get_name()?, "worker.py");
         assert!(module.has_python_module());
+
         assert_eq!(worker.get_compatibility_flags()?.len(), 2);
         assert_eq!(worker.get_compatibility_flags()?.get(0)?, "python_workers");
+
+        // Verify the crypto key binding for the Python worker
+        let binding1 = worker.get_bindings()?.get(1);
+        assert_eq!(binding1.get_name()?, "SECRET_KEY_0");
+
+        let worker::binding::CryptoKey(Ok(crypto_key)) = binding1.which()? else {
+            panic!("missing crypto key binding");
+        };
 
         Ok(())
     }

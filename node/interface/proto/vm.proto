@@ -72,10 +72,7 @@ message Limits {
 /// by the platform operator and potentially influencing the execution environment
 /// setup rather than being directly exposed to the worker code.
 message TrustedConfig {
-  /// Cryptographic keys to be provisioned securely. Each 'bytes' entry
-  /// is expected to contain an efficient serialized representation of a
-  /// JSON Web Key (JWK), such as the UTF-8 encoded JSON string.
-  /// The specific serialization format should be agreed upon by the communicating parties.
+  /// Cryptographic keys to be provisioned securely.
   repeated bytes crypto_keys = 1;
   /// Resource limits enforced by the execution environment.
   Limits limits = 2;
