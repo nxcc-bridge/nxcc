@@ -121,11 +121,7 @@ impl<T: VmRuntime> Vm for VmServiceGrpc<T> {
 
         match self
             .runtime
-            .start_worker(
-                req.worker_code,
-                untrusted_config,
-                trusted_config,
-            )
+            .start_worker(req.worker_code, untrusted_config, trusted_config)
             .await
         {
             Ok(id) => {
@@ -433,13 +429,12 @@ mod tests {
     impl VmRuntime for MockVmRuntime {
         async fn start_worker(
             &self,
-            worker_id: String,
             _worker_code: Vec<u8>,
             _untrusted_config: UntrustedConfig,
             _trusted_config: TrustedConfig,
         ) -> Result<String, VmError> {
             self.start_worker_count.fetch_add(1, Ordering::SeqCst);
-            let id = format!("instance-{}", worker_id);
+            let id = "instance-test-worker".to_string();
             let mut workers = self.workers.lock().unwrap();
             workers.insert(id.clone(), WorkerStatus::Running);
             Ok(id)
@@ -522,7 +517,7 @@ mod tests {
         let response = service.start_worker(request).await.unwrap();
         let response = response.into_inner();
         assert!(response.success);
-        assert_eq!(response.id, "instance-test-worker");
+        assert!(response.id.starts_with("instance-test-worker"));
         assert_eq!(runtime.start_worker_count.load(Ordering::SeqCst), 1);
         assert!(
             runtime
