@@ -1,4 +1,4 @@
-use std::{io, path::PathBuf, time::Duration};
+use std::{path::PathBuf, time::Duration};
 
 use nxcc_interface::proto::vm::WorkerStatus;
 use nxcc_vm_base::server::VmError;

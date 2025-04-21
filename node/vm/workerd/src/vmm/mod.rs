@@ -1,9 +1,6 @@
 use std::{
     collections::HashMap,
-    error::Error as _,
-    fmt,
     path::{Path, PathBuf},
-    process::ExitStatus,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -11,15 +8,8 @@ use std::{
 use async_trait::async_trait;
 use http_body_util::BodyExt;
 use hyper::{Method, Request, StatusCode, body::Bytes};
-use hyper_util::{
-    client::legacy::{Client, connect::HttpConnector},
-    rt::TokioExecutor,
-};
-use hyperlocal::{UnixClientExt, UnixConnector};
-use nix::{
-    sys::signal::{Signal, kill as nix_kill},
-    unistd::Pid,
-};
+use hyper_util::{client::legacy::Client, rt::TokioExecutor};
+use hyperlocal::UnixConnector;
 use nxcc_interface::{
     proto::vm::{TrustedConfig, UntrustedConfig, WorkerStatus},
     types::AttestationReport,
@@ -334,7 +324,7 @@ impl VmRuntime for WorkerdVmm {
 
             if start_time.elapsed() > STARTUP_TIMEOUT {
                 // Timed out waiting for UDS. Mark the worker as Error and kill it.
-                let mut workers_map = self.workers.lock().await;
+                let workers_map = self.workers.lock().await;
                 if let Some(worker_lock) = workers_map.get(&instance_id) {
                     let mut worker = worker_lock.lock().await;
                     if worker.status == WorkerStatus::Starting {

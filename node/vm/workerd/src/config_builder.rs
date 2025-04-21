@@ -88,7 +88,7 @@ pub fn build_config(
         for (i, key_bytes) in trusted_config.crypto_keys.iter().enumerate() {
             // For secret keys, we use the raw data directly and limit the usages
             // to deriveKey and deriveBits for increased security
-            let usages = vec![
+            let usages = [
                 worker::binding::crypto_key::Usage::DeriveKey,
                 worker::binding::crypto_key::Usage::DeriveBits,
             ];
@@ -294,7 +294,7 @@ mod tests {
         assert!(crypto_key.has_raw());
 
         // Check that the key is not extractable
-        assert_eq!(crypto_key.get_extractable(), false);
+        assert!(!crypto_key.get_extractable());
 
         // Check usages are limited to derive operations
         assert_eq!(crypto_key.get_usages()?.len(), 2);

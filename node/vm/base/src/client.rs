@@ -491,7 +491,7 @@ mod tests {
 
         // List workers
         let workers = client.list_running_workers().await?;
-        assert!(workers.len() > 0); // Mock service returns fixed list
+        assert!(!workers.is_empty()); // Mock service returns fixed list
 
         // Invoke worker
         let result = client

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, error::Error as _};
 
 use nxcc_interface::proto::vm::Limits;
 use tokio::time::{self, Duration};
@@ -517,7 +517,7 @@ async fn test_multiple_secret_keys_derived_bits() -> Result<(), Box<dyn std::err
     let info = [5u8, 6, 7, 8];
 
     // We know we inserted two keys: key0=[0x00;32], key1=[0xFF;32]
-    let expected_keys = vec![vec![0x00; 32], vec![0xFF; 32]];
+    let expected_keys = [vec![0x00; 32], vec![0xFF; 32]];
 
     // Make sure we got an array in the response
     let arr = parsed

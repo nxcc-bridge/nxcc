@@ -190,7 +190,7 @@ mod tests {
         assert!(certs.server.key_pem.contains("BEGIN PRIVATE KEY")); // rcgen default is PKCS#8
         // Verify server cert contains the SAN (optional but good check)
         let server_x509 = pem::parse(&certs.server.cert_pem).expect("Failed to parse server PEM");
-        let server_cert_parsed = x509_parser::parse_x509_certificate(&server_x509.contents())
+        let server_cert_parsed = x509_parser::parse_x509_certificate(server_x509.contents())
             .expect("Failed to parse server cert")
             .1;
         let sans = server_cert_parsed
