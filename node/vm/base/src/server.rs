@@ -90,13 +90,12 @@ use nxcc_interface::{
     types::IntoProto as _,
 };
 
-/// Internal struct that wraps a `VmRuntime` implementation and handles gRPC calls.
-pub(crate) struct VmServiceGrpc<T: VmRuntime> {
+pub struct VmServiceGrpc<T: VmRuntime> {
     runtime: Arc<T>,
 }
 
 impl<T: VmRuntime> VmServiceGrpc<T> {
-    pub(crate) fn new(runtime: Arc<T>) -> Self {
+    pub fn new(runtime: Arc<T>) -> Self {
         Self { runtime }
     }
 }
