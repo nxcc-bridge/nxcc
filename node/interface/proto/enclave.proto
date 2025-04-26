@@ -6,7 +6,7 @@ import "google/protobuf/empty.proto";
 import "interface.proto";
 
 // The main secrets service inside the TEE (EnclaveSecrets).
-service EnclaveSecrets {
+service Secrets {
   // get_report returns a fresh attestation report containing ephemeral pubkey, etc.
   rpc GetReport(GetReportRequest) returns (interface.AttestationReport);
 
@@ -14,8 +14,7 @@ service EnclaveSecrets {
   rpc PutSecrets(PutSecretsRequest) returns (PutSecretsResponse);
 
   // get_secrets returns a secrets box encrypted for the requesting enclave.
-  // Corrected message name usage here: GetSecretsEnclaveRequest -> GetSecretsResponse
-  rpc GetSecrets(GetSecretsEnclaveRequest) returns (GetSecretsResponse);
+  rpc GetSecrets(GetSecretsRequest) returns (GetSecretsResponse);
 
   // check_secrets returns whether the given secrets exist.
   rpc CheckSecrets(CheckSecretsRequest) returns (CheckSecretsResponse);
@@ -39,13 +38,13 @@ message PutSecretsResponse {
 }
 
 // Renamed message to avoid conflict with RPC name
-message GetSecretsEnclaveRequest {
-  repeated SecretEnclaveRequest requests = 1;
+message GetSecretsRequest {
+  repeated SecretRequest requests = 1;
   repeated PolicyExecutionReport policy_reports = 2; // Currently unused by implementation
   interface.EnvReport requester_env_report = 3; // Added field
 }
 
-message SecretEnclaveRequest {
+message SecretRequest {
   interface.SecretIdentifier id = 1;
 }
 

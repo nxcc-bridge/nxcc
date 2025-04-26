@@ -3,10 +3,10 @@ use std::sync::Arc;
 use nxcc_interface::{
     proto::enclave::{
         CheckSecretsRequest, CheckSecretsResponse, DeliverEventRequest, DeliverEventResponse,
-        GetReportRequest, GetSecretsEnclaveRequest, GetSecretsResponse, PutSecretsRequest,
+        GetReportRequest, GetSecretsRequest, GetSecretsResponse, PutSecretsRequest,
         PutSecretsResponse, RunWorkerRequest, RunWorkerResponse, SecretStatus,
-        enclave_secrets_server::{EnclaveSecrets, EnclaveSecretsServer},
         runner_server::{Runner, RunnerServer},
+        secrets_server,
     },
     types::{EnvReport, FromProto, IntoProto, SecretId, SecretsBox},
 };
@@ -17,18 +17,18 @@ use crate::{config::EnclaveConfig, runner::RunnerService, secrets::Secrets};
 
 // --- Secrets Service Implementation ---
 
-pub struct EnclaveSecretsService {
+pub struct SecretsService {
     secrets: Arc<Secrets>,
 }
 
-impl EnclaveSecretsService {
+impl SecretsService {
     pub fn new(secrets: Arc<Secrets>) -> Self {
         Self { secrets }
     }
 }
 
 #[tonic::async_trait]
-impl EnclaveSecrets for EnclaveSecretsService {
+impl secrets_server::Secrets for SecretsService {
     async fn get_report(
         &self,
         request: Request<GetReportRequest>,
@@ -80,7 +80,7 @@ impl EnclaveSecrets for EnclaveSecretsService {
 
     async fn get_secrets(
         &self,
-        request: Request<GetSecretsEnclaveRequest>,
+        request: Request<GetSecretsRequest>,
     ) -> Result<Response<GetSecretsResponse>, Status> {
         let proto_req = request.into_inner();
         debug!(
@@ -212,7 +212,7 @@ pub async fn start_grpc_server(config: &EnclaveConfig) -> Result<(), Box<dyn std
     let runner_service = Arc::new(RunnerService::new(secrets_service.clone())); // Arc<RunnerService>
 
     // Instantiate gRPC service wrappers
-    let secrets_grpc = EnclaveSecretsService::new(secrets_service); // Takes Arc<Secrets>
+    let secrets_grpc = SecretsService::new(secrets_service); // Takes Arc<Secrets>
     let runner_grpc = EnclaveRunnerService::new(runner_service); // Takes Arc<RunnerService>
 
     match config.mode {
@@ -227,7 +227,7 @@ pub async fn start_grpc_server(config: &EnclaveConfig) -> Result<(), Box<dyn std
             ))?;
 
             Server::builder()
-                .add_service(EnclaveSecretsServer::new(secrets_grpc))
+                .add_service(secrets_server::SecretsServer::new(secrets_grpc))
                 .add_service(RunnerServer::new(runner_grpc))
                 .serve_with_incoming(listener.incoming())
                 .await?;
@@ -271,7 +271,7 @@ pub async fn start_grpc_server(config: &EnclaveConfig) -> Result<(), Box<dyn std
                 let incoming = UnixListenerStream::new(uds_listener);
 
                 Server::builder()
-                    .add_service(EnclaveSecretsServer::new(secrets_grpc))
+                    .add_service(secrets_server::SecretsServer::new(secrets_grpc))
                     .add_service(RunnerServer::new(runner_grpc))
                     .serve_with_incoming(incoming)
                     .await?;

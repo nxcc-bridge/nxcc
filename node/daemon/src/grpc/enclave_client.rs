@@ -2,9 +2,9 @@ use hyper_util::rt::TokioIo;
 use nxcc_interface::{
     proto::enclave::{
         CheckSecretsRequest, DeliverEventRequest, DeliverEventResponse, GetReportRequest,
-        GetSecretsEnclaveRequest, PutSecretsRequest, PutSecretsResponse, RunWorkerRequest,
-        SecretEnclaveRequest, SecretsBundle as ProtoSecretsBundle,
-        enclave_secrets_client::EnclaveSecretsClient, runner_client::RunnerClient,
+        GetSecretsRequest, PutSecretsRequest, PutSecretsResponse, RunWorkerRequest, SecretRequest,
+        SecretsBundle as ProtoSecretsBundle, runner_client::RunnerClient,
+        secrets_client::SecretsClient,
     },
     types::{AttestationReport, EnvReport, FromProto as _, IntoProto as _, SecretId, SecretsBox},
 };
@@ -20,7 +20,7 @@ use crate::error::AppError;
 /// A single client struct for both the secrets and runner services in the enclave.
 #[derive(Clone)]
 pub struct EnclaveClient {
-    secrets_client: EnclaveSecretsClient<Channel>,
+    secrets_client: SecretsClient<Channel>,
     runner_client: RunnerClient<Channel>,
 }
 
@@ -40,7 +40,7 @@ impl EnclaveClient {
             .map_err(|e| AppError::Service(format!("UDS connect error: {e}")))?;
 
         Ok(Self {
-            secrets_client: EnclaveSecretsClient::new(channel.clone()),
+            secrets_client: SecretsClient::new(channel.clone()),
             runner_client: RunnerClient::new(channel),
         })
     }
@@ -85,11 +85,11 @@ impl EnclaveClient {
     ) -> Result<SecretsBox, String> {
         let mut requests = Vec::new();
         for sid in secret_ids {
-            requests.push(SecretEnclaveRequest {
+            requests.push(SecretRequest {
                 id: Some(sid.to_proto()),
             });
         }
-        let req = GetSecretsEnclaveRequest {
+        let req = GetSecretsRequest {
             requests,
             requester_env_report: Some(env_report.to_proto()),
             policy_reports: vec![], // not used yet
