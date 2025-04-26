@@ -1,7 +1,8 @@
 mod config;
 mod crypto;
-mod server;
-mod services;
+mod grpc;
+mod runner;
+mod secrets;
 
 use config::EnclaveConfig;
 use tracing::info;
@@ -14,6 +15,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = EnclaveConfig::dev();
     info!("Starting enclave in mode={}", config.mode);
 
-    server::start_grpc_server(&config).await?;
+    grpc::start_grpc_server(&config).await?;
     Ok(())
 }
