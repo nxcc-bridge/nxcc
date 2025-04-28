@@ -453,20 +453,16 @@ impl RunnerService {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, sync::Arc};
+    use std::sync::Arc;
 
     use nxcc_interface::{
-        proto::vm::{TrustedConfig, UntrustedConfig, WorkerStatus},
-        types::{
-            AttestationReport, ConsumerInfo, EnvReport, PolicyExecutionReport,
-            PolicyExecutionRequest, SecretId, TcpAddress, VmAddress,
-        },
+        proto::vm::WorkerStatus,
+        types::{AttestationReport, ConsumerInfo, EnvReport, PolicyExecutionRequest, SecretId},
     };
     use nxcc_vm_base::client::{
         VmClient as _,
         mock::{MockExecutionBehavior, MockVmServiceClient},
     };
-    use tokio::sync::RwLock;
 
     use super::*; // Import items from the outer module (RunnerService, RunnerError, etc.)
     use crate::secrets::Secrets; // Assuming secrets.rs is in the same crate src dir

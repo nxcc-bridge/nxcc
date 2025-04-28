@@ -3922,8 +3922,10 @@ name = "nxcc-interface"
 version = "0.1.0"
 dependencies = [
  "alloy-primitives",
+ "ciborium",
  "prost",
  "serde",
+ "sha2",
  "tonic",
  "tonic-build",
 ]

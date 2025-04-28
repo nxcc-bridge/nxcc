@@ -13,9 +13,8 @@ message AttestationReport {
 message SecretsBox {
   bytes encrypted_payload = 1;
   bytes sender_public_key = 2;
-  bytes signature = 3;
-  string alg = 4;
-  repeated SecretIdentifier contained_secret_ids = 5; // Added field
+  string alg = 3;
+  repeated SecretIdentifier contained_secret_ids = 4;
 }
 
 message SecretIdentifier {

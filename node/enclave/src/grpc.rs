@@ -353,7 +353,7 @@ pub async fn start_grpc_server(config: &EnclaveConfig) -> Result<(), Box<dyn std
     let secrets_grpc = SecretsGrpcService::new(secrets_service);
     let runner_grpc = EnclaveRunnerGrpcService::new(runner_service);
 
-    let mut builder = Server::builder()
+    let builder = Server::builder()
         .add_service(SecretsServer::new(secrets_grpc))
         .add_service(RunnerServer::new(runner_grpc));
 
@@ -381,9 +381,9 @@ pub async fn start_grpc_server(config: &EnclaveConfig) -> Result<(), Box<dyn std
             info!("Enclave gRPC listening on UDS: {}", config.uds_path);
             #[cfg(all(unix, feature = "uds"))]
             {
-                use std::{io::ErrorKind, path::Path};
+                use std::path::Path;
 
-                use tokio::net::{UnixListener, UnixStream};
+                use tokio::net::UnixListener;
                 use tokio_stream::wrappers::UnixListenerStream;
 
                 let path = Path::new(config.uds_path);

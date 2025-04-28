@@ -146,7 +146,6 @@ impl IntoProto<interface::EnvReport> for EnvReport {
 pub struct SecretsBox {
     pub encrypted_payload: Vec<u8>,
     pub sender_public_key: Vec<u8>, // This is the sender's *ephemeral key exchange* public key
-    pub signature: Vec<u8>, // Signature over encrypted_payload made with sender's *signing* key
     pub alg: String,
     pub contained_secret_ids: Vec<SecretId>,
 }
@@ -156,10 +155,24 @@ impl SecretsBox {
         Self {
             encrypted_payload: vec![],
             sender_public_key: vec![],
-            signature: vec![],
             alg: "X25519_AES-GCM-SIV_Ed25519".to_string(), // Default algorithm
             contained_secret_ids: vec![],
         }
+    }
+
+    pub fn calculate_binding_hash(&self) -> [u8; 32] {
+        use sha2::Digest as _;
+        let mut hasher = sha2::Sha256::default();
+        hasher.update(&self.encrypted_payload);
+        hasher.update(&self.sender_public_key);
+        hasher.update(self.alg.as_bytes());
+        // Hash contained IDs consistently (sort them first)
+        let mut sorted_ids = self.contained_secret_ids.clone();
+        sorted_ids.sort();
+        let mut id_bytes = Vec::new();
+        ciborium::into_writer(&sorted_ids, &mut id_bytes).unwrap();
+        hasher.update(&id_bytes);
+        hasher.finalize().into()
     }
 }
 
@@ -168,7 +181,6 @@ impl FromProto<interface::SecretsBox> for SecretsBox {
         Self {
             encrypted_payload: p.encrypted_payload,
             sender_public_key: p.sender_public_key,
-            signature: p.signature,
             alg: p.alg,
             contained_secret_ids: p
                 .contained_secret_ids
@@ -184,7 +196,6 @@ impl IntoProto<interface::SecretsBox> for SecretsBox {
         let mut out = interface::SecretsBox::default();
         out.encrypted_payload = self.encrypted_payload.clone();
         out.sender_public_key = self.sender_public_key.clone();
-        out.signature = self.signature.clone();
         out.alg = self.alg.clone();
         out.contained_secret_ids = self
             .contained_secret_ids

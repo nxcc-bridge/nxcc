@@ -184,7 +184,6 @@ fn decrypt_aead(
 pub fn encrypt_secrets_box(
     our_kx_keypair: &KeyExchangeKeyPair,
     recipient_kx_pk: &PublicKey,
-    signing_keypair: &SigningKeyPair,
     secrets: &Vec<(SecretId, Vec<u8>, u64)>, // (id, data, expiry)
 ) -> Result<SecretsBox, CryptoError> {
     let shared_secret = our_kx_keypair.diffie_hellman(recipient_kx_pk);
@@ -205,50 +204,30 @@ pub fn encrypt_secrets_box(
     let mut encrypted_payload = nonce;
     encrypted_payload.extend(ciphertext);
 
-    // Sign the encrypted payload (nonce + ciphertext)
-    let signature = signing_keypair.sign(&encrypted_payload);
-
     // Extract contained IDs
     let contained_secret_ids: Vec<SecretId> = secrets.iter().map(|(id, _, _)| id.clone()).collect();
 
     Ok(SecretsBox {
         encrypted_payload,
         sender_public_key: our_kx_keypair.public_key().as_bytes().to_vec(),
-        signature: signature.to_bytes().to_vec(),
-        alg: "X25519_AES-GCM-SIV_Ed25519".to_string(),
+        alg: "X25519_AES-GCM-SIV".to_string(),
         contained_secret_ids,
     })
 }
 
 /// Decrypts secrets from a SecretsBox.
-/// Verifies the signature using the sender's public key from the box.
+/// Assumes the SecretsBox integrity has been verified via attestation binding.
 /// Uses X25519 for key exchange and AES-GCM-SIV for decryption.
 pub fn decrypt_secrets_box(
     our_kx_keypair: &KeyExchangeKeyPair,
-    sender_sig_pk: &VerifyingKey,
     secrets_box: &SecretsBox,
 ) -> Result<Vec<(SecretId, Vec<u8>, u64)>, CryptoError> {
-    if secrets_box.alg != "X25519_AES-GCM-SIV_Ed25519" {
+    if secrets_box.alg != "X25519_AES-GCM-SIV" {
         return Err(CryptoError::OperationFailed(format!(
             "Unsupported SecretsBox algorithm: {}",
             secrets_box.alg
         )));
     }
-
-    // Verify signature
-    let signature_bytes: [u8; 64] =
-        secrets_box
-            .signature
-            .as_slice()
-            .try_into()
-            .map_err(|_| CryptoError::InvalidKeyLength {
-                expected: 64,
-                got: secrets_box.signature.len(),
-            })?;
-    let signature = Signature::from_bytes(&signature_bytes);
-    sender_sig_pk
-        .verify_strict(&secrets_box.encrypted_payload, &signature)
-        .map_err(|_| CryptoError::InvalidSignature)?;
 
     // Extract sender's KX public key
     let sender_kx_pk_bytes: [u8; 32] = secrets_box
@@ -372,9 +351,7 @@ mod tests {
     #[test]
     fn test_secrets_box_roundtrip() {
         let sender_kx = KeyExchangeKeyPair::generate();
-        let sender_sig = SigningKeyPair::generate();
         let recipient_kx = KeyExchangeKeyPair::generate();
-        let recipient_sig = SigningKeyPair::generate(); // Not used for decrypt, but needed for symmetry
 
         let secret_id1 = SecretId {
             chain_id: 1,
@@ -391,24 +368,17 @@ mod tests {
             (secret_id2.clone(), b"secret_data_2".to_vec(), 2000),
         ];
 
-        // Sender encrypts
-        let secrets_box = encrypt_secrets_box(
-            &sender_kx,
-            recipient_kx.public_key(),
-            &sender_sig,
-            &secrets_to_send,
-        )
-        .unwrap();
+        let secrets_box =
+            encrypt_secrets_box(&sender_kx, recipient_kx.public_key(), &secrets_to_send).unwrap();
 
         assert_eq!(secrets_box.contained_secret_ids.len(), 2);
         assert!(secrets_box.contained_secret_ids.contains(&secret_id1));
         assert!(secrets_box.contained_secret_ids.contains(&secret_id2));
-        assert_eq!(secrets_box.alg, "X25519_AES-GCM-SIV_Ed25519");
+        assert_eq!(secrets_box.alg, "X25519_AES-GCM-SIV");
 
         // Recipient decrypts
         let decrypted_secrets = decrypt_secrets_box(
-            &recipient_kx,            // Recipient uses their KX private key
-            &sender_sig.public_key(), // Recipient uses sender's SIG public key
+            &recipient_kx, // Recipient uses their KX private key
             &secrets_box,
         )
         .unwrap();
@@ -417,23 +387,12 @@ mod tests {
 
         // Test decryption failure with wrong recipient key
         let wrong_recipient_kx = KeyExchangeKeyPair::generate();
-        let decrypt_err =
-            decrypt_secrets_box(&wrong_recipient_kx, &sender_sig.public_key(), &secrets_box);
+        let decrypt_err = decrypt_secrets_box(&wrong_recipient_kx, &secrets_box);
         assert!(decrypt_err.is_err());
         assert!(matches!(
             decrypt_err.unwrap_err(),
             CryptoError::OperationFailed(_)
         )); // AEAD decrypt fails
-
-        // Test decryption failure with wrong sender signing key
-        let wrong_sender_sig = SigningKeyPair::generate();
-        let decrypt_err_sig =
-            decrypt_secrets_box(&recipient_kx, &wrong_sender_sig.public_key(), &secrets_box);
-        assert!(decrypt_err_sig.is_err());
-        assert!(matches!(
-            decrypt_err_sig.unwrap_err(),
-            CryptoError::InvalidSignature
-        ));
     }
 
     #[test]
