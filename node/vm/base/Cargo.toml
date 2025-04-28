@@ -20,6 +20,7 @@ default = ["uds"]
 uds = ["tokio-stream"]
 vsock = ["tokio-vsock"]
 tcp = []
+test = [] # enables mock client
 
 [dev-dependencies]
 http = "1.1.0"

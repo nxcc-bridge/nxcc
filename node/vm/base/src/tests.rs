@@ -1,4 +1,3 @@
-/// src/tests.rs
 use std::{collections::HashMap, error::Error, sync::Arc};
 
 use nxcc_interface::proto::vm::{TrustedConfig, UntrustedConfig, WorkerStatus};
@@ -8,9 +7,9 @@ use tonic::transport::{Certificate, ClientTlsConfig, Identity, Server};
 
 use crate::{
     binding::BoundClient,
-    client::{ClientError, VmServiceClient},
+    client::{ClientError, VmClient as _, VmServiceClient},
     server::{VmError, VmRuntime, VmServiceGrpc},
-    tls::MtlsCertificates, // Use the new struct
+    tls::MtlsCertificates,
 };
 
 /// A mock VM runtime implementation for the *server side* of this E2E test.
