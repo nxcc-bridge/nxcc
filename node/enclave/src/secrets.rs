@@ -335,7 +335,7 @@ impl Secrets {
 
     /// Checks if an authorization exists and is valid for the given node and secret.
     /// Used internally by PutSecrets and GetSecrets.
-    fn check_authorization(&self, node_id: &str, secret_id: &SecretId) -> bool {
+    pub(crate) fn check_authorization(&self, node_id: &str, secret_id: &SecretId) -> bool {
         let auth_id = calculate_authorization_id(node_id, secret_id);
         let auth_map = self.authorizations.read().unwrap();
 

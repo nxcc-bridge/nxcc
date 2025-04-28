@@ -3940,6 +3940,7 @@ dependencies = [
  "futures",
  "hex",
  "nxcc-interface",
+ "nxcc-vm-base",
  "once_cell",
  "rand 0.8.5",
  "rand_core 0.6.4",

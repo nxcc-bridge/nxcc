@@ -1,38 +1,50 @@
 use std::sync::Arc;
 
 use nxcc_interface::{
-    proto::enclave::{
-        CheckSecretsRequest, CheckSecretsResponse, DeliverEventRequest, DeliverEventResponse,
-        GetReportRequest, GetSecretsRequest, GetSecretsResponse, PutSecretsRequest,
-        PutSecretsResponse, RunWorkerRequest, RunWorkerResponse, SecretStatus,
-        runner_server::{Runner, RunnerServer},
-        secrets_server,
+    proto::{
+        enclave::{
+            AttachVmRequest, AttachVmResponse, CheckSecretsRequest, CheckSecretsResponse,
+            DetachVmRequest, ExecutePolicyRequest, ExecutePolicyResponse, GetReportRequest,
+            GetSecretsRequest, GetSecretsResponse, InvokeWorkerRequest, InvokeWorkerResponse,
+            PutSecretsRequest, PutSecretsResponse, RunWorkerRequest, RunWorkerResponse,
+            SecretStatus, TerminateWorkerRequest,
+            runner_server::{Runner, RunnerServer},
+            secrets_server::{Secrets as SecretsServerTrait, SecretsServer},
+        },
+        interface,
     },
-    types::{EnvReport, FromProto, IntoProto, SecretId, SecretsBox},
+    types::{
+        EnvReport, FromProto, IntoProto, PolicyExecutionRequest, SecretId, SecretsBox, VmAddress,
+    },
 };
+use nxcc_vm_base::client::ClientError;
 use tonic::{Request, Response, Status, transport::Server};
 use tracing::{debug, error, info};
 
-use crate::{config::EnclaveConfig, runner::RunnerService, secrets::Secrets};
+use crate::{
+    config::EnclaveConfig,
+    runner::{RunnerError, RunnerService},
+    secrets::Secrets,
+};
 
 // --- Secrets Service Implementation ---
 
-pub struct SecretsService {
+pub struct SecretsGrpcService {
     secrets: Arc<Secrets>,
 }
 
-impl SecretsService {
+impl SecretsGrpcService {
     pub fn new(secrets: Arc<Secrets>) -> Self {
         Self { secrets }
     }
 }
 
 #[tonic::async_trait]
-impl secrets_server::Secrets for SecretsService {
+impl SecretsServerTrait for SecretsGrpcService {
     async fn get_report(
         &self,
         request: Request<GetReportRequest>,
-    ) -> Result<Response<nxcc_interface::proto::interface::AttestationReport>, Status> {
+    ) -> Result<Response<interface::AttestationReport>, Status> {
         let user_data = request.into_inner().user_data;
         debug!(
             "gRPC GetReport request with user_data size {}",
@@ -84,7 +96,7 @@ impl secrets_server::Secrets for SecretsService {
     ) -> Result<Response<GetSecretsResponse>, Status> {
         let proto_req = request.into_inner();
         debug!(
-            "gRPC GetSecrets request for {} secret IDs",
+            "gRPC GetSecrets request for {} secret requests",
             proto_req.requests.len()
         );
 
@@ -95,11 +107,11 @@ impl secrets_server::Secrets for SecretsService {
             .collect();
 
         let requester_env_report = proto_req
-            .requester_env_report // This field was missing in the proto def! Added it.
+            .requester_env_report
             .map(EnvReport::from_proto)
             .ok_or_else(|| Status::invalid_argument("Missing requester_env_report"))?;
 
-        // Policy reports are currently ignored per instructions, local auth store is checked
+        // Policy reports are currently unused, local auth store is checked
         let policy_reports = Vec::new(); // Placeholder
 
         match self
@@ -152,68 +164,198 @@ impl secrets_server::Secrets for SecretsService {
 
 // --- Runner Service Implementation ---
 
-pub struct EnclaveRunnerService {
+pub struct EnclaveRunnerGrpcService {
     runner: Arc<RunnerService>,
 }
 
-impl EnclaveRunnerService {
+impl EnclaveRunnerGrpcService {
     pub fn new(runner: Arc<RunnerService>) -> Self {
         Self { runner }
     }
 }
 
+fn map_runner_error(err: RunnerError) -> Status {
+    error!("Runner service error: {}", err);
+    match err {
+        RunnerError::VmNotAttached(id) => {
+            Status::failed_precondition(format!("VM not attached: {id}"))
+        }
+        RunnerError::WorkerNotFound(id) => Status::not_found(format!("Worker not found: {id}")),
+        RunnerError::VmConnection(client_err) => {
+            Status::internal(format!("VM connection error: {client_err}"))
+        }
+        RunnerError::Serialization(s) | RunnerError::Deserialization(s) => {
+            Status::internal(format!("Data format error: {s}"))
+        }
+        RunnerError::PolicyExecutionFailed(s) => {
+            Status::internal(format!("Policy execution failed: {s}"))
+        }
+        RunnerError::Internal(s) => Status::internal(s),
+        RunnerError::TlsConfig(tls_err) => Status::internal(format!("TLS config error: {tls_err}")),
+        RunnerError::WorkerStartFailed(s) => {
+            Status::internal(format!("Failed to start worker: {s}"))
+        }
+        RunnerError::UnsupportedVmAddress => {
+            Status::unimplemented("VM address type not supported by this enclave build")
+        }
+    }
+}
+
 #[tonic::async_trait]
-impl Runner for EnclaveRunnerService {
+impl Runner for EnclaveRunnerGrpcService {
+    async fn attach_vm(
+        &self,
+        request: Request<AttachVmRequest>,
+    ) -> Result<Response<AttachVmResponse>, Status> {
+        let req = request.into_inner();
+        debug!("gRPC AttachVm request for vm_id '{}'", req.vm_id);
+        let address = req
+            .address
+            .map(VmAddress::from_proto)
+            .ok_or_else(|| Status::invalid_argument("Missing VM address"))?;
+
+        match self.runner.attach_vm(req.vm_id, address).await {
+            Ok(attached) => Ok(Response::new(AttachVmResponse { attached })),
+            Err(e) => Err(map_runner_error(e)),
+        }
+    }
+
+    async fn detach_vm(&self, request: Request<DetachVmRequest>) -> Result<Response<()>, Status> {
+        let req = request.into_inner();
+        debug!("gRPC DetachVm request for vm_id '{}'", req.vm_id);
+        match self.runner.detach_vm(req.vm_id).await {
+            Ok(()) => Ok(Response::new(())),
+            Err(e) => Err(map_runner_error(e)), // Although detach doesn't strictly need to comply, report internal errors
+        }
+    }
+
     async fn run_worker(
         &self,
         request: Request<RunWorkerRequest>,
     ) -> Result<Response<RunWorkerResponse>, Status> {
         let req = request.into_inner();
         debug!(
-            "gRPC RunWorker request with binary size {}",
-            req.worker_binary.len()
-        );
-        match self.runner.run_worker(req.worker_binary).await {
-            Ok(_) => Ok(Response::new(RunWorkerResponse { accepted: true })),
-            Err(e) => {
-                error!("RunWorker failed: {}", e);
-                Err(Status::internal(format!("Failed to run worker: {e}")))
-            }
-        }
-    }
-
-    async fn deliver_event(
-        &self,
-        request: Request<DeliverEventRequest>,
-    ) -> Result<Response<DeliverEventResponse>, Status> {
-        let req = request.into_inner();
-        debug!(
-            "gRPC DeliverEvent request for worker '{}', payload size {}",
-            req.worker_id,
-            req.event_payload.len()
+            "gRPC RunWorker request for vm_id '{}', code size {}, manifest size {}",
+            req.vm_id,
+            req.worker_code.len(),
+            req.manifest.len()
         );
         match self
             .runner
-            .deliver_event(req.worker_id, req.event_payload)
+            .run_worker(req.vm_id, req.worker_code, req.manifest)
             .await
         {
-            Ok(_) => Ok(Response::new(DeliverEventResponse { delivered: true })),
-            Err(e) => {
-                error!("DeliverEvent failed: {}", e);
-                Err(Status::internal(format!("Failed to deliver event: {e}")))
+            Ok(worker_id) => Ok(Response::new(RunWorkerResponse {
+                success: true,
+                worker_id,
+                error_message: String::new(),
+            })),
+            Err(RunnerError::WorkerStartFailed(msg)) => {
+                // Specific handling for start failure reported by VM
+                Ok(Response::new(RunWorkerResponse {
+                    success: false,
+                    worker_id: String::new(),
+                    error_message: msg,
+                }))
             }
+            Err(e) => Err(map_runner_error(e)),
+        }
+    }
+
+    async fn terminate_worker(
+        &self,
+        request: Request<TerminateWorkerRequest>,
+    ) -> Result<Response<()>, Status> {
+        let req = request.into_inner();
+        debug!(
+            "gRPC TerminateWorker request for worker_id '{}'",
+            req.worker_id
+        );
+        match self.runner.terminate_worker(req.worker_id).await {
+            Ok(()) => Ok(Response::new(())),
+            Err(RunnerError::WorkerNotFound(_)) => Ok(Response::new(())),
+            Err(e) => Err(map_runner_error(e)),
+        }
+    }
+
+    async fn invoke_worker(
+        &self,
+        request: Request<InvokeWorkerRequest>,
+    ) -> Result<Response<InvokeWorkerResponse>, Status> {
+        let req = request.into_inner();
+        debug!(
+            "gRPC InvokeWorker request for worker '{}', payload size {}",
+            req.worker_id,
+            req.payload.len()
+        );
+        match self.runner.invoke_worker(req.worker_id, req.payload).await {
+            Ok(result) => Ok(Response::new(InvokeWorkerResponse {
+                result,
+                success: true,
+                error_message: String::new(),
+            })),
+            // Handle specific case where VM reports failure during invocation
+            Err(RunnerError::VmConnection(ClientError::Grpc(status))) => {
+                Ok(Response::new(InvokeWorkerResponse {
+                    result: Vec::new(),
+                    success: false,
+                    error_message: status.message().to_string(),
+                }))
+            }
+            Err(e) => Err(map_runner_error(e)),
+        }
+    }
+
+    async fn execute_policy(
+        &self,
+        request: Request<ExecutePolicyRequest>,
+    ) -> Result<Response<ExecutePolicyResponse>, Status> {
+        let req = request.into_inner();
+        debug!(
+            "gRPC ExecutePolicy request for worker '{}', {} contexts",
+            req.worker_id,
+            req.contexts.len()
+        );
+
+        let internal_contexts: Vec<PolicyExecutionRequest> = req
+            .contexts
+            .into_iter()
+            .map(PolicyExecutionRequest::from_proto)
+            .collect();
+
+        match self
+            .runner
+            .execute_policy(req.worker_id, internal_contexts)
+            .await
+        {
+            Ok(satisfied_internal_contexts) => {
+                let satisfied_proto_contexts = satisfied_internal_contexts
+                    .into_iter()
+                    .map(|ctx| ctx.to_proto())
+                    .collect();
+                Ok(Response::new(ExecutePolicyResponse {
+                    satisfied_contexts: satisfied_proto_contexts,
+                }))
+            }
+            Err(e) => Err(map_runner_error(e)),
         }
     }
 }
 
+// --- Server Setup ---
+
 pub async fn start_grpc_server(config: &EnclaveConfig) -> Result<(), Box<dyn std::error::Error>> {
     // Instantiate shared services
-    let secrets_service = Secrets::new(); // Arc<Secrets>
-    let runner_service = Arc::new(RunnerService::new(secrets_service.clone())); // Arc<RunnerService>
+    let secrets_service = Secrets::new();
+    let runner_service = Arc::new(RunnerService::new(secrets_service.clone()));
 
     // Instantiate gRPC service wrappers
-    let secrets_grpc = SecretsService::new(secrets_service); // Takes Arc<Secrets>
-    let runner_grpc = EnclaveRunnerService::new(runner_service); // Takes Arc<RunnerService>
+    let secrets_grpc = SecretsGrpcService::new(secrets_service);
+    let runner_grpc = EnclaveRunnerGrpcService::new(runner_service);
+
+    let mut builder = Server::builder()
+        .add_service(SecretsServer::new(secrets_grpc))
+        .add_service(RunnerServer::new(runner_grpc));
 
     match config.mode {
         "vsock" => {
@@ -221,20 +363,23 @@ pub async fn start_grpc_server(config: &EnclaveConfig) -> Result<(), Box<dyn std
                 "Enclave gRPC listening on vsock: CID={}, port={}",
                 config.vsock_cid, config.vsock_port
             );
-            let listener = tokio_vsock::VsockListener::bind(tokio_vsock::VsockAddr::new(
-                config.vsock_cid,
-                config.vsock_port,
-            ))?;
-
-            Server::builder()
-                .add_service(secrets_server::SecretsServer::new(secrets_grpc))
-                .add_service(RunnerServer::new(runner_grpc))
-                .serve_with_incoming(listener.incoming())
-                .await?;
+            #[cfg(feature = "vsock")]
+            {
+                use tokio_vsock::VsockListener;
+                let listener = VsockListener::bind(tokio_vsock::VsockAddr::new(
+                    config.vsock_cid,
+                    config.vsock_port,
+                ))?;
+                builder.serve_with_incoming(listener.incoming()).await?;
+            }
+            #[cfg(not(feature = "vsock"))]
+            {
+                return Err("VSOCK feature is not enabled in this build.".into());
+            }
         }
         "uds" => {
             info!("Enclave gRPC listening on UDS: {}", config.uds_path);
-            #[cfg(unix)]
+            #[cfg(all(unix, feature = "uds"))]
             {
                 use std::{io::ErrorKind, path::Path};
 
@@ -242,46 +387,36 @@ pub async fn start_grpc_server(config: &EnclaveConfig) -> Result<(), Box<dyn std
                 use tokio_stream::wrappers::UnixListenerStream;
 
                 let path = Path::new(config.uds_path);
+                // Clean up existing socket file unconditionally for simplicity in dev
                 if path.exists() {
-                    // Attempt to connect to check if it's active
-                    match UnixStream::connect(path).await {
-                        Ok(_) => {
-                            return Err(format!(
-                                "Enclave UDS {} already in use by a running server.",
-                                config.uds_path
-                            )
-                            .into());
-                        }
-                        Err(e) if e.kind() == ErrorKind::ConnectionRefused => {
-                            // Socket exists but server isn't running, remove it
-                            info!("Removing stale UDS file: {}", config.uds_path);
-                            std::fs::remove_file(path)?;
-                        }
-                        Err(e) => {
-                            return Err(format!(
-                                "Error checking existing UDS {}: {}",
-                                config.uds_path, e
-                            )
-                            .into());
-                        }
-                    }
+                    info!("Removing existing UDS file: {}", config.uds_path);
+                    std::fs::remove_file(path)?;
                 }
 
                 let uds_listener = UnixListener::bind(path)?;
                 let incoming = UnixListenerStream::new(uds_listener);
 
-                Server::builder()
-                    .add_service(secrets_server::SecretsServer::new(secrets_grpc))
-                    .add_service(RunnerServer::new(runner_grpc))
-                    .serve_with_incoming(incoming)
-                    .await?;
+                // Set cleanup hook
+                let uds_path_clone = path.to_path_buf();
+                tokio::spawn(async move {
+                    tokio::signal::ctrl_c()
+                        .await
+                        .expect("Failed to listen for ctrl-c");
+                    info!(
+                        "Ctrl-C received, removing UDS file: {}",
+                        uds_path_clone.display()
+                    );
+                    let _ = std::fs::remove_file(&uds_path_clone);
+                });
 
-                // Clean up UDS file on shutdown (best effort)
+                builder.serve_with_incoming(incoming).await?;
+
+                // Clean up UDS file on normal shutdown (best effort)
                 let _ = std::fs::remove_file(path);
             }
-            #[cfg(not(unix))]
+            #[cfg(not(all(unix, feature = "uds")))]
             {
-                unimplemented!("UDS not supported on this platform");
+                return Err("UDS feature is not enabled or platform is not Unix.".into());
             }
         }
         other => {
