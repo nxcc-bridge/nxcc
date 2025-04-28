@@ -1,7 +1,7 @@
 use alloy_primitives::{Address, U256};
 use serde::{Deserialize, Serialize};
 
-use crate::proto::interface as proto;
+use crate::proto::{enclave, interface};
 
 /// Trait for converting a type to its Protocol Buffers representation
 pub trait IntoProto<P> {
@@ -20,8 +20,8 @@ pub struct AttestationReport {
     pub user_data: Vec<u8>,
 }
 
-impl FromProto<proto::AttestationReport> for AttestationReport {
-    fn from_proto(p: proto::AttestationReport) -> Self {
+impl FromProto<interface::AttestationReport> for AttestationReport {
+    fn from_proto(p: interface::AttestationReport) -> Self {
         Self {
             ephemeral_public_key: p.ephemeral_public_key,
             block_hashes: p.block_hashes,
@@ -30,9 +30,9 @@ impl FromProto<proto::AttestationReport> for AttestationReport {
     }
 }
 
-impl IntoProto<proto::AttestationReport> for AttestationReport {
-    fn to_proto(&self) -> proto::AttestationReport {
-        let mut out = proto::AttestationReport::default();
+impl IntoProto<interface::AttestationReport> for AttestationReport {
+    fn to_proto(&self) -> interface::AttestationReport {
+        let mut out = interface::AttestationReport::default();
         out.ephemeral_public_key = self.ephemeral_public_key.clone();
         out.block_hashes = self.block_hashes.clone();
         out.user_data = self.user_data.clone();
@@ -47,8 +47,8 @@ pub struct SecretId {
     pub identity_id: U256,
 }
 
-impl FromProto<proto::SecretIdentifier> for SecretId {
-    fn from_proto(p: proto::SecretIdentifier) -> Self {
+impl FromProto<interface::SecretIdentifier> for SecretId {
+    fn from_proto(p: interface::SecretIdentifier) -> Self {
         Self {
             chain_id: p.chain_id,
             identity_address: p.identity_address.parse().unwrap_or(Address::ZERO), // Handle parse error gracefully
@@ -57,9 +57,9 @@ impl FromProto<proto::SecretIdentifier> for SecretId {
     }
 }
 
-impl IntoProto<proto::SecretIdentifier> for SecretId {
-    fn to_proto(&self) -> proto::SecretIdentifier {
-        let mut out = proto::SecretIdentifier::default();
+impl IntoProto<interface::SecretIdentifier> for SecretId {
+    fn to_proto(&self) -> interface::SecretIdentifier {
+        let mut out = interface::SecretIdentifier::default();
         out.chain_id = self.chain_id;
         out.identity_address = format!("{:#x}", self.identity_address);
         out.identity_id = self.identity_id.to_string();
@@ -73,8 +73,8 @@ pub struct ConsumerInfo {
     pub signature: Vec<u8>,
 }
 
-impl FromProto<proto::ConsumerInfo> for ConsumerInfo {
-    fn from_proto(p: proto::ConsumerInfo) -> Self {
+impl FromProto<interface::ConsumerInfo> for ConsumerInfo {
+    fn from_proto(p: interface::ConsumerInfo) -> Self {
         Self {
             code_hash: p.code_hash,
             signature: p.signature,
@@ -82,9 +82,9 @@ impl FromProto<proto::ConsumerInfo> for ConsumerInfo {
     }
 }
 
-impl IntoProto<proto::ConsumerInfo> for ConsumerInfo {
-    fn to_proto(&self) -> proto::ConsumerInfo {
-        let mut out = proto::ConsumerInfo::default();
+impl IntoProto<interface::ConsumerInfo> for ConsumerInfo {
+    fn to_proto(&self) -> interface::ConsumerInfo {
+        let mut out = interface::ConsumerInfo::default();
         out.code_hash = self.code_hash.clone();
         out.signature = self.signature.clone();
         out
@@ -97,8 +97,8 @@ pub struct SecretRequest {
     pub consumer: ConsumerInfo,
 }
 
-impl FromProto<proto::SecretRequest> for SecretRequest {
-    fn from_proto(p: proto::SecretRequest) -> Self {
+impl FromProto<interface::SecretRequest> for SecretRequest {
+    fn from_proto(p: interface::SecretRequest) -> Self {
         Self {
             secret_id: SecretId::from_proto(p.secret_id.unwrap_or_default()),
             consumer: ConsumerInfo::from_proto(p.consumer.unwrap_or_default()),
@@ -106,9 +106,9 @@ impl FromProto<proto::SecretRequest> for SecretRequest {
     }
 }
 
-impl IntoProto<proto::SecretRequest> for SecretRequest {
-    fn to_proto(&self) -> proto::SecretRequest {
-        let mut out = proto::SecretRequest::default();
+impl IntoProto<interface::SecretRequest> for SecretRequest {
+    fn to_proto(&self) -> interface::SecretRequest {
+        let mut out = interface::SecretRequest::default();
         out.secret_id = Some(self.secret_id.to_proto());
         out.consumer = Some(self.consumer.to_proto());
         out
@@ -122,8 +122,8 @@ pub struct EnvReport {
     pub node_id: String,
 }
 
-impl FromProto<proto::EnvReport> for EnvReport {
-    fn from_proto(p: proto::EnvReport) -> Self {
+impl FromProto<interface::EnvReport> for EnvReport {
+    fn from_proto(p: interface::EnvReport) -> Self {
         Self {
             attestation: AttestationReport::from_proto(p.attestation.unwrap_or_default()),
             operator_signature: p.operator_signature,
@@ -132,9 +132,9 @@ impl FromProto<proto::EnvReport> for EnvReport {
     }
 }
 
-impl IntoProto<proto::EnvReport> for EnvReport {
-    fn to_proto(&self) -> proto::EnvReport {
-        let mut out = proto::EnvReport::default();
+impl IntoProto<interface::EnvReport> for EnvReport {
+    fn to_proto(&self) -> interface::EnvReport {
+        let mut out = interface::EnvReport::default();
         out.attestation = Some(self.attestation.to_proto());
         out.operator_signature = self.operator_signature.clone();
         out.node_id = self.node_id.clone();
@@ -163,8 +163,8 @@ impl SecretsBox {
     }
 }
 
-impl FromProto<proto::SecretsBox> for SecretsBox {
-    fn from_proto(p: proto::SecretsBox) -> Self {
+impl FromProto<interface::SecretsBox> for SecretsBox {
+    fn from_proto(p: interface::SecretsBox) -> Self {
         Self {
             encrypted_payload: p.encrypted_payload,
             sender_public_key: p.sender_public_key,
@@ -179,9 +179,9 @@ impl FromProto<proto::SecretsBox> for SecretsBox {
     }
 }
 
-impl IntoProto<proto::SecretsBox> for SecretsBox {
-    fn to_proto(&self) -> proto::SecretsBox {
-        let mut out = proto::SecretsBox::default();
+impl IntoProto<interface::SecretsBox> for SecretsBox {
+    fn to_proto(&self) -> interface::SecretsBox {
+        let mut out = interface::SecretsBox::default();
         out.encrypted_payload = self.encrypted_payload.clone();
         out.sender_public_key = self.sender_public_key.clone();
         out.signature = self.signature.clone();
@@ -203,8 +203,8 @@ pub struct PolicyExecutionRequest {
     pub env_report: EnvReport, // The EnvReport of the entity being evaluated
 }
 
-impl FromProto<proto::PolicyExecutionRequest> for PolicyExecutionRequest {
-    fn from_proto(p: proto::PolicyExecutionRequest) -> Self {
+impl FromProto<interface::PolicyExecutionRequest> for PolicyExecutionRequest {
+    fn from_proto(p: interface::PolicyExecutionRequest) -> Self {
         Self {
             secret_ids: p.secret_ids.into_iter().map(SecretId::from_proto).collect(),
             consumer: ConsumerInfo::from_proto(p.consumer.unwrap_or_default()),
@@ -213,9 +213,9 @@ impl FromProto<proto::PolicyExecutionRequest> for PolicyExecutionRequest {
     }
 }
 
-impl IntoProto<proto::PolicyExecutionRequest> for PolicyExecutionRequest {
-    fn to_proto(&self) -> proto::PolicyExecutionRequest {
-        proto::PolicyExecutionRequest {
+impl IntoProto<interface::PolicyExecutionRequest> for PolicyExecutionRequest {
+    fn to_proto(&self) -> interface::PolicyExecutionRequest {
+        interface::PolicyExecutionRequest {
             secret_ids: self.secret_ids.iter().map(|id| id.to_proto()).collect(),
             consumer: Some(self.consumer.to_proto()),
             env_report: Some(self.env_report.to_proto()),
@@ -230,4 +230,108 @@ pub struct PolicyExecutionReport {
     pub request: PolicyExecutionRequest,
     pub decision: bool,
     pub timestamp: u64, // Unix timestamp
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TcpAddress {
+    pub host: String,
+    pub port: u32,
+}
+
+impl FromProto<enclave::TcpAddress> for TcpAddress {
+    fn from_proto(p: enclave::TcpAddress) -> Self {
+        Self {
+            host: p.host,
+            port: p.port,
+        }
+    }
+}
+
+impl IntoProto<enclave::TcpAddress> for TcpAddress {
+    fn to_proto(&self) -> enclave::TcpAddress {
+        enclave::TcpAddress {
+            host: self.host.clone(),
+            port: self.port,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UdsAddress {
+    pub path: String,
+}
+
+impl FromProto<enclave::UdsAddress> for UdsAddress {
+    fn from_proto(p: enclave::UdsAddress) -> Self {
+        Self { path: p.path }
+    }
+}
+
+impl IntoProto<enclave::UdsAddress> for UdsAddress {
+    fn to_proto(&self) -> enclave::UdsAddress {
+        enclave::UdsAddress {
+            path: self.path.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VsockAddress {
+    pub cid: u32,
+    pub port: u32,
+}
+
+impl FromProto<enclave::VsockAddress> for VsockAddress {
+    fn from_proto(p: enclave::VsockAddress) -> Self {
+        Self {
+            cid: p.cid,
+            port: p.port,
+        }
+    }
+}
+
+impl IntoProto<enclave::VsockAddress> for VsockAddress {
+    fn to_proto(&self) -> enclave::VsockAddress {
+        enclave::VsockAddress {
+            cid: self.cid,
+            port: self.port,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum VmAddress {
+    Tcp(TcpAddress),
+    Uds(UdsAddress),
+    Vsock(VsockAddress),
+}
+
+impl FromProto<enclave::VmAddress> for VmAddress {
+    fn from_proto(p: enclave::VmAddress) -> Self {
+        match p.address_type {
+            Some(enclave::vm_address::AddressType::Tcp(tcp)) => {
+                VmAddress::Tcp(TcpAddress::from_proto(tcp))
+            }
+            Some(enclave::vm_address::AddressType::Uds(uds)) => {
+                VmAddress::Uds(UdsAddress::from_proto(uds))
+            }
+            Some(enclave::vm_address::AddressType::Vsock(vsock)) => {
+                VmAddress::Vsock(VsockAddress::from_proto(vsock))
+            }
+            None => panic!("VmAddress proto is missing address_type"), // Or return an error
+        }
+    }
+}
+
+impl IntoProto<enclave::VmAddress> for VmAddress {
+    fn to_proto(&self) -> enclave::VmAddress {
+        let address_type = match self {
+            VmAddress::Tcp(tcp) => enclave::vm_address::AddressType::Tcp(tcp.to_proto()),
+            VmAddress::Uds(uds) => enclave::vm_address::AddressType::Uds(uds.to_proto()),
+            VmAddress::Vsock(vsock) => enclave::vm_address::AddressType::Vsock(vsock.to_proto()),
+        };
+        enclave::VmAddress {
+            address_type: Some(address_type),
+        }
+    }
 }
