@@ -189,6 +189,12 @@ impl RunnerService {
         }
     }
 
+    #[cfg(test)]
+    pub async fn attach_mock_client(&self, vm_id: String, mock_client: MockVmServiceClient) {
+        let mut vms_guard = self.vms.write().await;
+        vms_guard.insert(vm_id, mock_client.into());
+    }
+
     /// Removes a VM connection.
     pub async fn detach_vm(&self, vm_id: String) -> Result<(), RunnerError> {
         info!("Detaching VM '{}'", vm_id);

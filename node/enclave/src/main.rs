@@ -3,6 +3,8 @@ mod crypto;
 mod grpc;
 mod runner;
 mod secrets;
+#[cfg(test)]
+mod tests;
 
 use config::EnclaveConfig;
 use tracing::info;

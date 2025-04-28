@@ -35,3 +35,4 @@ vsock = ["tokio-vsock", "nxcc-vm-base/vsock"]
 alloy-primitives = { version = "1.0.0", features = ["rand"] }
 rand = "0.8" # For testing key generation
 nxcc-vm-base = { path = "../vm/base", features = ["test"] }
+tracing-test = "0.2.5"

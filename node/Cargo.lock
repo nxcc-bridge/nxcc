@@ -3955,6 +3955,7 @@ dependencies = [
  "tonic",
  "tracing",
  "tracing-subscriber",
+ "tracing-test",
  "x25519-dalek",
  "zeroize",
 ]
