@@ -365,12 +365,30 @@ pub async fn start_grpc_server(config: &EnclaveConfig) -> Result<(), Box<dyn std
             );
             #[cfg(feature = "vsock")]
             {
+                use tokio::sync::oneshot;
                 use tokio_vsock::VsockListener;
+
+                let (shutdown_tx, shutdown_rx) = oneshot::channel();
+
+                let ctrl_c_task = tokio::spawn(async move {
+                    tokio::signal::ctrl_c()
+                        .await
+                        .expect("Failed to listen for ctrl-c");
+                    let _ = shutdown_tx.send(());
+                });
+
                 let listener = VsockListener::bind(tokio_vsock::VsockAddr::new(
                     config.vsock_cid,
                     config.vsock_port,
                 ))?;
-                builder.serve_with_incoming(listener.incoming()).await?;
+
+                builder
+                    .serve_with_incoming_shutdown(listener.incoming(), async {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await?;
+
+                ctrl_c_task.abort();
             }
             #[cfg(not(feature = "vsock"))]
             {
@@ -383,35 +401,38 @@ pub async fn start_grpc_server(config: &EnclaveConfig) -> Result<(), Box<dyn std
             {
                 use std::path::Path;
 
-                use tokio::net::UnixListener;
+                use tokio::{net::UnixListener, sync::oneshot};
                 use tokio_stream::wrappers::UnixListenerStream;
 
                 let path = Path::new(config.uds_path);
                 // Clean up existing socket file unconditionally for simplicity in dev
                 if path.exists() {
-                    info!("Removing existing UDS file: {}", config.uds_path);
+                    debug!("Removing existing UDS file: {}", config.uds_path);
                     std::fs::remove_file(path)?;
                 }
 
                 let uds_listener = UnixListener::bind(path)?;
                 let incoming = UnixListenerStream::new(uds_listener);
 
-                // Set cleanup hook
+                let (shutdown_tx, shutdown_rx) = oneshot::channel();
                 let uds_path_clone = path.to_path_buf();
-                tokio::spawn(async move {
+
+                let ctrl_c_task = tokio::spawn(async move {
                     tokio::signal::ctrl_c()
                         .await
                         .expect("Failed to listen for ctrl-c");
-                    info!(
-                        "Ctrl-C received, removing UDS file: {}",
-                        uds_path_clone.display()
-                    );
                     let _ = std::fs::remove_file(&uds_path_clone);
+                    let _ = shutdown_tx.send(());
                 });
 
-                builder.serve_with_incoming(incoming).await?;
+                builder
+                    .serve_with_incoming_shutdown(incoming, async {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await?;
 
-                // Clean up UDS file on normal shutdown (best effort)
+                ctrl_c_task.abort();
+
                 let _ = std::fs::remove_file(path);
             }
             #[cfg(not(all(unix, feature = "uds")))]
@@ -423,5 +444,6 @@ pub async fn start_grpc_server(config: &EnclaveConfig) -> Result<(), Box<dyn std
             return Err(format!("Invalid enclave gRPC mode: {}", other).into());
         }
     }
+
     Ok(())
 }
