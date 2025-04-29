@@ -1860,7 +1860,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "115531babc129696a58c64a4fef0a8bf9e9698629fb97e9e40767d235cfbcd53"
 dependencies = [
  "pkcs8",
- "serde",
  "signature",
 ]
 
@@ -3938,16 +3937,15 @@ dependencies = [
  "alloy-primitives",
  "chrono",
  "ciborium",
- "ed25519-dalek",
- "futures",
+ "clap",
+ "figment",
  "hex",
  "nxcc-interface",
  "nxcc-vm-base",
  "once_cell",
- "rand 0.8.5",
- "rand_core 0.6.4",
  "serde",
  "sha2",
+ "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tokio-stream",

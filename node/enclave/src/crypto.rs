@@ -4,7 +4,6 @@ use aes_gcm_siv::{
     AeadCore as _, Aes256GcmSiv,
     aead::{Aead, KeyInit, OsRng, generic_array::GenericArray},
 };
-use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use nxcc_interface::types::{AttestationReport, SecretId, SecretsBox};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -17,57 +16,12 @@ const AES_NONCE_SIZE: usize = 12; // 96 bits for AES-GCM-SIV
 pub enum CryptoError {
     #[error("Invalid key length: expected {expected}, got {got}")]
     InvalidKeyLength { expected: usize, got: usize },
-    #[error("Invalid signature")]
-    InvalidSignature,
     #[error("Cryptography operation failed: {0}")]
     OperationFailed(String),
     #[error("Serialization error: {0}")]
     Serialization(String),
     #[error("Deserialization error: {0}")]
     Deserialization(String),
-}
-
-/// Represents an Ed25519 keypair for signing.
-pub struct SigningKeyPair {
-    signing_key: SigningKey,
-}
-
-impl SigningKeyPair {
-    /// Generates a new Ed25519 keypair.
-    pub fn generate() -> Self {
-        let mut csprng = OsRng;
-        let signing_key = SigningKey::generate(&mut csprng);
-        Self { signing_key }
-    }
-
-    /// Returns the public verification key.
-    pub fn public_key(&self) -> VerifyingKey {
-        self.signing_key.verifying_key()
-    }
-
-    /// Signs a message.
-    pub fn sign(&self, message: &[u8]) -> Signature {
-        self.signing_key.sign(message)
-    }
-
-    /// Creates a keypair from raw bytes. Input must be 32 bytes.
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, CryptoError> {
-        let bytes_array: [u8; 32] =
-            bytes
-                .try_into()
-                .map_err(|_| CryptoError::InvalidKeyLength {
-                    expected: 32,
-                    got: bytes.len(),
-                })?;
-        Ok(Self {
-            signing_key: SigningKey::from_bytes(&bytes_array),
-        })
-    }
-
-    /// Returns the secret key bytes.
-    pub fn to_bytes(&self) -> [u8; 32] {
-        self.signing_key.to_bytes()
-    }
 }
 
 /// Represents an X25519 keypair for key exchange.
@@ -318,37 +272,6 @@ mod tests {
     }
 
     #[test]
-    fn test_signing() {
-        let keypair = SigningKeyPair::generate();
-        let message = b"Sign this message";
-        let signature = keypair.sign(message);
-        assert!(
-            keypair
-                .public_key()
-                .verify_strict(message, &signature)
-                .is_ok()
-        );
-
-        // Test wrong message
-        let wrong_message = b"Don't sign this";
-        assert!(
-            keypair
-                .public_key()
-                .verify_strict(wrong_message, &signature)
-                .is_err()
-        );
-
-        // Test wrong key
-        let other_keypair = SigningKeyPair::generate();
-        assert!(
-            other_keypair
-                .public_key()
-                .verify_strict(message, &signature)
-                .is_err()
-        );
-    }
-
-    #[test]
     fn test_secrets_box_roundtrip() {
         let sender_kx = KeyExchangeKeyPair::generate();
         let recipient_kx = KeyExchangeKeyPair::generate();
@@ -404,15 +327,6 @@ mod tests {
         assert_eq!(
             kx_orig.secret.to_bytes(),
             kx_recon.secret.to_bytes() // Compare secrets directly
-        );
-
-        let sig_orig = SigningKeyPair::generate();
-        let sig_bytes = sig_orig.to_bytes();
-        let sig_recon = SigningKeyPair::from_bytes(&sig_bytes).unwrap();
-        assert_eq!(sig_orig.public_key(), sig_recon.public_key());
-        assert_eq!(
-            sig_orig.signing_key.to_bytes(),
-            sig_recon.signing_key.to_bytes() // Compare secrets directly
         );
     }
 }

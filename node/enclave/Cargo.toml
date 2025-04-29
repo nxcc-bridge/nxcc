@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-futures = "0.3"
 nxcc-interface = { path = "../interface" }
 nxcc-vm-base = { path = "../vm/base" }
 tokio = { version = "1.44.1", features = ["rt-multi-thread", "macros", "net", "sync", "signal"] }
@@ -15,8 +14,6 @@ tokio-stream = { version = "0.1.17", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 x25519-dalek = { version = "2.0.1", features = ["getrandom", "static_secrets"] }
-ed25519-dalek = { version = "2.1.0", features = ["rand_core", "serde"] }
-rand_core = "0.6" # Pinned for ed25519-dalek v2 compatibility
 aes-gcm-siv = { version = "0.11.1", features = ["std"] }
 sha2 = "0.10.8"
 hex = "0.4.3"
@@ -26,6 +23,10 @@ chrono = { version = "0.4.38", default-features = false, features = ["clock"] } 
 thiserror = "1.0.63"
 zeroize = "1.8.1"
 
+# Config
+clap = { version = "4.5", features = ["derive", "env"] }
+figment = { version = "0.10", features = ["toml", "env"] }
+
 [features]
 default = ["uds"]
 uds = ["tokio-stream", "nxcc-vm-base/uds"]
@@ -33,6 +34,6 @@ vsock = ["tokio-vsock", "nxcc-vm-base/vsock"]
 
 [dev-dependencies]
 alloy-primitives = { version = "1.0.0", features = ["rand"] }
-rand = "0.8" # For testing key generation
 nxcc-vm-base = { path = "../vm/base", features = ["test"] }
+tempfile = "3.19.1"
 tracing-test = "0.2.5"

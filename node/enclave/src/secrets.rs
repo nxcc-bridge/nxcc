@@ -9,7 +9,6 @@ use nxcc_interface::types::{
     AttestationReport, EnvReport, PolicyExecutionReport, SecretId, SecretsBox,
 };
 use once_cell::sync::Lazy;
-use sha2::Digest as _;
 use tracing::{debug, error, info, warn};
 use x25519_dalek::PublicKey;
 
@@ -176,10 +175,6 @@ impl Secrets {
                 "Local authorization check passed for all secrets in the box from node {}",
                 env_report.node_id
             );
-
-            // 4. Decrypt the SecretsBox (no signature verification needed now)
-            // REMOVED HACK: No need to synthesize sender_sig_pk
-            // let mut hasher = sha2::Sha256::new(); ... // REMOVED HACK BLOCK
 
             let decrypted_secrets = match decrypt_secrets_box(
                 &self.ephemeral_kx_keypair, // Our KX keypair

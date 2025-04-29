@@ -357,11 +357,11 @@ pub async fn start_grpc_server(config: &EnclaveConfig) -> Result<(), Box<dyn std
         .add_service(SecretsServer::new(secrets_grpc))
         .add_service(RunnerServer::new(runner_grpc));
 
-    match config.mode {
+    match config.grpc.mode.as_str() {
         "vsock" => {
             info!(
                 "Enclave gRPC listening on vsock: CID={}, port={}",
-                config.vsock_cid, config.vsock_port
+                config.grpc.vsock_cid, config.grpc.vsock_port
             );
             #[cfg(feature = "vsock")]
             {
@@ -396,7 +396,7 @@ pub async fn start_grpc_server(config: &EnclaveConfig) -> Result<(), Box<dyn std
             }
         }
         "uds" => {
-            info!("Enclave gRPC listening on UDS: {}", config.uds_path);
+            info!("Enclave gRPC listening on UDS: {}", config.grpc.uds_path);
             #[cfg(all(unix, feature = "uds"))]
             {
                 use std::path::Path;
@@ -404,10 +404,10 @@ pub async fn start_grpc_server(config: &EnclaveConfig) -> Result<(), Box<dyn std
                 use tokio::{net::UnixListener, sync::oneshot};
                 use tokio_stream::wrappers::UnixListenerStream;
 
-                let path = Path::new(config.uds_path);
+                let path = Path::new(&config.grpc.uds_path);
                 // Clean up existing socket file unconditionally for simplicity in dev
                 if path.exists() {
-                    debug!("Removing existing UDS file: {}", config.uds_path);
+                    debug!("Removing existing UDS file: {}", config.grpc.uds_path);
                     std::fs::remove_file(path)?;
                 }
 
