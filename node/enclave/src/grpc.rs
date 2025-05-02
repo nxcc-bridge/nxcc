@@ -406,8 +406,8 @@ pub async fn start_grpc_server(config: &EnclaveConfig) -> Result<(), Box<dyn std
                 });
 
                 let listener = VsockListener::bind(tokio_vsock::VsockAddr::new(
-                    config.vsock_cid,
-                    config.vsock_port,
+                    config.grpc.vsock_cid,
+                    config.grpc.vsock_port,
                 ))?;
 
                 builder

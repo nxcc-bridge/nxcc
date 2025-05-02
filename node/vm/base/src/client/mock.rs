@@ -131,7 +131,7 @@ impl MockVmServiceClient {
     /// Get the current worker state by ID
     pub fn get_worker(&self, id: &str) -> Option<(WorkerStatus, Vec<u8>)> {
         let workers = self.workers.lock().unwrap();
-        workers.get(id).map(|w| (w.status.clone(), w.code.clone()))
+        workers.get(id).map(|w| (w.status, w.code.clone()))
     }
 
     /// Add a pre-existing worker (useful for test setup)
@@ -367,7 +367,7 @@ impl VmClient for MockVmServiceClient {
                 "MockVmServiceClient: Worker '{}' status is {:?}",
                 id, worker.status
             );
-            Ok(worker.status.clone())
+            Ok(worker.status)
         } else {
             Err(ClientError::Grpc(Status::not_found(format!(
                 "Worker '{}' not found",

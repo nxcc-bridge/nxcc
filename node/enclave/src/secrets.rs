@@ -2,7 +2,6 @@ use std::{
     collections::{HashMap, hash_map::DefaultHasher},
     hash::{Hash, Hasher},
     sync::{Arc, RwLock},
-    time::Duration,
 };
 
 use chrono::Utc;
@@ -785,7 +784,7 @@ mod tests {
         assert!(initial_timestamp > 0);
 
         // Wait a bit to ensure timestamp changes
-        sleep(Duration::from_secs(1));
+        sleep(std::time::Duration::from_secs(1));
 
         // 2. Attempt to put the same secret again with different data
         let new_secret_data = vec![2, 2, 2];

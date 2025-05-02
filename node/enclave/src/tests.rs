@@ -6,10 +6,10 @@ use std::{
 use alloy_primitives::{Address, U256};
 use nxcc_interface::{
     proto::enclave::{
-        CheckSecretsRequest, DetachVmRequest, ExecutePolicyRequest as ProtoExecutePolicyRequest,
-        GenerateSecretsRequest, GetReportRequest, GetSecretsRequest as ProtoGetSecretsRequest,
-        InvokeWorkerRequest, PutSecretsRequest as ProtoPutSecretsRequest, RunWorkerRequest,
-        SecretRequest, SecretsBundle, TerminateWorkerRequest, runner_server::Runner as _,
+        DetachVmRequest, ExecutePolicyRequest as ProtoExecutePolicyRequest, GenerateSecretsRequest,
+        GetReportRequest, GetSecretsRequest as ProtoGetSecretsRequest, InvokeWorkerRequest,
+        PutSecretsRequest as ProtoPutSecretsRequest, RunWorkerRequest, SecretRequest,
+        SecretsBundle, TerminateWorkerRequest, runner_server::Runner as _,
         secrets_server::Secrets as _,
     },
     types::{
@@ -24,7 +24,7 @@ use tracing::info;
 use crate::{
     crypto::{KeyExchangeKeyPair, decrypt_secrets_box, encrypt_secrets_box},
     grpc::{EnclaveRunnerGrpcService, SecretsGrpcService},
-    runner::{RunnerError, RunnerService},
+    runner::RunnerService,
     secrets::Secrets,
 };
 
@@ -327,9 +327,13 @@ async fn test_enclave_workflow() {
         .expect("PutSecrets (3) call failed");
     assert!(
         !put_secrets_resp_3.into_inner().success,
-        "PutSecrets (3) should return success=false as secret already exists (even though authorized)"
+        "PutSecrets (3) should return success=false as secret already exists (even though \
+         authorized)"
     );
-    info!("Step 6a: Further PutSecret processed (auth not consumed) but reported success=false as secret exists");
+    info!(
+        "Step 6a: Further PutSecret processed (auth not consumed) but reported success=false as \
+         secret exists"
+    );
 
     // Attempt GetSecret - should fail as getter isn't authorized yet
     let getter_kx = KeyExchangeKeyPair::generate();
