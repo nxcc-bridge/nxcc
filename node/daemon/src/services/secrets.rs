@@ -10,14 +10,15 @@ use std::{
 use futures::channel::mpsc;
 use nxcc_interface::{
     policy::PolicyBundle,
-    types::{EnvReport, SecretId, SecretRequest, SecretsBox},
+    types::{EnvReport, PolicyExecutionRequest, SecretId, SecretRequest, SecretsBox},
 };
 use tokio::sync::{Mutex, RwLock, oneshot};
 use tracing::{debug, error, info, warn};
 
+use super::runner;
 use crate::{
     error::AppError, grpc::enclave_client::EnclaveClient, network::SecretsMessage,
-    policy::PolicyManager,
+    policy::PolicyManager, services::runner::RunnerService,
 };
 
 // Timeout for waiting for P2P responses
@@ -30,6 +31,7 @@ pub struct SecretsService {
     enclave_client: EnclaveClient,
     policy_manager: Arc<PolicyManager>,
     pending: Mutex<HashMap<u64, PendingRequest>>,
+    runner_service: Arc<RunnerService>,
     request_counter: AtomicU64,
 }
 
@@ -51,11 +53,13 @@ impl SecretsService {
         p2p_secrets_sender: mpsc::Sender<SecretsMessage>,
         enclave_client: EnclaveClient,
         policy_manager: Arc<PolicyManager>,
+        runner_service: Arc<RunnerService>,
     ) -> Arc<Self> {
         Arc::new(Self {
             p2p_secrets_sender,
             enclave_client,
             policy_manager,
+            runner_service,
             pending: Mutex::new(HashMap::new()),
             request_counter: AtomicU64::new(0),
         })
@@ -141,10 +145,38 @@ impl SecretsService {
         tokio::spawn(async move {
             tokio::time::sleep(P2P_RESPONSE_TIMEOUT).await;
             info!("Timeout reached for request {}", request_id);
-            if let Err(e) = self_clone.timeout_pending_request(request_id).await {
-                error!(
-                    "Error during timeout finalization for request {}: {}",
-                    request_id, e
+            let mut lock = self_clone.pending.lock().await; // Acquire lock here
+            if let Some(p) = lock.get_mut(&request_id) {
+                // Check if threshold was already met
+                if p.response_count < p.threshold {
+                    // Threshold not met, remove and finalize for timeout/generation
+                    let pending_req = lock.remove(&request_id);
+                    drop(lock); // Drop lock before calling finalize
+                    if let Some(p_inner) = pending_req {
+                        if let Err(e) = self_clone
+                            .finalize_request_timeout(request_id, p_inner)
+                            .await
+                        {
+                            error!(
+                                "Error during timeout finalization for request {}: {}",
+                                request_id, e
+                            );
+                        }
+                    }
+                } else {
+                    // Threshold met, request already finalized or being finalized
+                    drop(lock);
+                    debug!(
+                        "Timeout occurred for request {}, but threshold was already met.",
+                        request_id
+                    );
+                }
+            } else {
+                // Request already removed (finalized by threshold or timeout)
+                drop(lock);
+                debug!(
+                    "Timeout occurred for request {}, but it was already finalized.",
+                    request_id
                 );
             }
         });
@@ -199,13 +231,35 @@ impl SecretsService {
                 request_id, p.response_count, p.threshold
             );
 
-            // TODO: Run policy check against responder
-            // This requires:
-            // - The policy for the secret(s) inside the box (use secrets_box.contained_secret_ids).
-            // - The responder's EnvReport (received as parameter).
-            // - Integration with the RunnerService/EnclaveClient runner part.
-            // For now, we assume the response is valid if received.
-            let is_valid_response = true; // Placeholder
+            // 1. Run policy check against the responder's EnvReport
+            let mut is_valid_response = true;
+            for secret_id in &secrets_box.contained_secret_ids {
+                // Fetch policy needed for the check
+                let policy = self.policy_manager.get_policy(secret_id).await?;
+                match self
+                    .runner_service
+                    .check_policy_for_env(policy, &env_report, secret_id)
+                    .await
+                {
+                    Ok(false) => {
+                        warn!(
+                            "Policy check failed for secret {:?} from responder node {}",
+                            secret_id, env_report.node_id
+                        );
+                        is_valid_response = false;
+                        break; // One failure invalidates the whole bundle for now
+                    }
+                    Ok(true) => { /* Policy satisfied, continue */ }
+                    Err(e) => {
+                        error!(
+                            "Policy execution failed for responder node {}: {}",
+                            env_report.node_id, e
+                        );
+                        is_valid_response = false;
+                        break;
+                    }
+                }
+            }
 
             if is_valid_response {
                 // Store the EnvReport along with the SecretsBox
@@ -222,22 +276,36 @@ impl SecretsService {
                         "Threshold met for request {}. Triggering finalization.",
                         request_id
                     );
+                    // Remove from map *before* dropping lock to prevent timeout finalization race
+                    let pending_req = lock.remove(&request_id);
                     // Drop the lock before calling finalize_request to avoid deadlock
                     drop(lock);
                     // Use spawn to avoid blocking the network handler
-                    let self_clone = Arc::clone(self);
-                    tokio::spawn(async move {
-                        if let Err(e) = self_clone.finalize_request(request_id).await {
-                            error!(
-                                "Error during threshold finalization for request {}: {}",
-                                request_id, e
-                            );
-                        }
-                    });
+                    if let Some(p_inner) = pending_req {
+                        let self_clone = Arc::clone(self);
+                        tokio::spawn(async move {
+                            if let Err(e) = self_clone
+                                .finalize_request_threshold(request_id, p_inner)
+                                .await
+                            {
+                                error!(
+                                    "Error during threshold finalization for request {}: {}",
+                                    request_id, e
+                                );
+                                // TODO: How to signal failure back if responder already gone? Log is best effort.
+                            }
+                        });
+                    } else {
+                        warn!(
+                            "Threshold met for request {}, but it was already removed from \
+                             pending map.",
+                            request_id
+                        );
+                    }
                 }
             } else {
                 warn!(
-                    "Ignoring invalid response for request {} (policy check failed - simulated)",
+                    "Ignoring invalid response for request {} (policy check failed)",
                     request_id
                 );
             }
@@ -256,32 +324,76 @@ impl SecretsService {
         _request_id: u64,
         secret_requests: BTreeMap<SecretId, Vec<SecretRequest>>,
         requester_env_report: EnvReport, // The EnvReport of the node asking for secrets
-    ) -> Option<SecretsBox> {
-        // Return Option<SecretsBox> instead of just SecretsBox
+    ) -> Option<(SecretsBox, EnvReport)> {
+        // Return tuple including our EnvReport
         let found_ids = self.gather_local(&secret_requests).await;
         if found_ids.is_empty() {
             debug!("No local secrets found for incoming request.");
             return None;
         }
         debug!(
-            "Found {} local secrets for incoming request.",
+            "Found {} potentially matching local secrets for incoming request.",
             found_ids.len()
         );
 
-        // TODO: Policy check - Should we check if the *requester* (requester_env_report) is allowed
-        // by the policy to receive these secrets before sending? This might require
-        // fetching policies here using self.policy_manager.get_policy(&id).
-        // For now, assume allowed if found locally.
+        // 1. Policy check: Verify the requester is allowed to get these secrets
+        let mut authorized_ids = Vec::new();
+        for secret_id in found_ids {
+            let policy = match self.policy_manager.get_policy(&secret_id).await {
+                Ok(p) => p,
+                Err(e) => {
+                    error!("Failed to get policy for {:?}: {}", secret_id, e);
+                    continue; // Skip this secret if policy fetch fails
+                }
+            };
+            match self
+                .runner_service
+                .check_policy_for_env(policy, &requester_env_report, &secret_id)
+                .await
+            {
+                Ok(true) => authorized_ids.push(secret_id),
+                Ok(false) => warn!(
+                    // Policy denied is not an error, just a denial
+                    "Policy denied for requester {} for secret {:?}",
+                    requester_env_report.node_id, secret_id
+                ),
+                Err(e) => error!(
+                    "Policy execution failed for requester {}: {}",
+                    requester_env_report.node_id, e
+                ),
+            }
+        }
 
-        // Pass the *requester's* EnvReport to the enclave's get_secrets
+        if authorized_ids.is_empty() {
+            info!(
+                "No secrets authorized for requester {}",
+                requester_env_report.node_id
+            );
+            return None;
+        }
+
+        // 2. Get the authorized secrets from the enclave
         match self
             .enclave_client
-            .get_secrets(found_ids, requester_env_report)
+            .get_secrets(authorized_ids, requester_env_report) // Pass requester's report
             .await
         {
             Ok(sb) => {
-                info!("Returning secrets box for incoming request.");
-                Some(sb)
+                info!(
+                    "Returning secrets box with {} authorized secrets.",
+                    sb.contained_secret_ids.len()
+                );
+                // 3. Generate *our* EnvReport to send back with the secrets
+                match self
+                    .get_own_env_report(sb.calculate_binding_hash().to_vec())
+                    .await
+                {
+                    Ok(our_env_report) => Some((sb, our_env_report)),
+                    Err(e) => {
+                        error!("Failed to generate own EnvReport for response: {}", e);
+                        None
+                    }
+                }
             }
             Err(e) => {
                 error!(
@@ -293,154 +405,159 @@ impl SecretsService {
         }
     }
 
-    /// Finalizes a request after timeout.
-    pub async fn timeout_pending_request(self: Arc<Self>, request_id: u64) -> Result<(), AppError> {
-        // Check if the request still exists (might have been finalized by threshold)
-        if self.pending.lock().await.contains_key(&request_id) {
-            info!("Finalizing request {} due to timeout.", request_id);
-            self.finalize_request(request_id).await
-        } else {
-            debug!(
-                "Timeout occurred for request {}, but it was already finalized.",
-                request_id
-            );
-            Ok(())
+    /// Finalizes a request after timeout, attempting generation.
+    /// Assumes the request was removed from the map by the caller.
+    async fn finalize_request_timeout(
+        self: Arc<Self>,
+        request_id: u64,
+        p: PendingRequest,
+    ) -> Result<(), AppError> {
+        warn!(
+            "Request {} timed out with {} responses (threshold {}). Attempting generation.",
+            request_id, p.response_count, p.threshold
+        );
+
+        // Attempt generation for all originally missing IDs
+        let ids_to_generate: Vec<SecretId> = p.requested_ids.iter().cloned().collect();
+        match self.generate_secrets_flow(ids_to_generate).await {
+            Ok(()) => {
+                info!("Secret generation successful for request {}", request_id);
+                // Check if secrets are now present and respond
+                self.check_and_respond(request_id, p.requested_ids, p.responder)
+                    .await?;
+            }
+            Err(e) => {
+                error!("Secret generation failed for request {}: {}", request_id, e);
+                let _ = p.responder.send(Err(e));
+            }
         }
+        Ok(())
     }
 
     /// Processes collected bundles, puts them into the enclave, checks final status, and responds.
-    async fn finalize_request(self: Arc<Self>, request_id: u64) -> Result<(), AppError> {
-        let pending_req = {
-            let mut lock = self.pending.lock().await;
-            // Remove the request to prevent duplicate finalization
-            lock.remove(&request_id)
-        };
+    /// Assumes the request was removed from the map by the caller.
+    async fn finalize_request_threshold(
+        self: Arc<Self>,
+        request_id: u64,
+        p: PendingRequest,
+    ) -> Result<(), AppError> {
+        info!(
+            "Finalizing request {}: received {} responses (threshold {})",
+            request_id, p.response_count, p.threshold
+        );
 
-        if let Some(p) = pending_req {
-            info!(
-                "Finalizing request {}: received {} responses (threshold {})",
-                request_id, p.response_count, p.threshold
+        // Threshold check is implicitly done by the fact this function is called
+
+        if p.collected_bundles.is_empty() {
+            warn!(
+                "Request {} failed: Threshold met but no bundles collected (this shouldn't happen)",
+                request_id
             );
+            let _ = p.responder.send(Err(AppError::Service(format!(
+                "No bundles collected for request {}",
+                request_id
+            ))));
+            return Ok(());
+        }
 
-            if p.response_count < p.threshold {
-                warn!(
-                    "Request {} failed: Threshold not met ({} < {})",
-                    request_id, p.response_count, p.threshold
+        // 7. Store valid secrets in the enclave using put_secrets with EnvReports
+        info!(
+            "Calling put_secrets for request {} with {} bundles.",
+            request_id,
+            p.collected_bundles.len()
+        );
+        // Pass the collected (SecretsBox, EnvReport) tuples directly
+        match self.enclave_client.put_secrets(p.collected_bundles).await {
+            Ok(success) => {
+                if !success {
+                    warn!(
+                        "Enclave put_secrets returned false for request {}",
+                        request_id
+                    );
+                    // Treat as failure even if enclave call succeeded
+                    let _ = p.responder.send(Err(AppError::Service(format!(
+                        "Enclave failed to store secrets for request {}",
+                        request_id
+                    ))));
+                    return Ok(());
+                }
+                info!("Enclave put_secrets succeeded for request {}", request_id);
+
+                self.check_and_respond(request_id, p.requested_ids, p.responder)
+                    .await?;
+            }
+            Err(e) => {
+                error!(
+                    "Enclave put_secrets failed for request {}: {}",
+                    request_id, e
                 );
                 let _ = p.responder.send(Err(AppError::Service(format!(
-                    "Threshold not met for request {}",
-                    request_id
+                    "Enclave put_secrets failed for request {}: {}",
+                    request_id, e
                 ))));
-                return Ok(()); // Return Ok here as the finalization itself didn't fail
             }
+        }
+        Ok(())
+    }
 
-            if p.collected_bundles.is_empty() {
-                warn!(
-                    "Request {} failed: Threshold met but no bundles collected (this shouldn't \
-                     happen)",
-                    request_id
-                );
-                let _ = p.responder.send(Err(AppError::Service(format!(
-                    "No bundles collected for request {}",
-                    request_id
-                ))));
-                return Ok(());
-            }
+    /// Checks if all requested secrets are present in the enclave and sends the final response.
+    async fn check_and_respond(
+        &self,
+        request_id: u64,
+        requested_ids: HashSet<SecretId>,
+        responder: oneshot::Sender<Result<(), AppError>>,
+    ) -> Result<(), AppError> {
+        let final_check_ids: Vec<SecretId> = requested_ids.iter().cloned().collect();
+        match self.enclave_client.check_secrets(final_check_ids).await {
+            Ok(statuses) => {
+                let now = current_unix_time();
+                let mut all_found = true;
+                let found_set: HashSet<SecretId> = statuses
+                    .into_iter()
+                    .filter_map(|(sid, found, expiry)| {
+                        if found && (expiry == 0 || expiry > now) {
+                            Some(sid)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
 
-            // 7. Store valid secrets in the enclave using put_secrets with EnvReports
-            info!(
-                "Calling put_secrets for request {} with {} bundles.",
-                request_id,
-                p.collected_bundles.len()
-            );
-            // Pass the collected (SecretsBox, EnvReport) tuples directly
-            match self.enclave_client.put_secrets(p.collected_bundles).await {
-                Ok(success) => {
-                    if !success {
-                        warn!(
-                            "Enclave put_secrets returned false for request {}",
-                            request_id
+                for requested_id in &requested_ids {
+                    if !found_set.contains(requested_id) {
+                        all_found = false;
+                        error!(
+                            "Request {} failed: Secret {:?} not found in enclave after process.",
+                            request_id, requested_id
                         );
-                        // Treat as failure even if enclave call succeeded
-                        let _ = p.responder.send(Err(AppError::Service(format!(
-                            "Enclave failed to store secrets for request {}",
-                            request_id
-                        ))));
-                        return Ok(());
-                    }
-                    info!("Enclave put_secrets succeeded for request {}", request_id);
-
-                    // Verify that all requested secrets are now present
-                    let final_check_ids: Vec<SecretId> = p.requested_ids.iter().cloned().collect();
-                    match self.enclave_client.check_secrets(final_check_ids).await {
-                        Ok(statuses) => {
-                            let now = current_unix_time();
-                            let mut all_found = true;
-                            let found_set: HashSet<SecretId> = statuses
-                                .into_iter()
-                                .filter_map(|(sid, found, expiry)| {
-                                    if found && (expiry == 0 || expiry > now) {
-                                        Some(sid)
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .collect();
-
-                            for requested_id in &p.requested_ids {
-                                if !found_set.contains(requested_id) {
-                                    all_found = false;
-                                    error!(
-                                        "Request {} failed: Secret {:?} not found in enclave \
-                                         after put_secrets.",
-                                        request_id, requested_id
-                                    );
-                                    break;
-                                }
-                            }
-
-                            if all_found {
-                                info!(
-                                    "All {} requested secrets confirmed in enclave for request {}.",
-                                    p.requested_ids.len(),
-                                    request_id
-                                );
-                                let _ = p.responder.send(Ok(()));
-                            } else {
-                                let _ = p.responder.send(Err(AppError::Service(format!(
-                                    "Failed to confirm all secrets in enclave for request {}",
-                                    request_id
-                                ))));
-                            }
-                        }
-                        Err(e) => {
-                            error!(
-                                "Failed final check_secrets for request {}: {}",
-                                request_id, e
-                            );
-                            let _ = p.responder.send(Err(AppError::Service(format!(
-                                "Failed final check_secrets for request {}: {}",
-                                request_id, e
-                            ))));
-                        }
+                        break;
                     }
                 }
-                Err(e) => {
-                    error!(
-                        "Enclave put_secrets failed for request {}: {}",
-                        request_id, e
+
+                if all_found {
+                    info!(
+                        "All {} requested secrets confirmed in enclave for request {}.",
+                        requested_ids.len(),
+                        request_id
                     );
-                    let _ = p.responder.send(Err(AppError::Service(format!(
-                        "Enclave put_secrets failed for request {}: {}",
-                        request_id, e
+                    let _ = responder.send(Ok(()));
+                } else {
+                    let _ = responder.send(Err(AppError::Service(format!(
+                        "Failed to confirm all secrets in enclave for request {}",
+                        request_id
                     ))));
                 }
             }
-        } else {
-            debug!(
-                "Attempted to finalize request {}, but it was not found in pending map.",
-                request_id
-            );
+            Err(e) => {
+                error!(
+                    "Failed final check_secrets for request {}: {}",
+                    request_id, e
+                );
+                let _ = responder.send(Err(AppError::Service(format!(
+                    "Failed final check_secrets for request {}: {}",
+                    request_id, e
+                ))));
+            }
         }
         Ok(())
     }
@@ -514,6 +631,74 @@ impl SecretsService {
                 Vec::new()
             }
         }
+    }
+
+    /// Orchestrates the secret generation flow for a list of IDs.
+    async fn generate_secrets_flow(&self, ids: Vec<SecretId>) -> Result<(), AppError> {
+        info!("Starting generation flow for {} secrets", ids.len());
+        if ids.is_empty() {
+            return Ok(());
+        }
+
+        // For simplicity, we execute policy for each ID individually.
+        // Could be batched if the policy worker supports it.
+        for secret_id in &ids {
+            // 1. Construct self EnvReport (hash doesn't matter for self-auth check)
+            let self_env_report = self.get_own_env_report(vec![0u8; 32]).await?;
+
+            // 1.5 Get Policy
+            let policy = self.policy_manager.get_policy(secret_id).await?;
+
+            // 2. Execute policy for self-authorization
+            match self
+                .runner_service
+                .check_policy_for_env(policy, &self_env_report, secret_id)
+                .await
+            {
+                Ok(true) => {
+                    info!("Self-authorization successful for secret {:?}", secret_id);
+                    // Authorization is stored implicitly by execute_policy_for_env via enclave
+                }
+                Ok(false) => {
+                    warn!("Self-authorization denied for secret {:?}", secret_id);
+                    // Continue to try others, but maybe return partial failure?
+                }
+                Err(e) => {
+                    error!(
+                        "Policy execution failed during self-authorization for secret {:?}: {}",
+                        secret_id, e
+                    );
+                    // Propagate the error for now
+                    return Err(e);
+                }
+            }
+        }
+
+        // 3. Call enclave's generate_secrets (which checks internal auth store)
+        self.enclave_client
+            .generate_secrets(ids)
+            .await
+            .map_err(|e| AppError::Service(format!("Enclave generate_secrets failed: {}", e)))
+    }
+
+    /// Constructs the EnvReport for the current node.
+    async fn get_own_env_report(&self, user_data_hash: Vec<u8>) -> Result<EnvReport, AppError> {
+        let attestation = self
+            .enclave_client
+            .get_report(user_data_hash)
+            .await
+            .map_err(|e| AppError::Service(format!("Failed to get attestation report: {}", e)))?;
+
+        // TODO: Implement operator signing
+        let operator_signature = vec![0u8; 64]; // Placeholder
+        // TODO: Get node ID from config or identity
+        let node_id = "self-node-id-placeholder".to_string(); // Placeholder
+
+        Ok(EnvReport {
+            attestation,
+            operator_signature,
+            node_id,
+        })
     }
 }
 

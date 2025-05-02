@@ -33,6 +33,10 @@ pub struct Config {
     #[serde(default)]
     #[clap(flatten)]
     pub grpc: GrpcConfig,
+
+    #[serde(default)]
+    #[clap(flatten)]
+    pub enclave: EnclaveConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, clap::Args)]
@@ -120,6 +124,47 @@ fn default_vsock_cid() -> u32 {
 
 fn default_uds_path() -> String {
     "/tmp/daemon_grpc.sock".to_string()
+}
+
+/// Configuration related to the connected enclave and its associated VM.
+#[derive(Debug, Clone, Serialize, Deserialize, clap::Args)]
+pub struct EnclaveConfig {
+    /// The UDS path for the main enclave gRPC service.
+    #[clap(long, default_value = "/tmp/enclave_grpc.sock")]
+    #[serde(default = "default_enclave_uds_path")]
+    pub enclave_uds_path: String,
+
+    /// The identifier for the VM instance attached to the enclave for policy execution.
+    /// This ID is used in RunWorker requests to the enclave.
+    #[clap(long, default_value = "policy-vm-0")]
+    #[serde(default = "default_policy_vm_id")]
+    pub policy_vm_id: String,
+
+    /// The UDS path for the VM gRPC service that the enclave should connect to.
+    /// The daemon tells the enclave this path via AttachVm.
+    #[clap(long, default_value = "/tmp/nxcc-workerd-vmm.sock")]
+    #[serde(default = "default_policy_vm_uds_path")]
+    pub policy_vm_uds_path: String,
+}
+
+impl Default for EnclaveConfig {
+    fn default() -> Self {
+        Self {
+            enclave_uds_path: default_enclave_uds_path(),
+            policy_vm_id: default_policy_vm_id(),
+            policy_vm_uds_path: default_policy_vm_uds_path(),
+        }
+    }
+}
+
+fn default_enclave_uds_path() -> String {
+    "/tmp/enclave_grpc.sock".to_string()
+}
+fn default_policy_vm_id() -> String {
+    "policy-vm-0".to_string()
+}
+fn default_policy_vm_uds_path() -> String {
+    "/tmp/nxcc-workerd-vmm.sock".to_string()
 }
 
 impl Config {

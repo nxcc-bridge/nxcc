@@ -1,9 +1,12 @@
 use hyper_util::rt::TokioIo;
 use nxcc_interface::{
     proto::enclave::{
-        CheckSecretsRequest, DeliverEventRequest, DeliverEventResponse, GetReportRequest,
-        GetSecretsRequest, PutSecretsRequest, PutSecretsResponse, RunWorkerRequest, SecretRequest,
-        SecretsBundle as ProtoSecretsBundle, runner_client::RunnerClient,
+        AttachVmRequest, CheckSecretsRequest, DetachVmRequest,
+        ExecutePolicyRequest as ProtoExecutePolicyRequest,
+        ExecutePolicyResponse as ProtoExecutePolicyResponse, GenerateSecretsRequest,
+        GetReportRequest, GetSecretsRequest, PutSecretsRequest, PutSecretsResponse,
+        RunWorkerRequest, RunWorkerResponse, SecretRequest, SecretsBundle as ProtoSecretsBundle,
+        TerminateWorkerRequest, VmAddress as ProtoVmAddress, runner_client::RunnerClient,
         secrets_client::SecretsClient,
     },
     types::{AttestationReport, EnvReport, FromProto as _, IntoProto as _, SecretId, SecretsBox},
@@ -45,6 +48,16 @@ impl EnclaveClient {
         })
     }
 
+    /// Returns the underlying secrets client.
+    pub fn secrets(&self) -> SecretsClient<Channel> {
+        self.secrets_client.clone()
+    }
+
+    /// Returns the underlying runner client.
+    pub fn runner(&self) -> RunnerClient<Channel> {
+        self.runner_client.clone()
+    }
+
     #[allow(unused)]
     pub async fn connect_vsock(_cid: u32, _port: u32) -> Result<Self, Box<dyn std::error::Error>> {
         Err("Vsock connect not implemented".into())
@@ -53,7 +66,7 @@ impl EnclaveClient {
     // Secrets interface calls
 
     pub async fn get_report(&self, user_data: Vec<u8>) -> Result<AttestationReport, String> {
-        let mut client = self.secrets_client.clone();
+        let mut client = self.secrets();
         let req = GetReportRequest { user_data };
         let resp = client.get_report(req).await.map_err(|e| e.to_string())?;
         Ok(AttestationReport::from_proto(resp.into_inner()))
@@ -73,7 +86,7 @@ impl EnclaveClient {
         let req = PutSecretsRequest {
             secrets_bundles: bundles,
         };
-        let mut client = self.secrets_client.clone();
+        let mut client = self.secrets();
         let resp = client.put_secrets(req).await.map_err(|e| e.to_string())?;
         Ok(resp.into_inner().success)
     }
@@ -94,7 +107,7 @@ impl EnclaveClient {
             requester_env_report: Some(env_report.to_proto()),
             policy_reports: vec![], // not used yet
         };
-        let mut client = self.secrets_client.clone();
+        let mut client = self.secrets();
         let resp = client.get_secrets(req).await.map_err(|e| e.to_string())?;
         let out = resp.into_inner();
         if let Some(box_proto) = out.secrets_box {
@@ -113,7 +126,7 @@ impl EnclaveClient {
             proto_ids.push(sid.to_proto());
         }
         let req = CheckSecretsRequest { ids: proto_ids };
-        let mut client = self.secrets_client.clone();
+        let mut client = self.secrets();
         let resp = client.check_secrets(req).await.map_err(|e| e.to_string())?;
         let statuses = resp.into_inner().statuses;
         let mut out = Vec::new();
@@ -126,26 +139,100 @@ impl EnclaveClient {
         Ok(out)
     }
 
-    // Runner interface calls
-
-    pub async fn run_worker(&self, worker_binary: Vec<u8>) -> Result<(), String> {
-        let req = RunWorkerRequest { worker_binary };
-        let mut client = self.runner_client.clone();
-        client.run_worker(req).await.map_err(|e| e.to_string())?;
+    pub async fn generate_secrets(&self, ids: Vec<SecretId>) -> Result<(), String> {
+        let proto_ids = ids.iter().map(|id| id.to_proto()).collect();
+        let req = GenerateSecretsRequest { ids: proto_ids };
+        let mut client = self.secrets();
+        client
+            .generate_secrets(req)
+            .await
+            .map_err(|e| e.to_string())?;
         Ok(())
     }
 
-    pub async fn deliver_event(&self, worker_id: String, payload: Vec<u8>) -> Result<(), String> {
-        let req = DeliverEventRequest {
-            worker_id,
-            event_payload: payload,
+    // Runner interface calls
+
+    pub async fn attach_vm(&self, vm_id: String, vm_uds_path: String) -> Result<bool, String> {
+        let address = ProtoVmAddress {
+            address_type: Some(
+                nxcc_interface::proto::enclave::vm_address::AddressType::Uds(
+                    nxcc_interface::proto::enclave::UdsAddress { path: vm_uds_path },
+                ),
+            ),
         };
-        let mut client = self.runner_client.clone();
-        let _resp: DeliverEventResponse = client
-            .deliver_event(req)
+        let req = AttachVmRequest {
+            vm_id,
+            address: Some(address),
+        };
+        let mut client = self.runner();
+        let resp = client.attach_vm(req).await.map_err(|e| e.to_string())?;
+        Ok(resp.into_inner().attached)
+    }
+
+    pub async fn detach_vm(&self, vm_id: String) -> Result<bool, String> {
+        let req = DetachVmRequest { vm_id };
+        let mut client = self.runner();
+        // TODO: DetachVmResponse doesn't have an `attached` field. Assuming Empty means success.
+        // Need to update proto or adjust logic here based on actual enclave behavior.
+        client.detach_vm(req).await.map_err(|e| e.to_string())?;
+        Ok(true) // Placeholder: Assume success if no error
+    }
+
+    pub async fn run_worker(
+        &self,
+        vm_id: String,
+        worker_code: Vec<u8>,
+        manifest: Vec<u8>,
+    ) -> Result<String, String> {
+        let req = RunWorkerRequest {
+            vm_id,
+            worker_code,
+            manifest,
+        };
+        let mut client = self.runner();
+        let resp = client.run_worker(req).await.map_err(|e| e.to_string())?;
+        let inner = resp.into_inner();
+        if inner.success {
+            Ok(inner.worker_id)
+        } else {
+            Err(format!(
+                "Enclave runner failed to start worker: {}",
+                inner.error_message
+            ))
+        }
+    }
+
+    pub async fn terminate_worker(&self, worker_id: String) -> Result<(), String> {
+        let req = TerminateWorkerRequest { worker_id };
+        let mut client = self.runner();
+        client
+            .terminate_worker(req)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub async fn execute_policy(
+        &self,
+        worker_id: String,
+        contexts: Vec<nxcc_interface::types::PolicyExecutionRequest>,
+    ) -> Result<Vec<nxcc_interface::types::PolicyExecutionRequest>, String> {
+        let proto_contexts = contexts.iter().map(|c| c.to_proto()).collect();
+        let req = ProtoExecutePolicyRequest {
+            worker_id,
+            contexts: proto_contexts,
+        };
+        let mut client = self.runner();
+        let resp: ProtoExecutePolicyResponse = client
+            .execute_policy(req)
             .await
             .map_err(|e| e.to_string())?
             .into_inner();
-        Ok(())
+        let satisfied = resp
+            .satisfied_contexts
+            .into_iter()
+            .map(nxcc_interface::types::PolicyExecutionRequest::from_proto)
+            .collect();
+        Ok(satisfied)
     }
 }

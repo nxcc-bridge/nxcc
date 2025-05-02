@@ -16,11 +16,11 @@ use tracing::{Level, info};
 use tracing_subscriber::{EnvFilter, fmt::Subscriber};
 
 use crate::{
-    config::Config,
+    config::{Config, EnclaveConfig},
     identity::{create_ephemeral_identity, get_or_create_identity},
     network::NetworkManager,
     policy::PolicyManager,
-    services::secrets::SecretsService,
+    services::{runner::RunnerService, secrets::SecretsService},
     web3::gateways::GatewayManager,
 };
 
@@ -54,25 +54,36 @@ async fn main() -> anyhow::Result<()> {
     let (secrets_tx, secrets_rx) = futures::channel::mpsc::channel(64);
     let (notifier_tx, notifier_rx) = futures::channel::mpsc::channel(64);
 
+    // Connect to the enclave
     let enclave_client =
-        grpc::enclave_client::EnclaveClient::connect_uds("/tmp/enclave_grpc.sock".to_string())
+        grpc::enclave_client::EnclaveClient::connect_uds(config.enclave.enclave_uds_path.clone())
             .await
             .unwrap_or_else(|e| {
                 panic!(
-                    "Failed to create EnclaveClient: {}. Ensure the enclave is running on \
-                     /tmp/enclave_grpc.sock.",
-                    e
+                    "Failed to create EnclaveClient: {}. Ensure the enclave is running on {}.",
+                    config.enclave.enclave_uds_path, e
                 )
             });
 
-    // Instantiate dependencies for SecretsService
+    // Instantiate services
+    let runner_service = Arc::new(RunnerService::new(
+        enclave_client.runner(),
+        config.enclave.clone(),
+    ));
     let gateway_manager = GatewayManager::new();
     let policy_manager = Arc::new(PolicyManager::new(gateway_manager, &config).await?);
 
+    // Attach the policy VM to the enclave's runner service
+    runner_service
+        .attach_policy_vm()
+        .await
+        .expect("Failed to attach policy VM to enclave runner");
+
     let secrets_service = SecretsService::new(
         secrets_tx.clone(),
-        enclave_client.clone(), // Clone enclave client
+        enclave_client.clone(), // SecretsService still needs the combined client for secrets calls
         policy_manager.clone(),
+        runner_service.clone(), // Inject RunnerService
     );
 
     {
