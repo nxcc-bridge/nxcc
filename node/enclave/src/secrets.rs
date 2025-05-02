@@ -2,6 +2,7 @@ use std::{
     collections::{HashMap, hash_map::DefaultHasher},
     hash::{Hash, Hasher},
     sync::{Arc, RwLock},
+    time::Duration,
 };
 
 use chrono::Utc;
@@ -19,10 +20,15 @@ use crate::crypto::{
 /// Represents a secret stored in the enclave's memory.
 #[derive(Clone, Debug)]
 struct StoredSecret {
+    /// The actual secret data.
     data: Vec<u8>,
+    /// Unix timestamp (seconds) when the secret expires. 0 means no expiry.
     expiry: u64, // Unix timestamp seconds, 0 means no expiry
+    /// Unix timestamp (seconds) when the secret was generated or put into this enclave.
+    generation_timestamp: u64,
 }
 
+pub(crate) const SELF_NODE_ID: &str = "@self";
 /// Unique identifier for an authorization grant.
 type AuthorizationId = u64;
 
@@ -124,6 +130,8 @@ impl Secrets {
             };
             debug!("Attestation verified for node {}", env_report.node_id);
 
+            // TODO (important!): verify that env report is bound to the attestation (node_id is used but untrusted)
+
             // 2. Verify SecretsBox Binding using the hash from user_data
             let expected_hash_slice = verified_user_data.as_slice();
             if expected_hash_slice.len() != 32 {
@@ -204,11 +212,27 @@ impl Secrets {
                         secret_id, env_report.node_id
                     );
                     continue;
+                } // Check if secret already exists
+                if let Some(existing_secret) = secrets_map.get(&secret_id) {
+                    // Existing secret is canonical, ignore the incoming one.
+                    warn!(
+                        "Ignoring incoming secret {:?} from node {}: already exists with \
+                         timestamp {}",
+                        secret_id, env_report.node_id, existing_secret.generation_timestamp
+                    );
+                } else {
+                    let stored_secret = StoredSecret {
+                        data,
+                        expiry,
+                        generation_timestamp: current_time,
+                    };
+                    info!(
+                        "Storing new secret {:?} with expiry {} and timestamp {}",
+                        secret_id, expiry, current_time
+                    );
+                    secrets_map.insert(secret_id, stored_secret);
+                    secrets_added_count += 1;
                 }
-                let stored_secret = StoredSecret { data, expiry };
-                info!("Storing secret {:?} with expiry {}", secret_id, expiry);
-                secrets_map.insert(secret_id, stored_secret);
-                secrets_added_count += 1;
             }
         }
 
@@ -216,6 +240,60 @@ impl Secrets {
         drop(secrets_map);
 
         Ok(secrets_added_count > 0)
+    }
+
+    /// Generates new secrets from entropy if authorized and not already existing.
+    /// Requires prior authorization for SELF_NODE_ID for each requested secret ID.
+    pub fn generate_secrets(&self, ids: Vec<SecretId>) -> Result<(), String> {
+        info!("GenerateSecrets request for {} IDs", ids.len());
+        let current_time = Utc::now().timestamp() as u64;
+        let mut secrets_generated_count = 0;
+
+        // Acquire write lock once
+        let mut secrets_map = self.secrets_storage.write().unwrap();
+
+        for secret_id in ids {
+            // 1. Check authorization for self-generation
+            if !self.check_authorization(SELF_NODE_ID, &secret_id) {
+                warn!(
+                    "Not authorized to self-generate secret {:?}. Skipping.",
+                    secret_id
+                );
+                // Continue to check other secrets, but return error if any fail auth?
+                // For now, just skip. Consider returning a partial success/failure later.
+                continue;
+            }
+
+            // 2. Check if secret already exists
+            if secrets_map.contains_key(&secret_id) {
+                error!("Secret {:?} already exists. Cannot generate.", secret_id);
+                // Return error immediately if a duplicate is requested for generation
+                return Err(format!("Secret {:?} already exists", secret_id));
+            }
+
+            // 3. Generate secret data (e.g., 32 bytes)
+            let mut secret_data = vec![0u8; 32];
+            rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut secret_data);
+
+            // 4. Store the secret (no expiry by default for generated secrets)
+            let expiry = 0; // Or derive from policy/request? Defaulting to no expiry.
+            let stored_secret = StoredSecret {
+                data: secret_data,
+                expiry,
+                generation_timestamp: current_time,
+            };
+            info!(
+                "Storing generated secret {:?} with timestamp {}",
+                secret_id, current_time
+            );
+            secrets_map.insert(secret_id, stored_secret);
+            secrets_generated_count += 1;
+        }
+
+        // Drop write lock
+        drop(secrets_map);
+        info!("Successfully generated {} secrets", secrets_generated_count);
+        Ok(())
     }
 
     /// Retrieves secrets and packages them into an encrypted SecretsBox for the requester.
@@ -418,6 +496,8 @@ impl Secrets {
 
 #[cfg(test)]
 mod tests {
+    use std::thread::sleep;
+
     use alloy_primitives::U256;
     use chrono::Utc;
     use nxcc_interface::types::{ConsumerInfo, PolicyExecutionReport, PolicyExecutionRequest};
@@ -615,6 +695,7 @@ mod tests {
         let stored = secrets_map.get(&secret_id).unwrap();
         assert_eq!(stored.data, secret_data);
         assert_eq!(stored.expiry, expiry);
+        assert!(stored.generation_timestamp > 0); // Should have a timestamp
     }
 
     #[test]
@@ -660,6 +741,77 @@ mod tests {
         // Verify the secret was NOT stored
         let secrets_map = secrets.secrets_storage.read().unwrap();
         assert!(!secrets_map.contains_key(&secret_id));
+    }
+
+    #[test]
+    fn test_put_secrets_existing_is_canonical() {
+        let secrets = Secrets::new();
+        let node_id = "test-node-canonical";
+        let secret_id = test_secret_id(555);
+        let initial_secret_data = vec![1, 1, 1];
+        let initial_expiry = 0;
+
+        // Authorize the node
+        let auth_request = test_policy_request(node_id, vec![secret_id.clone()]);
+        let auth_report = test_policy_report(auth_request, true);
+        secrets.store_authorization(auth_report);
+
+        // 1. Put the initial secret
+        let sender_kx1 = KeyExchangeKeyPair::generate();
+        let secrets_to_send1 = vec![(
+            secret_id.clone(),
+            initial_secret_data.clone(),
+            initial_expiry,
+        )];
+        let secrets_box1 = encrypt_secrets_box(
+            &sender_kx1,
+            secrets.ephemeral_kx_keypair.public_key(),
+            &secrets_to_send1,
+        )
+        .unwrap();
+        let binding_hash1 = secrets_box1.calculate_binding_hash();
+        let env_report1 = test_env_report_with_hash(node_id, binding_hash1.to_vec());
+
+        let result1 = secrets.put_secrets(vec![(secrets_box1, env_report1)]);
+        assert!(result1.is_ok() && result1.unwrap());
+
+        // Verify initial state
+        let initial_timestamp = {
+            let secrets_map = secrets.secrets_storage.read().unwrap();
+            let stored = secrets_map.get(&secret_id).unwrap();
+            assert_eq!(stored.data, initial_secret_data);
+            stored.generation_timestamp
+        };
+        assert!(initial_timestamp > 0);
+
+        // Wait a bit to ensure timestamp changes
+        sleep(Duration::from_secs(1));
+
+        // 2. Attempt to put the same secret again with different data
+        let new_secret_data = vec![2, 2, 2];
+        let new_expiry = 9999;
+        let sender_kx2 = KeyExchangeKeyPair::generate();
+        let secrets_to_send2 = vec![(secret_id.clone(), new_secret_data.clone(), new_expiry)];
+        let secrets_box2 = encrypt_secrets_box(
+            &sender_kx2,
+            secrets.ephemeral_kx_keypair.public_key(),
+            &secrets_to_send2,
+        )
+        .unwrap();
+        let binding_hash2 = secrets_box2.calculate_binding_hash();
+        let env_report2 = test_env_report_with_hash(node_id, binding_hash2.to_vec());
+
+        let result2 = secrets.put_secrets(vec![(secrets_box2, env_report2)]);
+        assert!(result2.is_ok());
+        // Expect false because the existing secret is canonical and should not be overwritten
+        assert!(!result2.unwrap());
+
+        // 3. Verify the secret was NOT overwritten
+        let secrets_map = secrets.secrets_storage.read().unwrap();
+        let stored_after = secrets_map.get(&secret_id).unwrap();
+        assert_eq!(stored_after.data, initial_secret_data); // Data should be the initial data
+        assert_eq!(stored_after.expiry, initial_expiry); // Expiry should be the initial expiry
+        assert_eq!(stored_after.generation_timestamp, initial_timestamp); // Timestamp should be the initial timestamp
     }
 
     #[test]
@@ -812,6 +964,7 @@ mod tests {
                 StoredSecret {
                     data: secret_data.clone(),
                     expiry: 0,
+                    generation_timestamp: Utc::now().timestamp() as u64,
                 },
             );
             secrets_map.insert(
@@ -819,6 +972,7 @@ mod tests {
                 StoredSecret {
                     data: secret_data.clone(),
                     expiry: 0,
+                    generation_timestamp: Utc::now().timestamp() as u64,
                 },
             );
         }
@@ -863,6 +1017,7 @@ mod tests {
                 StoredSecret {
                     data: secret_data.clone(),
                     expiry: 0, // No expiry
+                    generation_timestamp: Utc::now().timestamp() as u64,
                 },
             );
         }
@@ -904,6 +1059,7 @@ mod tests {
                 StoredSecret {
                     data: secret_data.clone(),
                     expiry,
+                    generation_timestamp: Utc::now().timestamp() as u64 - 7200, // Generated 2 hours ago
                 },
             );
         }
@@ -948,20 +1104,24 @@ mod tests {
                 StoredSecret {
                     data: vec![1, 2, 3],
                     expiry: 0, // No expiry
+                    generation_timestamp: current_time - 10,
                 },
             );
             secrets_map.insert(
                 secret_id2.clone(),
                 StoredSecret {
                     data: vec![4, 5, 6],
-                    expiry: future_time, // Valid
+                    expiry: future_time, // Valid expiry
+                    generation_timestamp: current_time - 5,
                 },
             );
             secrets_map.insert(
                 secret_id3.clone(),
                 StoredSecret {
+                    // Expired secret
                     data: vec![7, 8, 9],
                     expiry: past_time, // Expired
+                    generation_timestamp: current_time - 15,
                 },
             );
         }
@@ -1017,5 +1177,77 @@ mod tests {
         // Same inputs should produce same ID (deterministic)
         let id1_repeat = calculate_authorization_id(node_id, &secret_id1);
         assert_eq!(id1, id1_repeat);
+    }
+
+    #[test]
+    fn test_generate_secrets_success() {
+        let secrets = Secrets::new();
+        let secret_id1 = test_secret_id(1401);
+        let secret_id2 = test_secret_id(1402);
+
+        // Authorize self-generation
+        let request1 = test_policy_request(SELF_NODE_ID, vec![secret_id1.clone()]);
+        let report1 = test_policy_report(request1, true);
+        secrets.store_authorization(report1);
+        let request2 = test_policy_request(SELF_NODE_ID, vec![secret_id2.clone()]);
+        let report2 = test_policy_report(request2, true);
+        secrets.store_authorization(report2);
+
+        let result = secrets.generate_secrets(vec![secret_id1.clone(), secret_id2.clone()]);
+        assert!(result.is_ok());
+
+        // Verify secrets are stored
+        let secrets_map = secrets.secrets_storage.read().unwrap();
+        assert!(secrets_map.contains_key(&secret_id1));
+        assert!(secrets_map.contains_key(&secret_id2));
+        let stored1 = secrets_map.get(&secret_id1).unwrap();
+        let stored2 = secrets_map.get(&secret_id2).unwrap();
+        assert_eq!(stored1.data.len(), 32); // Check generated data length
+        assert_eq!(stored2.data.len(), 32);
+        assert_ne!(stored1.data, stored2.data); // Ensure different secrets generated
+        assert!(stored1.generation_timestamp > 0);
+        assert!(stored2.generation_timestamp > 0);
+        assert_eq!(stored1.expiry, 0); // Default no expiry
+    }
+
+    #[test]
+    fn test_generate_secrets_duplicate() {
+        let secrets = Secrets::new();
+        let secret_id = test_secret_id(1403);
+
+        // Authorize self-generation
+        let request = test_policy_request(SELF_NODE_ID, vec![secret_id.clone()]);
+        let report = test_policy_report(request, true);
+        secrets.store_authorization(report);
+
+        // Generate first time
+        let result1 = secrets.generate_secrets(vec![secret_id.clone()]);
+        assert!(result1.is_ok());
+
+        // Attempt to generate again
+        let result2 = secrets.generate_secrets(vec![secret_id.clone()]);
+        assert!(result2.is_err());
+        assert!(result2.unwrap_err().contains("already exists"));
+
+        // Verify only one secret exists
+        let secrets_map = secrets.secrets_storage.read().unwrap();
+        assert_eq!(secrets_map.len(), 1);
+    }
+
+    #[test]
+    fn test_generate_secrets_unauthorized() {
+        let secrets = Secrets::new();
+        let secret_id = test_secret_id(1404);
+
+        // Do NOT authorize self-generation
+
+        let result = secrets.generate_secrets(vec![secret_id.clone()]);
+        // Currently, skipping unauthorized secrets doesn't return an error, just doesn't generate.
+        // If we change it to return an error, this assertion needs updating.
+        assert!(result.is_ok());
+
+        // Verify secret was NOT stored
+        let secrets_map = secrets.secrets_storage.read().unwrap();
+        assert!(!secrets_map.contains_key(&secret_id));
     }
 }

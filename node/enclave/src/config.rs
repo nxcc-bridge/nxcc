@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use figment::{
-    providers::{Env, Format, Serialized, Toml},
     Figment,
+    providers::{Env, Format, Serialized, Toml},
 };
 use serde::{Deserialize, Serialize};
 
@@ -15,7 +15,6 @@ pub struct EnclaveConfig {
     #[arg(short, long)]
     #[serde(skip)]
     pub config_path: Option<PathBuf>,
-
 
     #[arg(short, long, default_value_t = false)]
     pub verbose: bool,

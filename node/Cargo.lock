@@ -3943,6 +3943,7 @@ dependencies = [
  "nxcc-interface",
  "nxcc-vm-base",
  "once_cell",
+ "rand 0.8.5",
  "serde",
  "sha2",
  "tempfile",

@@ -4,10 +4,10 @@ use nxcc_interface::{
     proto::{
         enclave::{
             AttachVmRequest, AttachVmResponse, CheckSecretsRequest, CheckSecretsResponse,
-            DetachVmRequest, ExecutePolicyRequest, ExecutePolicyResponse, GetReportRequest,
-            GetSecretsRequest, GetSecretsResponse, InvokeWorkerRequest, InvokeWorkerResponse,
-            PutSecretsRequest, PutSecretsResponse, RunWorkerRequest, RunWorkerResponse,
-            SecretStatus, TerminateWorkerRequest,
+            DetachVmRequest, ExecutePolicyRequest, ExecutePolicyResponse, GenerateSecretsRequest,
+            GetReportRequest, GetSecretsRequest, GetSecretsResponse, InvokeWorkerRequest,
+            InvokeWorkerResponse, PutSecretsRequest, PutSecretsResponse, RunWorkerRequest,
+            RunWorkerResponse, SecretStatus, TerminateWorkerRequest,
             runner_server::{Runner, RunnerServer},
             secrets_server::{Secrets as SecretsServerTrait, SecretsServer},
         },
@@ -157,6 +157,34 @@ impl SecretsServerTrait for SecretsGrpcService {
             Err(e) => {
                 error!("CheckSecrets failed: {}", e);
                 Err(Status::internal(format!("Failed to check secrets: {e}")))
+            }
+        }
+    }
+
+    async fn generate_secrets(
+        &self,
+        request: Request<GenerateSecretsRequest>,
+    ) -> Result<Response<()>, Status> {
+        let proto_req = request.into_inner();
+        debug!(
+            "gRPC GenerateSecrets request for {} IDs",
+            proto_req.ids.len()
+        );
+        let ids: Vec<SecretId> = proto_req
+            .ids
+            .into_iter()
+            .map(SecretId::from_proto)
+            .collect();
+
+        match self.secrets.generate_secrets(ids) {
+            Ok(()) => Ok(Response::new(())),
+            Err(e) => {
+                error!("GenerateSecrets failed: {}", e);
+                // Map specific errors (like duplicate) to appropriate gRPC status codes
+                Err(Status::already_exists(format!(
+                    "Failed to generate secrets: {}",
+                    e
+                )))
             }
         }
     }

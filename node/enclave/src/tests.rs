@@ -6,15 +6,15 @@ use std::{
 use alloy_primitives::{Address, U256};
 use nxcc_interface::{
     proto::enclave::{
-        DetachVmRequest, ExecutePolicyRequest as ProtoExecutePolicyRequest, GetReportRequest,
-        GetSecretsRequest as ProtoGetSecretsRequest, InvokeWorkerRequest,
-        PutSecretsRequest as ProtoPutSecretsRequest, RunWorkerRequest, SecretRequest,
-        SecretsBundle, TerminateWorkerRequest, runner_server::Runner as _,
+        CheckSecretsRequest, DetachVmRequest, ExecutePolicyRequest as ProtoExecutePolicyRequest,
+        GenerateSecretsRequest, GetReportRequest, GetSecretsRequest as ProtoGetSecretsRequest,
+        InvokeWorkerRequest, PutSecretsRequest as ProtoPutSecretsRequest, RunWorkerRequest,
+        SecretRequest, SecretsBundle, TerminateWorkerRequest, runner_server::Runner as _,
         secrets_server::Secrets as _,
     },
     types::{
         AttestationReport, ConsumerInfo, EnvReport, FromProto as _, IntoProto as _,
-        PolicyExecutionRequest, SecretId, SecretsBox,
+        PolicyExecutionReport, PolicyExecutionRequest, SecretId, SecretsBox,
     },
 };
 use nxcc_vm_base::client::mock::{MockExecutionBehavior, MockVmServiceClient};
@@ -24,7 +24,7 @@ use tracing::info;
 use crate::{
     crypto::{KeyExchangeKeyPair, decrypt_secrets_box, encrypt_secrets_box},
     grpc::{EnclaveRunnerGrpcService, SecretsGrpcService},
-    runner::RunnerService,
+    runner::{RunnerError, RunnerService},
     secrets::Secrets,
 };
 
@@ -326,10 +326,10 @@ async fn test_enclave_workflow() {
         .await
         .expect("PutSecrets (3) call failed");
     assert!(
-        put_secrets_resp_3.into_inner().success,
-        "PutSecrets (3) should SUCCEED again as auth is not consumed" // Changed assertion
+        !put_secrets_resp_3.into_inner().success,
+        "PutSecrets (3) should return success=false as secret already exists (even though authorized)"
     );
-    info!("Step 6a: Further PutSecret succeeded (auth not consumed)");
+    info!("Step 6a: Further PutSecret processed (auth not consumed) but reported success=false as secret exists");
 
     // Attempt GetSecret - should fail as getter isn't authorized yet
     let getter_kx = KeyExchangeKeyPair::generate();
@@ -603,6 +603,16 @@ async fn check_secret_exists(secrets_grpc: &SecretsGrpcService, secret_id: &Secr
     let statuses = check_resp.into_inner().statuses;
     assert_eq!(statuses.len(), 1);
     statuses[0].found
+}
+
+fn authorize_self_generation(secrets_service: &Secrets, secret_id: &SecretId) {
+    let request = test_policy_request(crate::secrets::SELF_NODE_ID, vec![secret_id.clone()]);
+    let report = PolicyExecutionReport {
+        request,
+        decision: true,
+        timestamp: chrono::Utc::now().timestamp() as u64,
+    };
+    secrets_service.store_authorization(report);
 }
 
 #[tokio::test]
@@ -1052,4 +1062,159 @@ async fn test_runner_ops_non_existent_entities() {
     );
 
     info!("Test OK: Runner operations correctly handled non-existent VMs/workers");
+}
+
+#[tokio::test]
+#[tracing_test::traced_test]
+async fn test_generate_secrets_workflow() {
+    let (secrets_service, runner_service, mock_vm_client, secrets_grpc, runner_grpc) =
+        setup_services();
+    let vm_id = "mock-vm-generate";
+    attach_mock_vm(&runner_service, vm_id, mock_vm_client.clone()).await;
+    let policy_worker_id = run_policy_worker(&runner_grpc, vm_id).await;
+
+    let secret_id_gen = test_secret_id(3001);
+    let getter_node_id = "node-getter-for-gen";
+
+    // 1. Attempt GenerateSecrets without authorization -> Fails (or does nothing)
+    let gen_req_unauth = Request::new(GenerateSecretsRequest {
+        ids: vec![secret_id_gen.to_proto()],
+    });
+    let gen_resp_unauth = secrets_grpc.generate_secrets(gen_req_unauth).await;
+    // Depending on implementation (error vs skip), check status or secret existence
+    // Current implementation skips, so the call succeeds but secret isn't created.
+    assert!(
+        gen_resp_unauth.is_ok(),
+        "GenerateSecrets call should succeed even if unauthorized (skips)"
+    );
+    assert!(
+        !check_secret_exists(&secrets_grpc, &secret_id_gen).await,
+        "Secret should not exist after unauthorized GenerateSecrets"
+    );
+    info!("Test OK: GenerateSecrets skipped unauthorized request");
+
+    // 2. Authorize self-generation (simulate runner authorizing enclave itself)
+    // This requires executing the policy worker for the special SELF_NODE_ID
+    execute_policy(
+        &runner_grpc,
+        &mock_vm_client,
+        &policy_worker_id,
+        crate::secrets::SELF_NODE_ID, // Use the special ID
+        &secret_id_gen,
+        true, // Assume policy allows self-generation
+    )
+    .await;
+    info!(
+        "Test Setup: Authorized self-generation for {:?}",
+        secret_id_gen
+    );
+
+    // 3. GenerateSecrets successfully
+    let gen_req_auth = Request::new(GenerateSecretsRequest {
+        ids: vec![secret_id_gen.to_proto()],
+    });
+    let gen_resp_auth = secrets_grpc.generate_secrets(gen_req_auth).await;
+    assert!(
+        gen_resp_auth.is_ok(),
+        "GenerateSecrets failed: {:?}",
+        gen_resp_auth.err()
+    );
+    assert!(
+        check_secret_exists(&secrets_grpc, &secret_id_gen).await,
+        "Secret should exist after authorized GenerateSecrets"
+    );
+    info!("Test OK: GenerateSecrets succeeded");
+
+    // 4. Attempt GenerateSecrets again for the same ID -> Fails (AlreadyExists)
+    let gen_req_dup = Request::new(GenerateSecretsRequest {
+        ids: vec![secret_id_gen.to_proto()],
+    });
+    let gen_resp_dup = secrets_grpc.generate_secrets(gen_req_dup).await;
+    assert!(gen_resp_dup.is_err());
+    assert_eq!(gen_resp_dup.err().unwrap().code(), Code::AlreadyExists);
+    info!("Test OK: GenerateSecrets failed for duplicate ID");
+
+    // 5. Attempt PutSecrets for the generated secret -> Fails (Existing is canonical)
+    let putter_node_id = "node-putter-for-gen";
+    execute_policy(
+        // Authorize putter
+        &runner_grpc,
+        &mock_vm_client,
+        &policy_worker_id,
+        putter_node_id,
+        &secret_id_gen,
+        true,
+    )
+    .await;
+    let putter_kx = KeyExchangeKeyPair::generate();
+    let enclave_pk_bytes = secrets_service
+        .get_report(vec![])
+        .unwrap()
+        .ephemeral_public_key;
+    let enclave_pk =
+        x25519_dalek::PublicKey::from(<[u8; 32]>::try_from(enclave_pk_bytes.as_slice()).unwrap());
+    let secrets_to_send = vec![(secret_id_gen.clone(), b"overwrite attempt".to_vec(), 0)];
+    let secrets_box_put = encrypt_secrets_box(&putter_kx, &enclave_pk, &secrets_to_send).unwrap();
+    let binding_hash_put = secrets_box_put.calculate_binding_hash();
+    let putter_env_report = test_sending_env_report(
+        putter_node_id,
+        putter_kx.public_key().as_bytes(),
+        binding_hash_put.to_vec(),
+    );
+    let put_req = Request::new(ProtoPutSecretsRequest {
+        secrets_bundles: vec![SecretsBundle {
+            secrets_box: Some(secrets_box_put.to_proto()),
+            env_report: Some(putter_env_report.to_proto()),
+        }],
+    });
+    let put_resp = secrets_grpc.put_secrets(put_req).await.unwrap();
+    // PutSecrets should report success=false because the existing secret was not overwritten
+    assert!(
+        !put_resp.into_inner().success,
+        "PutSecrets should not overwrite generated secret"
+    );
+    info!("Test OK: PutSecrets did not overwrite generated secret");
+
+    // 6. Authorize getter and GetSecrets
+    execute_policy(
+        // Authorize getter
+        &runner_grpc,
+        &mock_vm_client,
+        &policy_worker_id,
+        getter_node_id,
+        &secret_id_gen,
+        true,
+    )
+    .await;
+    let getter_kx = KeyExchangeKeyPair::generate();
+    let getter_env_report =
+        test_requesting_env_report(getter_node_id, getter_kx.public_key().as_bytes());
+    let get_req = Request::new(ProtoGetSecretsRequest {
+        requests: vec![SecretRequest {
+            id: Some(secret_id_gen.to_proto()),
+        }],
+        policy_reports: vec![],
+        requester_env_report: Some(getter_env_report.to_proto()),
+    });
+    let get_resp = secrets_grpc.get_secrets(get_req).await.unwrap();
+    let secrets_box_get = SecretsBox::from_proto(get_resp.into_inner().secrets_box.unwrap());
+    assert_eq!(secrets_box_get.contained_secret_ids.len(), 1);
+    assert_eq!(secrets_box_get.contained_secret_ids[0], secret_id_gen);
+
+    // 7. Decrypt and verify data length (we don't know the exact generated data)
+    let decrypted_secrets = decrypt_secrets_box(&getter_kx, &secrets_box_get).unwrap();
+    assert_eq!(decrypted_secrets.len(), 1);
+    assert_eq!(decrypted_secrets[0].0, secret_id_gen);
+    assert_eq!(
+        decrypted_secrets[0].1.len(),
+        32,
+        "Generated secret data has wrong length"
+    );
+    // Ensure it wasn't overwritten by the PutSecrets attempt
+    assert_ne!(decrypted_secrets[0].1, b"overwrite attempt".to_vec());
+    assert_eq!(
+        decrypted_secrets[0].2, 0,
+        "Generated secret expiry should be 0"
+    ); // Default expiry
+    info!("Test OK: GetSecrets retrieved generated secret successfully");
 }

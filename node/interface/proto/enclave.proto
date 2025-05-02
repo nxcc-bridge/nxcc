@@ -18,6 +18,9 @@ service Secrets {
 
   // check_secrets returns whether the given secrets exist.
   rpc CheckSecrets(CheckSecretsRequest) returns (CheckSecretsResponse);
+
+  // generate_secrets creates secrets for the first time
+  rpc GenerateSecrets(GenerateSecretsRequest) returns (google.protobuf.Empty);
 }
 
 message GetReportRequest {
@@ -62,6 +65,10 @@ message CheckSecretsRequest {
 
 message CheckSecretsResponse {
   repeated SecretStatus statuses = 1;
+}
+
+message GenerateSecretsRequest {
+  repeated interface.SecretIdentifier ids = 1;
 }
 
 message SecretStatus {
