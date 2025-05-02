@@ -120,11 +120,11 @@ impl From<kad::Event> for AppEvent {
 }
 
 pub struct NetworkManager {
-    local_key: libp2p::identity::Keypair,
-    config: Config,
-    notifier_receiver: mpsc::Receiver<NotifierMessage>,
-    secrets_receiver: mpsc::Receiver<SecretsMessage>,
-    secrets_service: Arc<SecretsService>,
+    pub(crate) local_key: libp2p::identity::Keypair,
+    pub(crate) config: Config,
+    pub(crate) notifier_receiver: mpsc::Receiver<NotifierMessage>,
+    pub(crate) secrets_receiver: mpsc::Receiver<SecretsMessage>,
+    pub(crate) secrets_service: Arc<SecretsService>,
 }
 
 impl NetworkManager {
@@ -294,7 +294,7 @@ impl NetworkManager {
     }
 }
 
-async fn run_network_loop(
+pub(crate) async fn run_network_loop(
     mut swarm: Swarm<AppBehaviour>,
     mut notifier_rx: mpsc::Receiver<NotifierMessage>,
     mut secrets_rx: mpsc::Receiver<SecretsMessage>,

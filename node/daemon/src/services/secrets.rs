@@ -25,6 +25,8 @@ use crate::{
 const P2P_RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
 // Threshold for number of valid responses needed per secret (currently request-level)
 const RESPONSE_THRESHOLD: usize = 1;
+// Special node ID used for self-authorization checks within the enclave.
+const SELF_NODE_ID: &str = "@self";
 
 pub struct SecretsService {
     p2p_secrets_sender: mpsc::Sender<SecretsMessage>,
@@ -46,6 +48,8 @@ struct PendingRequest {
     threshold: usize,
     // Channel to notify the original caller
     responder: oneshot::Sender<Result<(), AppError>>,
+    // Store the original requester's EnvReport for post-generation authorization
+    original_requester_env_report: EnvReport, // <-- Added field
 }
 
 impl SecretsService {
@@ -71,7 +75,7 @@ impl SecretsService {
     pub async fn get_secrets(
         self: Arc<Self>,
         secret_requests: HashMap<SecretId, Vec<SecretRequest>>,
-        env_report: EnvReport,
+        env_report: EnvReport, // This is the original requester's EnvReport
     ) -> Result<(), AppError> {
         info!(
             "get_secrets called with {} unique secret IDs",
@@ -131,6 +135,7 @@ impl SecretsService {
                     response_count: 0,
                     threshold: RESPONSE_THRESHOLD, // Use constant for now
                     responder: tx,
+                    original_requester_env_report: env_report.clone(), // <-- Store original report
                 },
             );
         }
@@ -161,6 +166,10 @@ impl SecretsService {
                                 "Error during timeout finalization for request {}: {}",
                                 request_id, e
                             );
+                            // If finalize fails, the original responder might still be waiting.
+                            // We should try to send the error back if the responder hasn't been dropped.
+                            // However, p_inner.responder is moved, so we can't easily send back here.
+                            // The error is logged, which is the best effort in this detached task.
                         }
                     }
                 } else {
@@ -410,7 +419,7 @@ impl SecretsService {
     async fn finalize_request_timeout(
         self: Arc<Self>,
         request_id: u64,
-        p: PendingRequest,
+        p: PendingRequest, // Takes ownership of the PendingRequest
     ) -> Result<(), AppError> {
         warn!(
             "Request {} timed out with {} responses (threshold {}). Attempting generation.",
@@ -419,16 +428,73 @@ impl SecretsService {
 
         // Attempt generation for all originally missing IDs
         let ids_to_generate: Vec<SecretId> = p.requested_ids.iter().cloned().collect();
-        match self.generate_secrets_flow(ids_to_generate).await {
+        match self.generate_secrets_flow(ids_to_generate.clone()).await {
+            // ^-- Clone ids_to_generate here
             Ok(()) => {
                 info!("Secret generation successful for request {}", request_id);
+
+                // --- BEGIN FIX ---
+                // Authorize the original requester for the newly generated secrets
+                info!(
+                    "Authorizing original requester ({}) for generated secrets of request {}",
+                    p.original_requester_env_report.node_id, request_id
+                );
+                for secret_id in &ids_to_generate {
+                    match self.policy_manager.get_policy(secret_id).await {
+                        Ok(policy) => {
+                            match self
+                                .runner_service
+                                .check_policy_for_env(
+                                    policy,
+                                    &p.original_requester_env_report, // Use stored report
+                                    secret_id,
+                                )
+                                .await
+                            {
+                                Ok(true) => {
+                                    info!(
+                                        "Successfully authorized original requester for generated \
+                                         secret {:?}",
+                                        secret_id
+                                    );
+                                }
+                                Ok(false) => {
+                                    warn!(
+                                        "Policy denied for original requester for generated \
+                                         secret {:?}. Final GetSecrets might return empty box.",
+                                        secret_id
+                                    );
+                                    // Don't fail the whole process, just log warning.
+                                }
+                                Err(e) => {
+                                    error!(
+                                        "Policy check failed during post-generation authorization \
+                                         for secret {:?}: {}",
+                                        secret_id, e
+                                    );
+                                    // Don't fail the whole process, just log error.
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!(
+                                "Failed to get policy for generated secret {:?} during \
+                                 post-generation authorization: {}",
+                                secret_id, e
+                            );
+                            // Don't fail the whole process, just log error.
+                        }
+                    }
+                }
+                // --- END FIX ---
+
                 // Check if secrets are now present and respond
                 self.check_and_respond(request_id, p.requested_ids, p.responder)
                     .await?;
             }
             Err(e) => {
                 error!("Secret generation failed for request {}: {}", request_id, e);
-                let _ = p.responder.send(Err(e));
+                let _ = p.responder.send(Err(e)); // Send error back to original caller
             }
         }
         Ok(())
@@ -439,7 +505,7 @@ impl SecretsService {
     async fn finalize_request_threshold(
         self: Arc<Self>,
         request_id: u64,
-        p: PendingRequest,
+        p: PendingRequest, // Takes ownership
     ) -> Result<(), AppError> {
         info!(
             "Finalizing request {}: received {} responses (threshold {})",
@@ -483,6 +549,66 @@ impl SecretsService {
                 }
                 info!("Enclave put_secrets succeeded for request {}", request_id);
 
+                // --- BEGIN (Minor) FIX ---
+                // Authorize the original requester for the received secrets
+                // This ensures consistency between threshold and timeout paths
+                info!(
+                    "Authorizing original requester ({}) for received secrets of request {}",
+                    p.original_requester_env_report.node_id, request_id
+                );
+                // We need to know which secrets were *successfully* put.
+                // Check_secrets below confirms this, but we need the IDs *before* that.
+                // Let's iterate through the *requested* IDs and authorize them if they
+                // were successfully put (which check_and_respond will verify).
+                // This might authorize secrets that weren't actually in the received bundles,
+                // but check_and_respond will catch that later.
+                for secret_id in &p.requested_ids {
+                    match self.policy_manager.get_policy(secret_id).await {
+                        Ok(policy) => {
+                            match self
+                                .runner_service
+                                .check_policy_for_env(
+                                    policy,
+                                    &p.original_requester_env_report, // Use stored report
+                                    secret_id,
+                                )
+                                .await
+                            {
+                                Ok(true) => {
+                                    debug!(
+                                        // Use debug level here as it's less critical than post-generation
+                                        "Authorized original requester for potentially received \
+                                         secret {:?}",
+                                        secret_id
+                                    );
+                                }
+                                Ok(false) => {
+                                    warn!(
+                                        "Policy denied for original requester for potentially \
+                                         received secret {:?}.",
+                                        secret_id
+                                    );
+                                }
+                                Err(e) => {
+                                    error!(
+                                        "Policy check failed during post-receive authorization \
+                                         for secret {:?}: {}",
+                                        secret_id, e
+                                    );
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!(
+                                "Failed to get policy for potentially received secret {:?} during \
+                                 post-receive authorization: {}",
+                                secret_id, e
+                            );
+                        }
+                    }
+                }
+                // --- END (Minor) FIX ---
+
                 self.check_and_respond(request_id, p.requested_ids, p.responder)
                     .await?;
             }
@@ -518,6 +644,13 @@ impl SecretsService {
                         if found && (expiry == 0 || expiry > now) {
                             Some(sid)
                         } else {
+                            if found {
+                                // Log if found but expired
+                                debug!(
+                                    "Secret {:?} found but expired (expiry: {}, now: {})",
+                                    sid, expiry, now
+                                );
+                            }
                             None
                         }
                     })
@@ -527,7 +660,8 @@ impl SecretsService {
                     if !found_set.contains(requested_id) {
                         all_found = false;
                         error!(
-                            "Request {} failed: Secret {:?} not found in enclave after process.",
+                            "Request {} failed: Secret {:?} not found or expired in enclave after \
+                             process.",
                             request_id, requested_id
                         );
                         break;
@@ -661,7 +795,11 @@ impl SecretsService {
                 }
                 Ok(false) => {
                     warn!("Self-authorization denied for secret {:?}", secret_id);
-                    // Continue to try others, but maybe return partial failure?
+                    // If self-auth fails, we cannot generate. Return error.
+                    return Err(AppError::Service(format!(
+                        "Self-authorization denied for secret generation: {:?}",
+                        secret_id
+                    )));
                 }
                 Err(e) => {
                     error!(
@@ -692,7 +830,7 @@ impl SecretsService {
         // TODO: Implement operator signing
         let operator_signature = vec![0u8; 64]; // Placeholder
         // TODO: Get node ID from config or identity
-        let node_id = "self-node-id-placeholder".to_string(); // Placeholder
+        let node_id = SELF_NODE_ID.to_string();
 
         Ok(EnvReport {
             attestation,
@@ -705,6 +843,6 @@ impl SecretsService {
 fn current_unix_time() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default() // Use default on error
         .as_secs()
 }

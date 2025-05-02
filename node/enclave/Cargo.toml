@@ -30,6 +30,7 @@ figment = { version = "0.10", features = ["toml", "env"] }
 default = ["uds"]
 uds = ["tokio-stream", "nxcc-vm-base/uds"]
 vsock = ["tokio-vsock", "nxcc-vm-base/vsock"]
+test = []
 
 [dev-dependencies]
 alloy-primitives = { version = "1.0.0", features = ["rand"] }
