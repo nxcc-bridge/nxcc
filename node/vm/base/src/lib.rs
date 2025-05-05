@@ -1,5 +1,6 @@
 pub mod binding;
 pub mod client;
+pub mod config;
 pub mod server;
 #[cfg(test)]
 mod tests;
@@ -9,7 +10,7 @@ use std::{error::Error, sync::Arc};
 
 use crate::{
     server::{ServerConfig, VmRuntime, run_vm_server},
-    tls::MtlsCertificates, // Use the new struct
+    tls::MtlsCertificates,
 };
 
 /// Run a VM server with auto-generated TLS certificates signed by a dummy CA.

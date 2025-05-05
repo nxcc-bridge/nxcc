@@ -26,15 +26,10 @@ use tokio::{
 use tracing::{debug, error, info, warn};
 
 use crate::{
+    config::WorkerdConfig,
     config_builder::{CodeType, build_config, detect_code_type},
     errors::WorkerdVmError,
 };
-
-const WORKERD_BINARY_PATH: &str = "workerd";
-/// How long we wait for the worker's UDS to become connectable before timing out.
-const STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
-/// Poll interval for checking UDS readiness during startup.
-const UDS_CHECK_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Holds information about a single worker process.
 #[derive(Debug)]
@@ -53,12 +48,14 @@ struct WorkerInfo {
 #[derive(Clone)]
 pub struct WorkerdVmm {
     workers: Arc<Mutex<HashMap<String, Arc<Mutex<WorkerInfo>>>>>,
+    config: WorkerdConfig,
 }
 
 impl WorkerdVmm {
-    pub fn new() -> Self {
+    pub fn new(config: WorkerdConfig) -> Self {
         WorkerdVmm {
             workers: Arc::new(Mutex::new(HashMap::new())),
+            config,
         }
     }
 
@@ -181,7 +178,7 @@ impl VmRuntime for WorkerdVmm {
         let code_type = detect_code_type(&worker_code)?;
         let temp_dir_handle = Arc::new(
             tempfile::Builder::new()
-                .prefix("nxcc-workerd-")
+                .prefix(&self.config.temp_dir_prefix)
                 .rand_bytes(5)
                 .tempdir()
                 .map_err(WorkerdVmError::TempDirCreationFailed)?,
@@ -225,7 +222,7 @@ impl VmRuntime for WorkerdVmm {
         }
 
         // Sanity check for the workerd binary
-        if Command::new(WORKERD_BINARY_PATH)
+        if Command::new(&self.config.binary_path)
             .arg("--version")
             .output()
             .await
@@ -233,12 +230,12 @@ impl VmRuntime for WorkerdVmm {
         {
             error!(
                 "workerd binary not found or failed to execute at path: {}",
-                WORKERD_BINARY_PATH
+                self.config.binary_path
             );
             return Err(WorkerdVmError::WorkerdBinaryNotFound.into());
         }
 
-        let mut command = Command::new(WORKERD_BINARY_PATH);
+        let mut command = Command::new(&self.config.binary_path);
         command
             .arg("serve")
             .arg("-b")
@@ -295,6 +292,8 @@ impl VmRuntime for WorkerdVmm {
 
         // Poll for UDS readiness, or time out
         let start_time = Instant::now();
+        let startup_timeout = Duration::from_secs(self.config.startup_timeout_secs);
+        let uds_check_interval = Duration::from_millis(self.config.uds_check_interval_ms);
         loop {
             match tokio::net::UnixStream::connect(&uds_path).await {
                 Ok(_) => {
@@ -322,7 +321,7 @@ impl VmRuntime for WorkerdVmm {
                 }
             }
 
-            if start_time.elapsed() > STARTUP_TIMEOUT {
+            if start_time.elapsed() > startup_timeout {
                 // Timed out waiting for UDS. Mark the worker as Error and kill it.
                 let workers_map = self.workers.lock().await;
                 if let Some(worker_lock) = workers_map.get(&instance_id) {
@@ -338,7 +337,7 @@ impl VmRuntime for WorkerdVmm {
                     let logs_content = worker.logs.lock().await.clone();
                     return Err(WorkerdVmError::StartupTimeout {
                         instance_id: instance_id.clone(),
-                        timeout: STARTUP_TIMEOUT,
+                        timeout: startup_timeout,
                         logs: logs_content,
                     }
                     .into());
@@ -346,13 +345,13 @@ impl VmRuntime for WorkerdVmm {
                 // If it's not in the map for some reason, just fail
                 return Err(WorkerdVmError::StartupTimeout {
                     instance_id,
-                    timeout: STARTUP_TIMEOUT,
+                    timeout: startup_timeout,
                     logs: "[No logs captured]".to_string(),
                 }
                 .into());
             }
 
-            sleep(UDS_CHECK_INTERVAL).await;
+            sleep(uds_check_interval).await;
         }
     }
 
