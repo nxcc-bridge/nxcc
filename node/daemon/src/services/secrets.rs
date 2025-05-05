@@ -28,7 +28,7 @@ use crate::{
 #[cfg(not(debug_assertions))]
 const P2P_RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
 #[cfg(debug_assertions)]
-const P2P_RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
+const P2P_RESPONSE_TIMEOUT: Duration = Duration::from_secs(3);
 // Threshold for number of valid responses needed per secret (currently request-level)
 const RESPONSE_THRESHOLD: usize = 1;
 

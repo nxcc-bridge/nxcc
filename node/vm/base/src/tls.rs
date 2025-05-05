@@ -135,8 +135,9 @@ fn generate_deterministic_ca_cert() -> Result<(RcgenCertificate, KeyPair), TlsEr
         "A0gAMEUCIQDyUOTygq+QajPP+UBQdGuz8cfl+tiQL5Z99AkMEJJMFAIgEBAa4RMU".into(),
         "bRtVh8qU6DPGHJgjjeZVMeIVgZNi+sT5HkY=".into(),
         "-".repeat(5) + "END CERTIFICATE" + &"-".repeat(5),
-    ].join("\n");
-    let params = CertificateParams::from_ca_cert_pem(& cert_pem).unwrap();
+    ]
+    .join("\n");
+    let params = CertificateParams::from_ca_cert_pem(&cert_pem).unwrap();
 
     let key_pem = [
         "-".repeat(5) + "BEGIN EC PRIVATE KEY" + &"-".repeat(5),
