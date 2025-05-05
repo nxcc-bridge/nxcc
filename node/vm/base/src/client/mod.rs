@@ -107,8 +107,7 @@ impl VmServiceClient {
         tls_config: ClientTlsConfig,
     ) -> Result<Self, ClientError> {
         let endpoint = Channel::from_shared(format!("https://{}", addr))
-            .map_err(|e| ClientError::Uri(e.to_string()))?
-            .tls_config(tls_config)?;
+            .map_err(|e| ClientError::Uri(e.to_string()))?;
 
         let channel = endpoint.connect().await?;
 

@@ -342,8 +342,6 @@ pub async fn run_vm_server<T: VmRuntime>(
     let grpc_service = VmServiceGrpc::new(runtime);
 
     let server_builder = Server::builder()
-        .tls_config(server_tls_config)?
-        .layer(client_binding_layer)
         .add_service(VmServer::new(grpc_service));
 
     match config {
