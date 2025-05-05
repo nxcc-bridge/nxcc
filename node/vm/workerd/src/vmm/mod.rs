@@ -295,20 +295,93 @@ impl VmRuntime for WorkerdVmm {
         let startup_timeout = Duration::from_secs(self.config.startup_timeout_secs);
         let uds_check_interval = Duration::from_millis(self.config.uds_check_interval_ms);
         loop {
+            // Check if the process exited prematurely
+            {
+                let workers_map = self.workers.lock().await;
+                if let Some(worker_lock) = workers_map.get(&instance_id) {
+                    let mut worker = worker_lock.lock().await;
+                    // Check if the process handle still exists and try_wait
+                    match worker.process.try_wait() {
+                        Ok(Some(exit_status)) => {
+                            // Process exited!
+                            worker.status = WorkerStatus::Error; // Or determine based on exit_status
+                            let logs_content = worker.logs.lock().await.clone();
+                            error!(
+                                instance_id = ?instance_id,
+                                ?exit_status,
+                                "Workerd process exited prematurely during startup check. Logs:\n{}",
+                                logs_content
+                            );
+                            return Err(WorkerdVmError::StartupFailedPrematureExit {
+                                instance_id: instance_id.clone(),
+                                final_status: worker.status, // Use the updated status
+                                logs: logs_content,
+                            }
+                            .into());
+                        }
+                        Ok(None) => {
+                            // Still running, continue check
+                        }
+                        Err(e) => {
+                            // Error checking status, log it but might proceed cautiously
+                            warn!(instance_id = ?instance_id, "Error checking workerd process status during startup: {}", e);
+                        }
+                    }
+                } else {
+                    // Worker somehow removed from map during startup? Should not happen.
+                    return Err(WorkerdVmError::Internal(format!(
+                        "Worker {} disappeared from map during startup",
+                        instance_id
+                    ))
+                    .into());
+                }
+            }
+
             match tokio::net::UnixStream::connect(&uds_path).await {
                 Ok(_) => {
-                    // Mark the worker as Running and return success
-                    let workers_map = self.workers.lock().await;
-                    if let Some(worker_lock) = workers_map.get(&instance_id) {
-                        let mut worker = worker_lock.lock().await;
-                        if worker.status == WorkerStatus::Starting {
-                            worker.status = WorkerStatus::Running;
-                            info!(instance_id = ?instance_id, "UDS ready, worker is now Running.");
+                    // Socket file exists and is connectable.
+                    sleep(Duration::from_millis(100)).await; // Adjust duration if needed (50-200ms range)
+
+                    // Re-check process status one last time before declaring success
+                    // (Optional but safer: prevents declaring success if it crashed *during* the sleep)
+                    {
+                        let workers_map = self.workers.lock().await;
+                        if let Some(worker_lock) = workers_map.get(&instance_id) {
+                            let mut worker = worker_lock.lock().await;
+                            if let Ok(Some(exit_status)) = worker.process.try_wait() {
+                                worker.status = WorkerStatus::Error;
+                                let logs_content = worker.logs.lock().await.clone();
+                                error!(
+                                    instance_id = ?instance_id,
+                                    ?exit_status,
+                                    "Workerd process exited just before marking as Running. Logs:\n{}",
+                                    logs_content
+                                );
+                                return Err(WorkerdVmError::StartupFailedPrematureExit {
+                                    instance_id: instance_id.clone(),
+                                    final_status: worker.status,
+                                    logs: logs_content,
+                                }
+                                .into());
+                            }
+                            // If still running or error checking status, proceed to mark Running
+                            if worker.status == WorkerStatus::Starting {
+                                worker.status = WorkerStatus::Running;
+                                info!(instance_id = ?instance_id, "UDS ready, worker is now Running.");
+                            }
+                        } else {
+                            // Should not happen
+                            return Err(WorkerdVmError::Internal(format!(
+                                "Worker {} disappeared from map just before marking Running",
+                                instance_id
+                            ))
+                            .into());
                         }
                     }
                     return Ok(instance_id);
                 }
                 Err(e) => {
+                    // Log unexpected errors, but connection refused/not found are expected during startup
                     if e.kind() != std::io::ErrorKind::NotFound
                         && e.kind() != std::io::ErrorKind::ConnectionRefused
                     {
@@ -318,6 +391,7 @@ impl VmRuntime for WorkerdVmm {
                             "Unexpected error checking UDS: {}. Will retry.", e
                         );
                     }
+                    // No need to sleep here, the main loop sleep handles polling interval
                 }
             }
 
@@ -326,13 +400,30 @@ impl VmRuntime for WorkerdVmm {
                 let workers_map = self.workers.lock().await;
                 if let Some(worker_lock) = workers_map.get(&instance_id) {
                     let mut worker = worker_lock.lock().await;
+                    // Check if it exited on its own before we kill it
+                    let final_status = match worker.process.try_wait() {
+                        Ok(Some(status)) => {
+                            error!(instance_id=?worker.instance_id, ?status, "Workerd exited on its own before startup timeout.");
+                            WorkerStatus::Error // Mark as error if it exited
+                        }
+                        _ => WorkerStatus::Error, // Still mark as Error due to timeout
+                    };
+
                     if worker.status == WorkerStatus::Starting {
-                        worker.status = WorkerStatus::Error;
+                        worker.status = final_status; // Use determined status
                         warn!(
                             instance_id = ?worker.instance_id,
-                            "Timeout waiting for UDS. Killing process."
+                            timeout = ?startup_timeout,
+                            "Timeout waiting for UDS. Killing process (if running)."
                         );
-                        let _ = worker.process.kill(); // best-effort kill
+                        // Use kill() directly on the Child object, no need for pid lookup
+                        if let Err(e) = worker.process.kill().await {
+                            // Log error if kill fails, but proceed with timeout error
+                            // Ignore InvalidInput error which means process already exited
+                            if e.kind() != std::io::ErrorKind::InvalidInput {
+                                error!(instance_id = ?worker.instance_id, "Error killing process on startup timeout: {}", e);
+                            }
+                        }
                     }
                     let logs_content = worker.logs.lock().await.clone();
                     return Err(WorkerdVmError::StartupTimeout {
@@ -346,7 +437,7 @@ impl VmRuntime for WorkerdVmm {
                 return Err(WorkerdVmError::StartupTimeout {
                     instance_id,
                     timeout: startup_timeout,
-                    logs: "[No logs captured]".to_string(),
+                    logs: "[No logs captured - worker not found in map]".to_string(),
                 }
                 .into());
             }
