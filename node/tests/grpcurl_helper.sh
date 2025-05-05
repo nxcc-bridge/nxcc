@@ -24,6 +24,10 @@ grpcurl_attach_vm() {
   _vm_id="$2"
   _vm_sock="$3"
   echo "Attempting to attach VM '$_vm_id' ($_vm_sock) to Daemon ($_daemon_sock)..."
+  
+  # Sleep before making the gRPC call to ensure the socket is ready
+  sleep 2
+  
   grpcurl \
     -proto "$DAEMON_PROTO" \
     -import-path "$PROTO_DIR" \
@@ -40,6 +44,10 @@ grpcurl_attach_vm() {
     return 1
   fi
   echo "AttachVm call completed for $_daemon_sock."
+  
+  # Sleep after the call to allow time for processing
+  sleep 2
+  
   return 0
 }
 
@@ -51,6 +59,9 @@ grpcurl_get_secrets() {
   _identity_addr="$3"
   _identity_id_num="$4"
   _node_id="$5" # Node ID of the *requester* (e.g., Alice's daemon asking for itself)
+
+  # Sleep before making the gRPC call
+  sleep 2
 
   # --- Construct a plausible EnvReport ---
   # In a real scenario, this would involve calling the enclave's GetReport.
@@ -99,6 +110,10 @@ grpcurl_get_secrets() {
     return 1
   fi
   echo "GetSecrets call completed for $_daemon_sock."
+  
+  # Sleep after the call to allow time for processing
+  sleep 2
+  
   return 0
 }
 
@@ -110,6 +125,9 @@ grpcurl_check_secrets_enclave() {
   _chain_id="$2"
   _identity_addr="$3"
   _identity_id_num="$4"
+
+  # Sleep before making the gRPC call
+  sleep 1
 
   echo "Calling CheckSecrets on Enclave ($_enclave_sock) for $_identity_addr/$_identity_id_num..."
   grpcurl \
@@ -133,6 +151,10 @@ grpcurl_check_secrets_enclave() {
     return 1
   fi
   echo "CheckSecrets call completed for $_enclave_sock."
+  
+  # Sleep after the call
+  sleep 1
+  
   return 0
 }
 
@@ -150,6 +172,9 @@ poll_until_secret_found() {
 
   echo "Polling CheckSecrets on $_enclave_sock for $_identity_addr/$_identity_id_num (Timeout: ${_timeout_secs}s)..."
 
+  # Initial sleep before starting to poll
+  sleep 3
+
   while [ "$(date +%s)" -lt $_end_time ]; do
     _output=$(grpcurl_check_secrets_enclave "$_enclave_sock" "$_chain_id" "$_identity_addr" "$_identity_id_num" 2>&1)
     _grpcurl_exit=$?
@@ -158,6 +183,8 @@ poll_until_secret_found() {
       # Check if "found": true is in the output
       if echo "$_output" | grep '"found": *true' >/dev/null; then
         echo "Secret $_identity_addr/$_identity_id_num found on $_enclave_sock."
+        # Sleep a bit after finding the secret to ensure stability
+        sleep 2
         return 0 # Success
       else
         printf "." # Progress indicator
@@ -167,6 +194,7 @@ poll_until_secret_found() {
       # Continue polling, maybe the service wasn't ready yet
     fi
 
+    # Use the provided interval for polling
     sleep "$_interval_secs"
   done
 
@@ -179,3 +207,4 @@ poll_until_secret_found() {
 # If it fails, the main script needs to define these directly or use "." to source.
 export PROTO_DIR DAEMON_PROTO ENCLAVE_PROTO
 export -f check_grpcurl grpcurl_attach_vm grpcurl_get_secrets grpcurl_check_secrets_enclave poll_until_secret_found
+

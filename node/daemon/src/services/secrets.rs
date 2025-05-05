@@ -703,12 +703,10 @@ impl SecretsService {
 
         // TODO: Implement operator signing
         let operator_signature = vec![0u8; 64]; // Placeholder
-        // TODO: Get node ID from config or identity
-        let node_id = self.local_peer_id.to_base58(); // Use the actual PeerId
         Ok(EnvReport {
             attestation,
             operator_signature,
-            node_id,
+            node_id: "@self".into(), // TODO: export this const
         })
     }
 }

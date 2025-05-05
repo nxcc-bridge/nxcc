@@ -83,13 +83,13 @@ setup_node() {
     echo "Starting $NODE_NAME VM (nxcc-workerd-vm)..."
     "$WORKERD_VM_BIN" --server-mode uds --server-uds-path "$NODE_VM_SOCK" 2>&1 &
     NODE_VM_PID=$!
-    sleep 1 # Give VM time to start
+    sleep 3 # Give VM more time to start (increased from 1)
 
     # Start Enclave
     echo "Starting $NODE_NAME Enclave..."
-    "$ENCLAVE_BIN" --grpc-mode uds --grpc-uds-path "$NODE_ENCLAVE_SOCK" 2>&1 &
+    RUST_LOG=nxcc_platform_enclave=debug "$ENCLAVE_BIN" --grpc-mode uds --grpc-uds-path "$NODE_ENCLAVE_SOCK" --verbose 2>&1 &
     NODE_ENCLAVE_PID=$!
-    sleep 1 # Give enclave time to start
+    sleep 3 # Give enclave more time to start (increased from 1)
 
     # Start Daemon
     echo "Starting $NODE_NAME Daemon..."
@@ -111,7 +111,7 @@ setup_node() {
     eval "$DAEMON_CMD" 2>&1 &
     set +x
     NODE_DAEMON_PID=$!
-    sleep 2 # Give daemon time to start
+    sleep 5 # Give daemon more time to start (increased from 2)
 
     # Return values by setting variables in the parent scope
     # These variables will be available after calling the function
@@ -128,5 +128,8 @@ setup_node() {
     eval "${NODE_NAME}_ENCLAVE_PID=$NODE_ENCLAVE_PID"
     eval "${NODE_NAME}_DAEMON_PID=$NODE_DAEMON_PID"
 
+    # Additional sleep to ensure everything is fully initialized
+    sleep 2
+    
     return 0
 }
