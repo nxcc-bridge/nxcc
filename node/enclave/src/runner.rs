@@ -4,7 +4,7 @@ use nxcc_interface::{
     proto::vm::{TrustedConfig, UntrustedConfig},
     types::{PolicyExecutionReport, PolicyExecutionRequest, VmAddress},
 };
-#[cfg(any(test, feature = "test"))]
+#[cfg(test)]
 use nxcc_vm_base::client::mock::MockVmServiceClient;
 use nxcc_vm_base::{
     client::{ClientError, VmClient as _, VmServiceClient},
@@ -50,7 +50,7 @@ pub enum VmClient {
     Real(VmServiceClient),
 
     // Mock client only exists during tests
-    #[cfg(any(test, feature = "test"))]
+    #[cfg(test)]
     Mock(MockVmServiceClient),
 }
 
@@ -75,7 +75,7 @@ impl VmClient {
                     )
                     .await
             }
-            #[cfg(any(test, feature = "test"))]
+            #[cfg(test)]
             VmClient::Mock(client) => {
                 client
                     .start_worker(
@@ -93,7 +93,7 @@ impl VmClient {
     pub async fn stop_worker(&mut self, worker_id: String) -> Result<(), ClientError> {
         match self {
             VmClient::Real(client) => client.stop_worker(worker_id).await,
-            #[cfg(any(test, feature = "test"))]
+            #[cfg(test)]
             VmClient::Mock(client) => client.stop_worker(worker_id).await,
         }
     }
@@ -106,7 +106,7 @@ impl VmClient {
     ) -> Result<Vec<u8>, ClientError> {
         match self {
             VmClient::Real(client) => client.invoke_worker(worker_id, payload).await,
-            #[cfg(any(test, feature = "test"))]
+            #[cfg(test)]
             VmClient::Mock(client) => client.invoke_worker(worker_id, payload).await,
         }
     }
@@ -120,7 +120,7 @@ impl From<VmServiceClient> for VmClient {
 }
 
 // Create a convenient From implementation for MockVmServiceClient when in test mode
-#[cfg(any(test, feature = "test"))]
+#[cfg(test)]
 impl From<MockVmServiceClient> for VmClient {
     fn from(client: MockVmServiceClient) -> Self {
         VmClient::Mock(client)
@@ -189,7 +189,7 @@ impl RunnerService {
         }
     }
 
-    #[cfg(any(test, feature = "test"))]
+    #[cfg(test)]
     pub async fn attach_mock_client(&self, vm_id: String, mock_client: MockVmServiceClient) {
         let mut vms_guard = self.vms.write().await;
         vms_guard.insert(vm_id, mock_client.into());

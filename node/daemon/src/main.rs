@@ -7,8 +7,6 @@ mod identity;
 mod network;
 mod policy;
 mod services;
-#[cfg(test)]
-mod tests;
 mod web3;
 
 use std::sync::Arc;

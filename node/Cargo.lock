@@ -3899,9 +3899,6 @@ dependencies = [
  "hyper-util",
  "libp2p",
  "nxcc-interface",
- "nxcc-platform-enclave",
- "nxcc-vm-base",
- "nxcc-workerd-vm",
  "prost",
  "rand 0.9.1",
  "reqwest",
@@ -3916,7 +3913,6 @@ dependencies = [
  "tower 0.5.2",
  "tracing",
  "tracing-subscriber",
- "tracing-test",
  "url",
 ]
 

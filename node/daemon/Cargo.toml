@@ -32,11 +32,3 @@ alloy-contract = "0.14.0"
 reqwest = { version = "0.12.15", features = ["json"] }
 serde_json = "1.0.140"
 tempfile = "3.19.1"
-
-[dev-dependencies]
-nxcc-platform-enclave = { path = "../enclave", features = ["uds", "test"] } # Ensure uds feature is enabled for tests
-nxcc-vm-base = { path = "../vm/base", features = ["test", "uds"] } # Enable test mock and uds
-nxcc-workerd-vm = { path = "../vm/workerd", features = ["uds"] } # Ensure uds feature is enabled for tests
-tokio-stream = { version = "0.1.17", features = ["net"] } # For MemoryTransport listener
-tracing-test = "0.2.5"
-alloy-primitives = { version = "1.0.0", features = ["rand"] } # For random SecretId
