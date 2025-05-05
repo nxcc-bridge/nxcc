@@ -20,6 +20,7 @@ message BroadcastResponse {
 // Secrets service
 service Secrets {
   rpc GetSecrets (GetSecretsRequest) returns (GetSecretsResponse);
+  rpc AttachVm (AttachVmRequest) returns (AttachVmResponse);
 }
 
 message GetSecretsRequest {
@@ -29,4 +30,13 @@ message GetSecretsRequest {
 
 message GetSecretsResponse {
   interface.SecretsBox secrets_box = 1;
+}
+
+message AttachVmRequest {
+  string vm_id = 1;
+  string uds_path = 2;
+}
+
+message AttachVmResponse {
+  bool success = 1;
 }

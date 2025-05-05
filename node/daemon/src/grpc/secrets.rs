@@ -1,7 +1,10 @@
 use std::{collections::HashMap, sync::Arc};
 
 use nxcc_interface::{
-    proto::daemon::{GetSecretsRequest, GetSecretsResponse, secrets_server::Secrets},
+    proto::daemon::{
+        AttachVmRequest, AttachVmResponse, GetSecretsRequest, GetSecretsResponse,
+        secrets_server::Secrets,
+    },
     types::{EnvReport, FromProto as _, IntoProto as _, SecretId, SecretRequest, SecretsBox},
 };
 use tonic::{Request, Response, Status};
@@ -100,6 +103,31 @@ impl Secrets for SecretsDebugGrpc {
                     "SecretsService failed to get secrets: {:?}",
                     e
                 )))
+            }
+        }
+    }
+
+    async fn attach_vm(
+        &self,
+        request: Request<AttachVmRequest>,
+    ) -> Result<Response<AttachVmResponse>, Status> {
+        let req = request.into_inner();
+
+        let vm_id = if req.vm_id.is_empty() {
+            req.uds_path.clone()
+        } else {
+            req.vm_id
+        };
+
+        let uds_path = req.uds_path;
+
+        tracing::info!("AttachVm debug request: vm_id='{vm_id}', uds_path='{uds_path}'");
+
+        match self.enclave_client.attach_vm(vm_id, uds_path).await {
+            Ok(attached) => Ok(Response::new(AttachVmResponse { success: true })),
+            Err(e) => {
+                tracing::error!("AttachVm failed: {e}");
+                Err(Status::internal(e))
             }
         }
     }
