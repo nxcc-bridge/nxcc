@@ -212,7 +212,7 @@ fn map_runner_error(err: RunnerError) -> Status {
         RunnerError::VmConnection(client_err) => {
             Status::internal(format!("VM connection error: {client_err}"))
         }
-        RunnerError::Serialization(s) | RunnerError::Deserialization(s) => {
+        RunnerError::Deserialization(s) => {
             Status::internal(format!("Data format error: {s}"))
         }
         RunnerError::PolicyExecutionFailed(s) => {

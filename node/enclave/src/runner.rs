@@ -24,8 +24,6 @@ pub enum RunnerError {
     WorkerNotFound(String),
     #[error("VM connection error: {0}")]
     VmConnection(#[from] ClientError),
-    #[error("Serialization error: {0}")]
-    Serialization(String),
     #[error("Deserialization error: {0}")]
     Deserialization(String),
     #[error("Policy execution failed in VM: {0}")]
@@ -383,10 +381,7 @@ impl RunnerService {
                 .ok_or_else(|| RunnerError::WorkerNotFound(worker_id.clone()))?
         };
 
-        // Serialize contexts for the VM payload
-        let mut payload = Vec::new();
-        ciborium::into_writer(&contexts, &mut payload)
-            .map_err(|e| RunnerError::Serialization(e.to_string()))?;
+        let payload = serde_json::to_vec(&contexts).unwrap();
 
         let mut vms_guard = self.vms.write().await; // Write lock for mutable client
         let client = vms_guard
@@ -406,7 +401,7 @@ impl RunnerService {
 
         // Deserialize the result payload from the VM
         // TODO: we assume VM returns Vec<bool> indicating success for each context index
-        let results: Vec<bool> = ciborium::from_reader(result_payload.as_slice())
+        let results: Vec<bool> = serde_json::from_slice(result_payload.as_slice())
             .map_err(|e| RunnerError::Deserialization(e.to_string()))?;
 
         if results.len() != contexts.len() {
@@ -977,8 +972,7 @@ mod tests {
 
         // Expected VM response: context1=true, context2=false
         let vm_response_bools = vec![true, false];
-        let mut vm_response_payload = Vec::new();
-        ciborium::into_writer(&vm_response_bools, &mut vm_response_payload).unwrap();
+        let mut vm_response_payload = serde_json::to_vec(&vm_response_bools).unwrap();
 
         attach_mock_vm(&runner_service, vm_id, mock_client.clone()).await;
         add_worker_mapping(&runner_service, worker_id, vm_id).await;
@@ -1035,8 +1029,7 @@ mod tests {
 
         // Expected VM response: context1=true
         let vm_response_bools = vec![true];
-        let mut vm_response_payload = Vec::new();
-        ciborium::into_writer(&vm_response_bools, &mut vm_response_payload).unwrap();
+        let vm_response_payload = serde_json::to_vec(&vm_response_bools).unwrap();
 
         attach_mock_vm(&runner_service, vm_id, mock_client.clone()).await;
         add_worker_mapping(&runner_service, worker_id, vm_id).await;
@@ -1081,8 +1074,7 @@ mod tests {
 
         // Expected VM response: context1=false
         let vm_response_bools = vec![false];
-        let mut vm_response_payload = Vec::new();
-        ciborium::into_writer(&vm_response_bools, &mut vm_response_payload).unwrap();
+        let vm_response_payload = serde_json::to_vec(&vm_response_bools).unwrap();
 
         attach_mock_vm(&runner_service, vm_id, mock_client.clone()).await;
         add_worker_mapping(&runner_service, worker_id, vm_id).await;
@@ -1197,8 +1189,7 @@ mod tests {
 
         // VM returns results for 2 contexts (incorrect)
         let vm_response_bools = vec![true, false];
-        let mut vm_response_payload = Vec::new();
-        ciborium::into_writer(&vm_response_bools, &mut vm_response_payload).unwrap();
+        let vm_response_payload = serde_json::to_vec(&vm_response_bools).unwrap();
 
         attach_mock_vm(&runner_service, vm_id, mock_client.clone()).await;
         add_worker_mapping(&runner_service, worker_id, vm_id).await;

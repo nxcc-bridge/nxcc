@@ -164,8 +164,7 @@ async fn test_enclave_workflow() {
 
     // Configure mock VM to return 'false' for this policy execution
     let vm_response_fail = vec![false];
-    let mut vm_response_payload_fail = Vec::new();
-    ciborium::into_writer(&vm_response_fail, &mut vm_response_payload_fail).unwrap();
+    let vm_response_payload_fail = serde_json::to_vec(&vm_response_fail).unwrap();
     mock_vm_client.set_worker_execution_behavior(
         &policy_worker_id,
         MockExecutionBehavior::Fixed(vm_response_payload_fail.clone()),
@@ -250,8 +249,7 @@ async fn test_enclave_workflow() {
 
     // Configure mock VM to return 'true' for this policy execution
     let vm_response_ok = vec![true];
-    let mut vm_response_payload_ok = Vec::new();
-    ciborium::into_writer(&vm_response_ok, &mut vm_response_payload_ok).unwrap();
+    let vm_response_payload_ok = serde_json::to_vec(&vm_response_ok).unwrap();
     mock_vm_client.set_worker_execution_behavior(
         &policy_worker_id,
         MockExecutionBehavior::Fixed(vm_response_payload_ok.clone()),
@@ -562,8 +560,7 @@ async fn execute_policy(
 
     // Configure mock VM
     let vm_response = vec![should_succeed];
-    let mut vm_response_payload = Vec::new();
-    ciborium::into_writer(&vm_response, &mut vm_response_payload).unwrap();
+    let vm_response_payload = serde_json::to_vec(&vm_response).unwrap();
     mock_vm_client.set_worker_execution_behavior(
         worker_id,
         MockExecutionBehavior::Fixed(vm_response_payload.clone()),
