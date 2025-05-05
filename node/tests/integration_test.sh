@@ -148,7 +148,7 @@ sleep 3
 # 1. Alice receives GetSecrets request
 echo "Step 1 & 2 & 3: Triggering GetSecrets on Alice (will initiate P2P ask & generation)..."
 # Run in background as it might involve waiting/generation
-grpcurl_get_secrets "$alice_DAEMON_SOCK" "$SECRET_CHAIN_ID" "$SECRET_IDENTITY_ADDR" "$SECRET_IDENTITY_ID_NUM" "$alice_PEER_ID" &
+grpcurl_get_secrets "$alice_DAEMON_SOCK" "$SECRET_CHAIN_ID" "$SECRET_IDENTITY_ADDR" "$SECRET_IDENTITY_ID_NUM" &
 GET_SECRETS_ALICE_PID=$!
 # We don't wait for this specific call to finish, as the important part is the side effect (generation)
 
@@ -165,7 +165,7 @@ sleep 5
 # 4. Bob receives GetSecrets request
 echo "Step 4 & 5: Triggering GetSecrets on Bob (will initiate P2P ask to Alice)..."
 # Run in background
-grpcurl_get_secrets "$bob_DAEMON_SOCK" "$SECRET_CHAIN_ID" "$SECRET_IDENTITY_ADDR" "$SECRET_IDENTITY_ID_NUM" "$bob_PEER_ID" &
+grpcurl_get_secrets "$bob_DAEMON_SOCK" "$SECRET_CHAIN_ID" "$SECRET_IDENTITY_ADDR" "$SECRET_IDENTITY_ID_NUM" &
 GET_SECRETS_BOB_PID=$!
 
 # Sleep to allow Bob time to process the request

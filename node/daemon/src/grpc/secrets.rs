@@ -5,7 +5,10 @@ use nxcc_interface::{
         AttachVmRequest, AttachVmResponse, GetSecretsRequest, GetSecretsResponse,
         secrets_server::Secrets,
     },
-    types::{EnvReport, FromProto as _, IntoProto as _, SecretId, SecretRequest, SecretsBox},
+    types::{
+        AttestationReport, EnvReport, FromProto as _, IntoProto as _, SecretId, SecretRequest,
+        SecretsBox,
+    },
 };
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, info};
@@ -38,12 +41,6 @@ impl Secrets for SecretsDebugGrpc {
             req.secret_requests.len()
         );
 
-        let env_proto = req
-            .env_report
-            .ok_or_else(|| Status::invalid_argument("Missing EnvReport"))?;
-        // Keep the original EnvReport for the final enclave call
-        let original_env_report = EnvReport::from_proto(env_proto);
-
         let mut grouped_requests = HashMap::new();
         let mut all_secret_ids = Vec::new(); // Collect all requested IDs for the final fetch
         for proto_req in req.secret_requests {
@@ -56,12 +53,32 @@ impl Secrets for SecretsDebugGrpc {
         }
         all_secret_ids.dedup(); // Ensure unique IDs
 
+        // --- Generate Daemon's Own EnvReport ---
+        let user_data_hash = Default::default();
+
+        let attestation = self
+            .enclave_client
+            .get_report(user_data_hash)
+            .await
+            .map_err(|e| {
+                Status::internal(format!("Failed to get own attestation report: {}", e))
+            })?;
+
+        // Construct the daemon's own EnvReport
+        let operator_signature = vec![0u8; 64]; // Placeholder
+        let env_report = EnvReport {
+            attestation,
+            operator_signature,
+            node_id: "@self".into(), // Use placeholder consistent with SecretsService::get_own_env_report
+        };
+        // --- End EnvReport Generation ---
+
         // Call the internal service method. This ensures secrets are fetched/stored.
         // It returns Ok(()) on success, Err otherwise.
         match self
             .secrets_service
             .clone()
-            .get_secrets(grouped_requests, original_env_report.clone())
+            .get_secrets(grouped_requests, env_report.clone())
             .await
         {
             Ok(()) => {
@@ -70,11 +87,9 @@ impl Secrets for SecretsDebugGrpc {
                      {} secrets.",
                     all_secret_ids.len()
                 );
-                // If successful, call the enclave's get_secrets to get the actual box
-                // for the original caller, passing the original EnvReport.
                 match self
                     .enclave_client
-                    .get_secrets(all_secret_ids, original_env_report)
+                    .get_secrets(all_secret_ids, env_report)
                     .await
                 {
                     Ok(secrets_box) => {

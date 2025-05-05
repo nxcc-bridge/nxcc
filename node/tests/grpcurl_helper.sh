@@ -52,7 +52,7 @@ grpcurl_attach_vm() {
 }
 
 # Function to call Daemon's GetSecrets
-# Args: $1=Daemon UDS Path, $2=Chain ID, $3=Identity Address, $4=Identity ID (numeric), $5=Node ID (for EnvReport)
+# Args: $1=Daemon UDS Path, $2=Chain ID, $3=Identity Address, $4=Identity ID (numeric)
 grpcurl_get_secrets() {
   _daemon_sock="$1"
   _chain_id="$2"
@@ -62,24 +62,6 @@ grpcurl_get_secrets() {
 
   # Sleep before making the gRPC call
   sleep 2
-
-  # --- Construct a plausible EnvReport ---
-  # In a real scenario, this would involve calling the enclave's GetReport.
-  # For the test, we create placeholders. The ephemeral_public_key needs to be 32 bytes.
-  # The user_data hash isn't critical for GetSecrets itself.
-  _fake_ephemeral_pk_b64=$(openssl rand -base64 32)
-  _fake_attestation_report='{
-        "ephemeral_public_key": "'"${_fake_ephemeral_pk_b64}"'",
-        "block_hashes": ["AAAAAQIDBA=="],
-        "user_data": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-    }'
-  _fake_operator_sig_b64=$(openssl rand -base64 64 | tr -d '\n')
-  _fake_env_report='{
-        "attestation": '"$_fake_attestation_report"',
-        "operator_signature": "'"${_fake_operator_sig_b64}"'",
-        "node_id": "'"${_node_id}"'"
-    }'
-  # --- End EnvReport Construction ---
 
   echo "Calling GetSecrets on $_daemon_sock for $_identity_addr/$_identity_id_num (Node: $_node_id)..."
   grpcurl \
@@ -99,8 +81,7 @@ grpcurl_get_secrets() {
                  "signature": "AAECAwQFBgcICQoLDA0ODwECAwQFBgcICQoLDA0ODw=="
                }
             }
-          ],
-          "env_report": '"$_fake_env_report"'
+          ]
         }' \
     "unix://$_daemon_sock" \
     daemon.Secrets/GetSecrets

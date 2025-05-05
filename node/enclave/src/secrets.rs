@@ -183,21 +183,18 @@ impl Secrets {
                 env_report.node_id
             );
 
-            let decrypted_secrets = match decrypt_secrets_box(
-                &self.ephemeral_kx_keypair, // Our KX keypair
-                // &sender_sig_pk, // REMOVED
-                &secrets_box,
-            ) {
-                Ok(s) => s,
-                Err(e) => {
-                    // Decryption failure might indicate wrong recipient key or corrupted data
-                    error!(
-                        "Failed to decrypt secrets box from node {} (post-attestation): {}",
-                        env_report.node_id, e
-                    );
-                    continue; // Skip this bundle
-                }
-            };
+            let decrypted_secrets =
+                match decrypt_secrets_box(&self.ephemeral_kx_keypair, &secrets_box) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        // Decryption failure might indicate wrong recipient key or corrupted data
+                        error!(
+                            "Failed to decrypt secrets box from node {} (post-attestation): {}",
+                            env_report.node_id, e
+                        );
+                        continue; // Skip this bundle
+                    }
+                };
             debug!(
                 "Successfully decrypted secrets box from node {}",
                 env_report.node_id

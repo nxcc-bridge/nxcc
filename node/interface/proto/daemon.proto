@@ -25,7 +25,6 @@ service Secrets {
 
 message GetSecretsRequest {
   repeated interface.SecretRequest secret_requests = 1;
-  interface.EnvReport env_report = 2;
 }
 
 message GetSecretsResponse {

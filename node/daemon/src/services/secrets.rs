@@ -199,7 +199,7 @@ impl SecretsService {
             .try_send(SecretsMessage::PublishSecretsRequest {
                 request_id,
                 secret_requests: BTreeMap::from_iter(missing_requests.clone().into_iter()),
-                env_report: env_report.clone(), // Send the original requester's EnvReport
+                env_report: env_report.clone(),
             })
             .map_err(|e| AppError::Service(format!("Failed to publish secrets request: {e}")))?;
 
@@ -706,7 +706,7 @@ impl SecretsService {
         Ok(EnvReport {
             attestation,
             operator_signature,
-            node_id: "@self".into(), // TODO: export this const
+            node_id: "@self".into(), // TODO: export this const. use non-self when providing to others
         })
     }
 }
