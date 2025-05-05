@@ -66,8 +66,8 @@ impl MtlsCertificates {
     /// Creates a complete mTLS certificate setup with a new dummy CA, server cert, and client cert.
     /// Hostnames are not used as services are ephemeral and unnamed.
     pub fn new() -> Result<Self, TlsError> {
-        // Generate the dummy CA
-        let (ca_cert, ca_key) = generate_ca_cert()?;
+        // Generate the deterministic CA
+        let (ca_cert, ca_key) = generate_deterministic_ca_cert()?;
         let ca_pem = ca_cert.pem();
 
         // Generate server certificate - explicitly add "localhost" as SAN
@@ -121,17 +121,34 @@ impl MtlsCertificates {
 
 /// Generates a deterministic Certificate Authority (CA) certificate and key pair.
 /// This CA is intended solely to satisfy mTLS chain requirements and should NOT be trusted.
-fn generate_ca_cert() -> Result<(RcgenCertificate, KeyPair), TlsError> {
-    let mut params = CertificateParams::default();
-    let mut distinguished_name = DistinguishedName::new();
-    // Use a fixed, recognizable name for the dummy CA
-    distinguished_name.push(DnType::CommonName, "Dummy Untrusted CA");
-    params.distinguished_name = distinguished_name;
-    params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
-    params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::CrlSign];
+fn generate_deterministic_ca_cert() -> Result<(RcgenCertificate, KeyPair), TlsError> {
+    // TODO: consider injecting these through a reproducible build script
+    let cert_pem = [
+        "-".repeat(5) + "BEGIN CERTIFICATE" + &"-".repeat(5),
+        "MIIBljCCATygAwIBAgIJAN5+gUHFcJE0MAoGCCqGSM49BAMCMC0xKzApBgNVBAMM".into(),
+        "IkR1bW15IFVudHJ1c3RlZCBDQSAtIERldGVybWluaXN0aWMwIBcNNzAwMTAxMDAw".into(),
+        "MDAwWhgPMjA1MDAxMDEwMDAwMDBaMC0xKzApBgNVBAMMIkR1bW15IFVudHJ1c3Rl".into(),
+        "ZCBDQSAtIERldGVybWluaXN0aWMwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAASM".into(),
+        "pRHfsjER+pvKos8uVqghT2JF8wpQVx5wB7zsP0RCVjJvnd4FnZTM2ChhVdTWZW2D".into(),
+        "WxAZK442Dkzv8CnHoZ64o0MwQTAPBgNVHQ8BAf8EBQMDBwYAMB0GA1UdDgQWBBTz".into(),
+        "iq9OpmTH3Dsad5XbbbSHYPME7zAPBgNVHRMBAf8EBTADAQH/MAoGCCqGSM49BAMC".into(),
+        "A0gAMEUCIQDyUOTygq+QajPP+UBQdGuz8cfl+tiQL5Z99AkMEJJMFAIgEBAa4RMU".into(),
+        "bRtVh8qU6DPGHJgjjeZVMeIVgZNi+sT5HkY=".into(),
+        "-".repeat(5) + "END CERTIFICATE" + &"-".repeat(5),
+    ].join("\n");
+    let params = CertificateParams::from_ca_cert_pem(& cert_pem).unwrap();
 
-    // Generate a new key pair for the CA - does not take alg argument
-    let key_pair = KeyPair::generate().map_err(|e| TlsError::KeyGeneration(e.to_string()))?;
+    let key_pem = [
+        "-".repeat(5) + "BEGIN EC PRIVATE KEY" + &"-".repeat(5),
+        "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg8CZUSyBRxMLyr6y/".into(),
+        "GDnudlkKg2/Prkia/3aZUYT2IQqhRANCAASMpRHfsjER+pvKos8uVqghT2JF8wpQ".into(),
+        "Vx5wB7zsP0RCVjJvnd4FnZTM2ChhVdTWZW2DWxAZK442Dkzv8CnHoZ64".into(),
+        "-".repeat(5) + "END EC PRIVATE KEY" + &"-".repeat(5),
+    ]
+    .join("\n");
+    let key_pair =
+        KeyPair::from_pem(&key_pem).map_err(|e| TlsError::KeyGeneration(e.to_string()))?;
+
     let cert = params.self_signed(&key_pair)?;
     Ok((cert, key_pair))
 }

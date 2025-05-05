@@ -109,7 +109,7 @@ async fn wait_for_status(
 #[ignore] // Requires workerd binary on PATH
 #[tracing_test::traced_test]
 async fn test_start_invoke_stop_single_worker() -> Result<(), Box<dyn std::error::Error>> {
-    let vmm = WorkerdVmm::new();
+    let vmm = WorkerdVmm::new(Default::default());
     let (untrusted, trusted) = create_mock_configs();
     let code = create_js_code("single");
 
@@ -178,7 +178,7 @@ async fn test_start_invoke_stop_single_worker() -> Result<(), Box<dyn std::error
 #[tokio::test]
 #[ignore]
 async fn test_multiple_workers_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
-    let vmm = WorkerdVmm::new();
+    let vmm = WorkerdVmm::new(Default::default());
     let (untrusted1, trusted1) = create_mock_configs();
     let (untrusted2, trusted2) = create_mock_configs();
     let code1 = create_js_code("worker1");
@@ -277,7 +277,7 @@ async fn test_multiple_workers_lifecycle() -> Result<(), Box<dyn std::error::Err
 #[tokio::test]
 #[ignore]
 async fn test_worker_config_bindings() -> Result<(), Box<dyn std::error::Error>> {
-    let vmm = WorkerdVmm::new();
+    let vmm = WorkerdVmm::new(Default::default());
     let (untrusted, trusted) = create_mock_configs();
     let code = create_js_config_code();
 
@@ -327,7 +327,7 @@ async fn test_worker_config_bindings() -> Result<(), Box<dyn std::error::Error>>
 
 #[tokio::test]
 async fn test_error_handling_non_existent_worker() {
-    let vmm = WorkerdVmm::new();
+    let vmm = WorkerdVmm::new(Default::default());
     let non_existent_id = "id-does-not-exist".to_string();
 
     let stop_res = vmm.stop_worker(non_existent_id.clone()).await;
@@ -369,7 +369,7 @@ async fn test_error_handling_non_existent_worker() {
 
 #[tokio::test]
 async fn test_get_attestation_unsupported() {
-    let vmm = WorkerdVmm::new();
+    let vmm = WorkerdVmm::new(Default::default());
     let attestation_res = vmm.get_attestation(vec![1, 2, 3]).await;
     assert!(attestation_res.is_err());
     assert!(
@@ -382,7 +382,7 @@ async fn test_get_attestation_unsupported() {
 
 #[tokio::test]
 async fn test_start_worker_invalid_code() {
-    let vmm = WorkerdVmm::new();
+    let vmm = WorkerdVmm::new(Default::default());
     let (untrusted, trusted) = create_mock_configs();
     let invalid_code = vec![0xff, 0xfe, 0xfd];
 
@@ -488,7 +488,7 @@ fn create_js_multi_key_test_code() -> Vec<u8> {
 async fn test_multiple_secret_keys_derived_bits() -> Result<(), Box<dyn std::error::Error>> {
     use base64::Engine as _;
     // 1) Create the VMM and configs with multiple keys
-    let vmm = WorkerdVmm::new();
+    let vmm = WorkerdVmm::new(Default::default());
     let (untrusted, trusted) = create_mock_configs_with_multiple_keys();
     // 2) Provide the JS that uses HKDF on each SECRET_KEY_x
     let code = create_js_multi_key_test_code();
