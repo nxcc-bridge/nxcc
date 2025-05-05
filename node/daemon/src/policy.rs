@@ -11,7 +11,7 @@ use nxcc_interface::{
     types::SecretId,
 };
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::{config::Config, error::AppError, web3::gateways::GatewayManager};
 
@@ -130,24 +130,57 @@ impl PolicyManager {
 
         // Handle mock URLs for testing/dev
         if policy_url.starts_with("mock://") {
-            warn!("Using mock policy for secret {:?}", secret_id);
-            // Create a dummy policy bundle
-            let mock_manifest = PolicyManifest {
-                version: "1.0".to_string(),
-                name: format!("Mock Policy for {:?}", secret_id),
-                description: "A dummy policy for testing".to_string(),
-                allowed_consumers: vec![], // Adjust as needed
-                execution_constraints: nxcc_interface::policy::ExecutionConstraints {
-                    max_memory_mb: 128,
-                    max_execution_time_ms: 1000,
-                    allowed_network_calls: false,
-                },
-            };
-            let mock_policy = PolicyBundle {
-                manifest: mock_manifest,
-                executable: b"mock_executable_code".to_vec(),
-            };
-            return Ok(mock_policy);
+            warn!("Using local mock policy for secret {:?}", secret_id);
+            // Load from a fixed local path relative to the Cargo manifest dir
+            let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or("..".to_string());
+            let policy_bundle_path = Path::new(&manifest_dir).join("tests/policy/mock_policy.json");
+            let worker_code_path_rel = "tests/policy/mock_worker.js"; // Path relative to manifest dir
+
+            debug!(
+                "Loading mock policy bundle from: {}",
+                policy_bundle_path.display()
+            );
+
+            let policy_bundle_content = tokio::fs::read_to_string(&policy_bundle_path)
+                .await
+                .map_err(|e| AppError::Io(e))?;
+
+            // Deserialize only the manifest part first
+            #[derive(Debug, Clone, serde::Deserialize)]
+            pub struct MockPolicyBundle {
+                pub manifest: nxcc_interface::policy::PolicyManifest,
+                #[serde(rename = "executable")]
+                pub executable_path: String,
+            }
+
+            let mut policy_bundle: MockPolicyBundle = serde_json::from_str(&policy_bundle_content)
+                .map_err(|e| {
+                    AppError::Service(format!("Failed to parse mock policy JSON: {}", e))
+                })?;
+
+            // Load the executable code based on the relative path in the manifest
+            let worker_code_path_abs = PathBuf::from(manifest_dir).join(worker_code_path_rel);
+            debug!(
+                "Loading mock worker code from: {}",
+                worker_code_path_abs.display()
+            );
+            let worker_code = tokio::fs::read(&worker_code_path_abs)
+                .await
+                .map_err(|e| AppError::Io(e))?;
+
+            // Validate the loaded manifest
+            self.manifest_checker
+                .check_manifest(&policy_bundle.manifest)?;
+            debug!(
+                "Manifest check passed for mock policy of secret {:?}",
+                secret_id
+            );
+
+            // Return the fully constructed bundle
+            return Ok(PolicyBundle {
+                manifest: policy_bundle.manifest,
+                executable: worker_code,
+            });
         }
 
         // Fetch the actual policy content

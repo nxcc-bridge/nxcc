@@ -8,6 +8,8 @@ use std::{
 };
 
 use futures::channel::mpsc;
+use libp2p::PeerId; // Import PeerId
+use libp2p::identity::Keypair; // Import Keypair
 use nxcc_interface::{
     policy::PolicyBundle,
     types::{EnvReport, PolicyExecutionRequest, SecretId, SecretRequest, SecretsBox},
@@ -16,12 +18,16 @@ use tokio::sync::{Mutex, RwLock, oneshot};
 use tracing::{debug, error, info, warn};
 
 use super::runner;
+use crate::config::Config; // Import Config
 use crate::{
     error::AppError, grpc::enclave_client::EnclaveClient, network::SecretsMessage,
     policy::PolicyManager, services::runner::RunnerService,
 };
 
 // Timeout for waiting for P2P responses
+#[cfg(not(debug_assertions))]
+const P2P_RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
+#[cfg(debug_assertions)]
 const P2P_RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
 // Threshold for number of valid responses needed per secret (currently request-level)
 const RESPONSE_THRESHOLD: usize = 1;
@@ -33,6 +39,8 @@ pub struct SecretsService {
     pending: Mutex<HashMap<u64, PendingRequest>>,
     runner_service: Arc<RunnerService>,
     request_counter: AtomicU64,
+    local_peer_id: PeerId, // Store the local PeerId
+                           // config: Arc<Config>, // Store config if needed for other things
 }
 
 struct PendingRequest {
@@ -54,6 +62,8 @@ impl SecretsService {
         enclave_client: EnclaveClient,
         policy_manager: Arc<PolicyManager>,
         runner_service: Arc<RunnerService>,
+        local_key: Keypair, // Pass the keypair
+                            // config: Arc<Config>, // Pass config
     ) -> Arc<Self> {
         Arc::new(Self {
             p2p_secrets_sender,
@@ -62,6 +72,8 @@ impl SecretsService {
             runner_service,
             pending: Mutex::new(HashMap::new()),
             request_counter: AtomicU64::new(0),
+            local_peer_id: local_key.public().to_peer_id(), // Derive PeerId
+                                                            // config,
         })
     }
 
@@ -692,8 +704,7 @@ impl SecretsService {
         // TODO: Implement operator signing
         let operator_signature = vec![0u8; 64]; // Placeholder
         // TODO: Get node ID from config or identity
-        let node_id = "self-node-id-placeholder".to_string(); // Placeholder
-
+        let node_id = self.local_peer_id.to_base58(); // Use the actual PeerId
         Ok(EnvReport {
             attestation,
             operator_signature,

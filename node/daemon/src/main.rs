@@ -26,35 +26,39 @@ use crate::{
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel::<()>(1);
-
     let config = Config::load()?;
+
     let log_level = if config.verbose {
         Level::DEBUG
     } else {
         Level::INFO
     };
-
-    let base_filter = format!("{}={}", env!("CARGO_PKG_NAME"), log_level);
+    let base_filter = format!("{}={}", env!("CARGO_PKG_NAME").replace("-", "_"), log_level);
     let env_filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(base_filter));
     let subscriber = Subscriber::builder().with_env_filter(env_filter).finish();
     tracing::subscriber::set_global_default(subscriber)?;
-
-    info!("Starting daemon...");
 
     let local_key = match &config.identity_path {
         Some(path) => get_or_create_identity(path)?,
         None => create_ephemeral_identity(),
     };
 
-    let local_peer_id = local_key.public().to_peer_id();
-    info!("Local peer id: {local_peer_id}");
+    if config.print_peer_id {
+        println!("{}", local_key.public().to_peer_id());
+        return Ok(());
+    }
+
+    let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel::<()>(1);
 
     let (secrets_tx, secrets_rx) = futures::channel::mpsc::channel(64);
     let (notifier_tx, notifier_rx) = futures::channel::mpsc::channel(64);
 
     // Connect to the enclave
+    info!(
+        "connecting to enclave over UDS {}",
+        config.enclave.enclave_uds_path.clone()
+    );
     let enclave_client =
         grpc::enclave_client::EnclaveClient::connect_uds(config.enclave.enclave_uds_path.clone())
             .await
@@ -84,6 +88,8 @@ async fn main() -> anyhow::Result<()> {
         enclave_client.clone(), // SecretsService still needs the combined client for secrets calls
         policy_manager.clone(),
         runner_service.clone(), // Inject RunnerService
+        local_key.clone(),      // Pass the local keypair
+                                // Arc::new(config.clone()), // Pass config if needed
     );
 
     {

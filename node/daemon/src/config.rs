@@ -7,15 +7,19 @@ use serde::{Deserialize, Serialize};
 #[derive(Parser, Debug, Clone, Serialize, Deserialize, Default)]
 #[command(author, version, about, long_about = None)]
 pub struct Config {
-    /// Path to a config file (TOML). Defaults to "config.toml" if not provided.
+    /// Path to a config file (TOML). Overridden by CLI args and env vars.
     /// This field is skipped in serialization so we don't rewrite the same info into the file.
     #[arg(short, long)]
     #[serde(skip)]
-    pub config: Option<PathBuf>,
+    pub config_path: Option<PathBuf>,
 
     /// If provided, load or create a keypair at this path. Otherwise use ephemeral mode.
     #[arg(long)]
     pub identity_path: Option<PathBuf>,
+
+    /// Print the Peer ID derived from the identity and exit.
+    #[arg(long, default_value_t = false)]
+    pub print_peer_id: bool,
 
     /// Enable verbose logging
     #[arg(short, long, default_value_t = false)]
@@ -132,7 +136,7 @@ pub struct EnclaveConfig {
     /// The UDS path for the main enclave gRPC service.
     #[clap(long, default_value = "/tmp/enclave_grpc.sock")]
     #[serde(default = "default_enclave_uds_path")]
-    pub enclave_uds_path: String,
+    pub enclave_uds_path: String, // Keep existing name for consistency
 
     /// The identifier for the VM instance attached to the enclave for policy execution.
     /// This ID is used in RunWorker requests to the enclave.
@@ -171,7 +175,7 @@ impl Config {
     /// Load from a combination of:
     /// 1. A default struct,
     /// 2. A TOML file (if found),
-    /// 3. Environment variables (prefixed with `P2P_`),
+    /// 3. Environment variables (prefixed with `NXCC_`),
     /// 4. CLI arguments (parsed by `clap`).
     pub fn load() -> Result<Self, figment::Error> {
         use figment::{
@@ -182,7 +186,10 @@ impl Config {
         let cli = Config::parse();
 
         // Fall back to "config.toml" if `--config` was not provided
-        let config_path = cli.config.clone().unwrap_or_else(|| "config.toml".into());
+        let config_path = cli
+            .config_path
+            .clone()
+            .unwrap_or_else(|| "config.toml".into());
 
         Figment::new()
             .merge(Serialized::defaults(Config::default()))
