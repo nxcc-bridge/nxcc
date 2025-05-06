@@ -105,6 +105,7 @@ impl nxcc_interface::proto::vm::vm_server::Vm for MockVmService {
             nxcc_interface::proto::vm::GetAttestationResponse {
                 report: Some(nxcc_interface::proto::interface::AttestationReport {
                     ephemeral_public_key: vec![1, 2, 3, 4],
+                    measurement: vec![0u8; 32],
                     block_hashes: vec![vec![5, 6, 7, 8]],
                     user_data: req.user_data,
                 }),
@@ -411,6 +412,7 @@ async fn test_mock_client() {
     // Test attestation with custom behavior
     client.set_attestation_behavior(MockAttestationBehavior::Custom(AttestationReport {
         user_data: vec![],
+        measurement: vec![0u8; 32],
         ephemeral_public_key: vec![9, 8, 7],
         block_hashes: vec![vec![1, 1, 1]],
     }));

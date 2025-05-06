@@ -341,6 +341,7 @@ impl VmClient for MockVmServiceClient {
                 Ok(AttestationReport {
                     user_data,
                     ephemeral_public_key: vec![1, 2, 3, 4, 5],
+                    measurement: vec![0u8; 32],
                     block_hashes: vec![vec![10, 11, 12], vec![13, 14, 15]],
                 })
             }

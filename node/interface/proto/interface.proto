@@ -6,8 +6,9 @@ package interface;
 
 message AttestationReport {
   bytes ephemeral_public_key = 1;
-  repeated bytes block_hashes = 2;
-  bytes user_data = 3;
+  bytes measurement = 2;
+  repeated bytes block_hashes = 3;
+  bytes user_data = 4;
 }
 
 message SecretsBox {

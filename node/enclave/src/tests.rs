@@ -48,6 +48,7 @@ fn test_policy_env_report(node_id: &str) -> EnvReport {
     let kx = KeyExchangeKeyPair::generate(); // Need a valid key for attestation structure
     EnvReport {
         attestation: AttestationReport {
+            measurement: vec![0u8; 32],
             ephemeral_public_key: kx.public_key().as_bytes().to_vec(),
             block_hashes: vec![vec![1, 2]],
             user_data: vec![0u8; 32], // Placeholder hash for policy eval
@@ -65,6 +66,7 @@ fn test_sending_env_report(
 ) -> EnvReport {
     EnvReport {
         attestation: AttestationReport {
+            measurement: vec![0u8; 32],
             ephemeral_public_key: sender_kx_pk.to_vec(),
             block_hashes: vec![vec![4, 5]],
             user_data: binding_hash, // Crucial: hash of the secrets box
@@ -78,6 +80,7 @@ fn test_sending_env_report(
 fn test_requesting_env_report(node_id: &str, getter_kx_pk: &[u8]) -> EnvReport {
     EnvReport {
         attestation: AttestationReport {
+            measurement: vec![0u8; 32],
             ephemeral_public_key: getter_kx_pk.to_vec(), // Getter's KX PubKey
             block_hashes: vec![vec![7, 8]],
             user_data: vec![9u8; 32], // User data content not critical for GetSecrets verification itself

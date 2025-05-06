@@ -93,7 +93,6 @@ setup_node() {
 
     # Start Daemon
     echo "Starting $NODE_NAME Daemon..."
-    set -x
     DAEMON_CMD="$DAEMON_BIN \
         --uds-path $NODE_DAEMON_SOCK \
         --enclave-uds-path $NODE_ENCLAVE_SOCK \
@@ -109,7 +108,6 @@ setup_node() {
     fi
 
     eval "$DAEMON_CMD" 2>&1 &
-    set +x
     NODE_DAEMON_PID=$!
     sleep 5 # Give daemon more time to start (increased from 2)
 

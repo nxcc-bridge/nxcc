@@ -487,6 +487,7 @@ mod tests {
             },
             env_report: EnvReport {
                 attestation: AttestationReport {
+                    measurement: vec![0u8; 32],
                     ephemeral_public_key: vec![3; 32], // Needs to be 32 bytes for Secrets mock
                     block_hashes: vec![vec![4, 5], vec![6, 7]],
                     user_data: vec![8, 9],

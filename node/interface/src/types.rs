@@ -16,6 +16,8 @@ pub trait FromProto<P> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttestationReport {
     pub ephemeral_public_key: Vec<u8>,
+    /// PCR0 or MRENCLAVE
+    pub measurement: Vec<u8>,
     pub block_hashes: Vec<Vec<u8>>,
     pub user_data: Vec<u8>,
 }
@@ -24,6 +26,7 @@ impl FromProto<interface::AttestationReport> for AttestationReport {
     fn from_proto(p: interface::AttestationReport) -> Self {
         Self {
             ephemeral_public_key: p.ephemeral_public_key,
+            measurement: p.measurement,
             block_hashes: p.block_hashes,
             user_data: p.user_data,
         }
@@ -34,6 +37,7 @@ impl IntoProto<interface::AttestationReport> for AttestationReport {
     fn to_proto(&self) -> interface::AttestationReport {
         let mut out = interface::AttestationReport::default();
         out.ephemeral_public_key = self.ephemeral_public_key.clone();
+        out.measurement = self.measurement.clone();
         out.block_hashes = self.block_hashes.clone();
         out.user_data = self.user_data.clone();
         out

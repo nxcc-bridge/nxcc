@@ -48,6 +48,7 @@ impl VmRuntime for E2EMockVmRuntime {
         user_data: Vec<u8>,
     ) -> Result<nxcc_interface::types::AttestationReport, VmError> {
         Ok(nxcc_interface::types::AttestationReport {
+            measurement: vec![0u8; 32],
             ephemeral_public_key: vec![0, 1, 2, 3],
             block_hashes: vec![vec![4, 5, 6, 7]],
             user_data,

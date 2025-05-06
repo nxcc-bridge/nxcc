@@ -514,6 +514,7 @@ mod tests {
         let kx_keypair = KeyExchangeKeyPair::generate();
         EnvReport {
             attestation: AttestationReport {
+                measurement: vec![0u8; 32],
                 ephemeral_public_key: kx_keypair.public_key().as_bytes().to_vec(),
                 block_hashes: vec![vec![1, 2, 3]],
                 user_data: user_data_hash, // Use the provided hash

@@ -465,6 +465,7 @@ mod tests {
                 return Err(VmError::new("Forced attestation error"));
             }
             Ok(nxcc_interface::types::AttestationReport {
+                measurement: vec![0u8; 32],
                 ephemeral_public_key: vec![],
                 block_hashes: vec![],
                 user_data,
