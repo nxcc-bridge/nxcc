@@ -562,7 +562,7 @@ impl SecretsService {
             }
             Err(e) => {
                 error!(
-                    "Failed final check_secrets for request {}: {}",
+                    "Failed to final check_secrets for request {}: {}",
                     request_id, e
                 );
                 let _ = responder.send(Err(AppError::Service(format!(
@@ -706,7 +706,7 @@ impl SecretsService {
         Ok(EnvReport {
             attestation,
             operator_signature,
-            node_id: "@self".into(), // TODO: export this const. use non-self when providing to others
+            node_id: "@self".into(), // This node_id is for daemon's internal use/logging; enclave uses attestation.
         })
     }
 }

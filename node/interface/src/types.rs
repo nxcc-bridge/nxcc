@@ -71,7 +71,7 @@ impl IntoProto<interface::SecretIdentifier> for SecretId {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct ConsumerInfo {
     pub code_hash: Vec<u8>,
     pub signature: Vec<u8>,

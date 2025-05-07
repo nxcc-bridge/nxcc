@@ -424,7 +424,8 @@ impl RunnerService {
                 // Policy satisfied for this context
                 debug!(
                     "Policy satisfied for context {} (Node ID: {})",
-                    i, context.env_report.node_id
+                    i,
+                    context.env_report.node_id // node_id used for logging only
                 );
                 let report = PolicyExecutionReport {
                     request: context.clone(),
@@ -437,7 +438,8 @@ impl RunnerService {
             } else {
                 debug!(
                     "Policy denied for context {} (Node ID: {})",
-                    i, context.env_report.node_id
+                    i,
+                    context.env_report.node_id // node_id used for logging only
                 );
             }
         }
@@ -973,7 +975,7 @@ mod tests {
 
         // Expected VM response: context1=true, context2=false
         let vm_response_bools = vec![true, false];
-        let mut vm_response_payload = serde_json::to_vec(&vm_response_bools).unwrap();
+        let vm_response_payload = serde_json::to_vec(&vm_response_bools).unwrap();
 
         attach_mock_vm(&runner_service, vm_id, mock_client.clone()).await;
         add_worker_mapping(&runner_service, worker_id, vm_id).await;
@@ -992,9 +994,9 @@ mod tests {
         );
 
         // Check initial authorization state
-        assert!(!secrets.check_authorization(node_id_1, &secret_id_1));
-        assert!(!secrets.check_authorization(node_id_2, &secret_id_2));
-        assert!(!secrets.check_authorization(node_id_2, &secret_id_3));
+        assert!(!secrets.check_authorization(&context1.env_report.attestation, &secret_id_1));
+        assert!(!secrets.check_authorization(&context2.env_report.attestation, &secret_id_2));
+        assert!(!secrets.check_authorization(&context2.env_report.attestation, &secret_id_3));
 
         let result = runner_service
             .execute_policy(worker_id.to_string(), contexts.clone())
@@ -1012,9 +1014,9 @@ mod tests {
         assert_eq!(satisfied_contexts[0].secret_ids, context1.secret_ids);
 
         // Verify authorization stored only for satisfied context
-        assert!(secrets.check_authorization(node_id_1, &secret_id_1));
-        assert!(!secrets.check_authorization(node_id_2, &secret_id_2)); // context2 failed
-        assert!(!secrets.check_authorization(node_id_2, &secret_id_3)); // context2 failed
+        assert!(secrets.check_authorization(&context1.env_report.attestation, &secret_id_1));
+        assert!(!secrets.check_authorization(&context2.env_report.attestation, &secret_id_2)); // context2 failed
+        assert!(!secrets.check_authorization(&context2.env_report.attestation, &secret_id_3)); // context2 failed
     }
 
     #[tokio::test]
@@ -1047,7 +1049,7 @@ mod tests {
             MockExecutionBehavior::Fixed(vm_response_payload),
         );
 
-        assert!(!secrets.check_authorization(node_id_1, &secret_id_1));
+        assert!(!secrets.check_authorization(&context1.env_report.attestation, &secret_id_1));
 
         let result = runner_service
             .execute_policy(worker_id.to_string(), contexts.clone())
@@ -1059,7 +1061,7 @@ mod tests {
             satisfied_contexts[0].env_report.node_id,
             context1.env_report.node_id
         );
-        assert!(secrets.check_authorization(node_id_1, &secret_id_1));
+        assert!(secrets.check_authorization(&context1.env_report.attestation, &secret_id_1));
     }
 
     #[tokio::test]
@@ -1092,7 +1094,7 @@ mod tests {
             MockExecutionBehavior::Fixed(vm_response_payload),
         );
 
-        assert!(!secrets.check_authorization(node_id_1, &secret_id_1));
+        assert!(!secrets.check_authorization(&context1.env_report.attestation, &secret_id_1));
 
         let result = runner_service
             .execute_policy(worker_id.to_string(), contexts.clone())
@@ -1100,7 +1102,7 @@ mod tests {
         let satisfied_contexts = result.unwrap();
 
         assert!(satisfied_contexts.is_empty());
-        assert!(!secrets.check_authorization(node_id_1, &secret_id_1)); // Still not authorized
+        assert!(!secrets.check_authorization(&context1.env_report.attestation, &secret_id_1)); // Still not authorized
     }
 
     #[tokio::test]
@@ -1137,7 +1139,7 @@ mod tests {
         assert!(
             matches!(result, Err(RunnerError::VmConnection(ClientError::Grpc(status))) if status.message() == error_msg)
         );
-        assert!(!secrets.check_authorization(node_id_1, &secret_id_1)); // No authorization granted
+        assert!(!secrets.check_authorization(&context1.env_report.attestation, &secret_id_1)); // No authorization granted
     }
 
     #[tokio::test]
@@ -1174,7 +1176,7 @@ mod tests {
             .await;
 
         assert!(matches!(result, Err(RunnerError::Deserialization(_))));
-        assert!(!secrets.check_authorization(node_id_1, &secret_id_1)); // No authorization granted
+        assert!(!secrets.check_authorization(&context1.env_report.attestation, &secret_id_1)); // No authorization granted
     }
 
     #[tokio::test]
@@ -1214,7 +1216,7 @@ mod tests {
         assert!(
             matches!(result, Err(RunnerError::PolicyExecutionFailed(msg)) if msg == "Mismatched result count")
         );
-        assert!(!secrets.check_authorization(node_id_1, &secret_id_1)); // No authorization granted
+        assert!(!secrets.check_authorization(&context1.env_report.attestation, &secret_id_1)); // No authorization granted
     }
 
     #[tokio::test]
@@ -1236,7 +1238,7 @@ mod tests {
             .await;
 
         assert!(matches!(result, Err(RunnerError::WorkerNotFound(id)) if id == worker_id));
-        assert!(!secrets.check_authorization(node_id_1, &secret_id_1)); // No authorization granted
+        assert!(!secrets.check_authorization(&context1.env_report.attestation, &secret_id_1)); // No authorization granted
     }
 
     #[tokio::test]
@@ -1270,6 +1272,6 @@ mod tests {
 
         // It finds the worker mapping, tries to get the VM client, fails.
         assert!(matches!(result, Err(RunnerError::VmNotAttached(id)) if id == vm_id));
-        assert!(!secrets.check_authorization(node_id_1, &secret_id_1)); // No authorization granted
+        assert!(!secrets.check_authorization(&context1.env_report.attestation, &secret_id_1)); // No authorization granted
     }
 }

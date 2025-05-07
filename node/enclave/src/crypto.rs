@@ -226,7 +226,7 @@ pub fn generate_attestation(ephemeral_kx_pk: &PublicKey, user_data: Vec<u8>) -> 
     // TODO: Integrate with actual TEE attestation mechanism
     AttestationReport {
         ephemeral_public_key: ephemeral_kx_pk.as_bytes().to_vec(),
-        measurement: vec![0u8; 32], // Placeholder
+        measurement: vec![0u8; 32],                       // Placeholder
         block_hashes: vec![b"dummy_block_hash".to_vec()], // Placeholder
         user_data,
     }
