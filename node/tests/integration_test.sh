@@ -19,7 +19,6 @@ echo "Test directory: $TEST_DIR"
 DAEMON_BIN="$REPO_ROOT/target/$MODE/nxcc-daemon"
 ENCLAVE_BIN="$REPO_ROOT/target/$MODE/nxcc-platform-enclave"
 WORKERD_VM_BIN="$REPO_ROOT/target/$MODE/nxcc-workerd-vm" # Use the base server binary
-PYTHON_SCRIPT="$REPO_ROOT/tests/create_identity.py"
 
 check_grpcurl # Check if grpcurl exists early
 
@@ -34,14 +33,6 @@ if [ ! -f "$ENCLAVE_BIN" ]; then
 fi
 if [ ! -f "$WORKERD_VM_BIN" ]; then
     echo "Workerd VM binary not found at $WORKERD_VM_BIN. Build first."
-    exit 1
-fi
-if ! command -v poetry >/dev/null 2>&1; then
-    echo "poetry (python) not found."
-    exit 1
-fi
-if [ ! -f "$PYTHON_SCRIPT" ]; then
-    echo "Python identity script not found at $PYTHON_SCRIPT."
     exit 1
 fi
 
@@ -97,7 +88,7 @@ trap cleanup EXIT INT TERM
 # --- Node 1 (Alice) Setup ---
 echo "--- Setting up Node 1 (Alice) ---"
 setup_node "$NODE1_NAME" "$TEST_DIR" "$NODE1_PORT" "" \
-    "$DAEMON_BIN" "$ENCLAVE_BIN" "$WORKERD_VM_BIN" "$PYTHON_SCRIPT"
+    "$DAEMON_BIN" "$ENCLAVE_BIN" "$WORKERD_VM_BIN"
 
 # Sleep after node setup to ensure everything is ready
 sleep 3
@@ -111,7 +102,7 @@ sleep 3
 # --- Node 2 (Bob) Setup ---
 echo "--- Setting up Node 2 (Bob) ---"
 setup_node "$NODE2_NAME" "$TEST_DIR" "$NODE2_PORT" "$alice_MULTIADDR" \
-    "$DAEMON_BIN" "$ENCLAVE_BIN" "$WORKERD_VM_BIN" "$PYTHON_SCRIPT"
+    "$DAEMON_BIN" "$ENCLAVE_BIN" "$WORKERD_VM_BIN"
 
 # Sleep after node setup to ensure everything is ready
 sleep 3

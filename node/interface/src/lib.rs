@@ -23,7 +23,6 @@ pub mod policy {
         pub version: String,
         pub name: String,
         pub description: String,
-        pub allowed_consumers: Vec<String>,
         pub execution_constraints: ExecutionConstraints,
     }
 

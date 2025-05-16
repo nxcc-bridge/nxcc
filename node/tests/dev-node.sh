@@ -19,7 +19,6 @@ echo "Node directory: $TEST_DIR"
 DAEMON_BIN="$REPO_ROOT/target/$MODE/nxcc-daemon"
 ENCLAVE_BIN="$REPO_ROOT/target/$MODE/nxcc-platform-enclave"
 WORKERD_VM_BIN="$REPO_ROOT/target/$MODE/nxcc-workerd-vm"
-PYTHON_SCRIPT="$REPO_ROOT/tests/create_identity.py"
 
 # Check if binaries exist
 if [ ! -f "$DAEMON_BIN" ]; then
@@ -32,14 +31,6 @@ if [ ! -f "$ENCLAVE_BIN" ]; then
 fi
 if [ ! -f "$WORKERD_VM_BIN" ]; then
     echo "Workerd VM binary not found at $WORKERD_VM_BIN. Build first."
-    exit 1
-fi
-if ! command -v poetry >/dev/null 2>&1; then
-    echo "poetry (python) not found."
-    exit 1
-fi
-if [ ! -f "$PYTHON_SCRIPT" ]; then
-    echo "Python identity script not found at $PYTHON_SCRIPT."
     exit 1
 fi
 
@@ -65,7 +56,7 @@ trap cleanup EXIT INT TERM
 # --- Setup Node ---
 echo "=== Setting up $NODE_NAME node ==="
 setup_node "$NODE_NAME" "$TEST_DIR" "$NODE_PORT" "$BOOTSTRAP_PEERS" \
-    "$DAEMON_BIN" "$ENCLAVE_BIN" "$WORKERD_VM_BIN" "$PYTHON_SCRIPT"
+    "$DAEMON_BIN" "$ENCLAVE_BIN" "$WORKERD_VM_BIN"
 
 # Attach VM to Enclave via Daemon
 eval "DAEMON_SOCK=\$${NODE_NAME}_DAEMON_SOCK"

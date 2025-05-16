@@ -52,7 +52,6 @@ setup_node() {
     DAEMON_BIN="$5"
     ENCLAVE_BIN="$6"
     WORKERD_VM_BIN="$7"
-    PYTHON_SCRIPT="$8"
 
     # Create node directory
     NODE_DIR="$TEST_DIR/$NODE_NAME"
