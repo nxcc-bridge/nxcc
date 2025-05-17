@@ -221,8 +221,10 @@ async fn test_client_operations() -> Result<(), Box<dyn Error>> {
         advanced_vm_config: HashMap::new(),
     };
 
+    let mut secrets = HashMap::new();
+    secrets.insert("CLIENT_SECRET".to_string(), vec![1, 2, 3]);
     let trusted_config = TrustedConfig {
-        crypto_keys: vec![vec![1, 2, 3]],
+        secrets,
         limits: None,
     };
 
@@ -364,8 +366,10 @@ async fn test_mock_client() {
         advanced_vm_config: HashMap::new(),
     };
 
+    let mut secrets = HashMap::new();
+    secrets.insert("CLIENT_SECRET".to_string(), vec![1, 2, 3]);
     let trusted_config = TrustedConfig {
-        crypto_keys: vec![vec![1, 2, 3]],
+        secrets,
         limits: None,
     };
 

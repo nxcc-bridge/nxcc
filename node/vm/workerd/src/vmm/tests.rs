@@ -10,8 +10,10 @@ fn create_mock_configs() -> (UntrustedConfig, TrustedConfig) {
         userdata_json: r#"{"message": "Hello from config!"}"#.to_string(),
         advanced_vm_config: HashMap::new(),
     };
+    let mut secrets = HashMap::new();
+    secrets.insert("MY_SECRET".to_string(), vec![0u8; 32]);
     let trusted = TrustedConfig {
-        crypto_keys: vec![vec![0u8; 32]],
+        secrets,
         limits: Some(Limits {
             memory_mb: 128,
             cpu_count: 1,
@@ -41,7 +43,7 @@ fn create_js_config_code() -> Vec<u8> {
     export default {
         async fetch(request, env, ctx) {
             let config = env.USER_CONFIG;
-            let key_present = typeof env.SECRET_KEY_0 !== 'undefined';
+            let key_present = typeof env.MY_SECRET !== 'undefined';
             return new Response(`Config message: ${config.message}, Key bound: ${key_present}`);
         }
     }
@@ -416,8 +418,11 @@ fn create_mock_configs_with_multiple_keys() -> (UntrustedConfig, TrustedConfig) 
     // Key0 = [0x00; 32], Key1 = [0xFF; 32]
     let key0 = vec![0x00; 32];
     let key1 = vec![0xFF; 32];
+    let mut secrets = HashMap::new();
+    secrets.insert("KEY_A".to_string(), key0);
+    secrets.insert("KEY_B".to_string(), key1);
     let trusted = TrustedConfig {
-        crypto_keys: vec![key0, key1],
+        secrets,
         limits: Some(Limits {
             memory_mb: 128,
             cpu_count: 1,
@@ -436,12 +441,11 @@ fn create_js_multi_key_test_code() -> Vec<u8> {
         const info = new Uint8Array([5,6,7,8]);
         const derivedResults = [];
 
-        // For each SECRET_KEY_x in the environment, run HKDF deriveBits
-        let i = 0;
-        while (true) {
-          const keyName = `SECRET_KEY_${i}`;
+        // For each named secret in the environment, run HKDF deriveBits
+        const secretNames = ['KEY_A', 'KEY_B'];
+        for (const keyName of secretNames) {
           if (!(keyName in env)) {
-            break; // No more keys
+            continue;
           }
           const cryptoKey = env[keyName];
 
@@ -467,11 +471,9 @@ fn create_js_multi_key_test_code() -> Vec<u8> {
           const base64Result = btoa(b64);
 
           derivedResults.push({
-            keyIndex: i,
+            keyName,
             derivedBase64: base64Result
           });
-
-          i++;
         }
 
         return new Response(JSON.stringify(derivedResults));
@@ -490,7 +492,7 @@ async fn test_multiple_secret_keys_derived_bits() -> Result<(), Box<dyn std::err
     // 1) Create the VMM and configs with multiple keys
     let vmm = WorkerdVmm::new(Default::default());
     let (untrusted, trusted) = create_mock_configs_with_multiple_keys();
-    // 2) Provide the JS that uses HKDF on each SECRET_KEY_x
+    // 2) Provide the JS that uses HKDF on each named secret
     let code = create_js_multi_key_test_code();
 
     // 3) Start the worker
@@ -506,7 +508,7 @@ async fn test_multiple_secret_keys_derived_bits() -> Result<(), Box<dyn std::err
     assert_eq!(status, WorkerStatus::Running);
 
     // 4) Invoke the worker (no special payload needed).
-    //    The worker will return a JSON array of {keyIndex, derivedBase64} objects.
+    //    The worker will return a JSON array of {keyName, derivedBase64} objects.
     let invoke_result = vmm.invoke_worker(worker_id.clone(), vec![]).await?;
     let response_str = String::from_utf8_lossy(&invoke_result);
     let parsed: serde_json::Value = serde_json::from_str(&response_str)?;
@@ -516,7 +518,7 @@ async fn test_multiple_secret_keys_derived_bits() -> Result<(), Box<dyn std::err
     let salt = [1u8, 2, 3, 4];
     let info = [5u8, 6, 7, 8];
 
-    // We know we inserted two keys: key0=[0x00;32], key1=[0xFF;32]
+    // We inserted two keys KEY_A=[0x00;32], KEY_B=[0xFF;32]
     let expected_keys = [vec![0x00; 32], vec![0xFF; 32]];
 
     // Make sure we got an array in the response
@@ -529,12 +531,15 @@ async fn test_multiple_secret_keys_derived_bits() -> Result<(), Box<dyn std::err
         "Number of keys doesn't match"
     );
 
-    for (i, raw_key) in expected_keys.iter().enumerate() {
+    for (name, raw_key) in [("KEY_A", &expected_keys[0]), ("KEY_B", &expected_keys[1])].iter() {
         // Re-derive bits in Rust
         let local_derived = derive_hkdf_sha256(raw_key, &salt, &info);
 
         // Worker response must have an object with "derivedBase64"
-        let worker_obj = arr.get(i).unwrap();
+        let worker_obj = arr
+            .iter()
+            .find(|v| v.get("keyName").map(|n| n == *name).unwrap_or(false))
+            .ok_or("Missing object for key")?;
         let derived_base64 = worker_obj
             .get("derivedBase64")
             .ok_or("Missing derivedBase64 field")?
@@ -549,7 +554,7 @@ async fn test_multiple_secret_keys_derived_bits() -> Result<(), Box<dyn std::err
         // Compare
         assert_eq!(
             local_derived, worker_derived,
-            "Mismatch in derived bits for key index {i}"
+            "Mismatch in derived bits for {name}"
         );
     }
 

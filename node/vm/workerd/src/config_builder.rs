@@ -84,8 +84,8 @@ pub fn build_config(
         }
         // TODO: Handle advanced_vm_config if needed, maybe as separate JSON bindings?
 
-        // 2. Secret Key Bindings (raw binary format)
-        for (i, key_bytes) in trusted_config.crypto_keys.iter().enumerate() {
+        // 2. Secret Key Bindings (raw binary format) using provided names
+        for (name, key_bytes) in trusted_config.secrets.iter() {
             // For secret keys, we use the raw data directly and limit the usages
             // to deriveKey and deriveBits for increased security
             let usages = [
@@ -93,10 +93,7 @@ pub fn build_config(
                 worker::binding::crypto_key::Usage::DeriveBits,
             ];
 
-            bindings.push((
-                format!("SECRET_KEY_{}", i),
-                BindingType::Secret(key_bytes.clone()),
-            ));
+            bindings.push((name.clone(), BindingType::Secret(key_bytes.clone())));
         }
 
         // Add bindings to the worker config
@@ -201,11 +198,13 @@ mod tests {
         };
 
         // Using raw bytes for the secret key instead of a JWK
+        let mut secrets = std::collections::HashMap::new();
+        secrets.insert(
+            "MY_SECRET".to_string(),
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+        );
         let trusted = TrustedConfig {
-            crypto_keys: vec![
-                // Some random bytes to use as a secret key
-                vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
-            ],
+            secrets,
             limits: Some(Limits {
                 memory_mb: 128,
                 cpu_count: 1,
@@ -273,7 +272,7 @@ mod tests {
         assert_eq!(module.get_name()?, "worker.js");
         assert!(module.has_es_module());
 
-        assert_eq!(worker.get_bindings()?.len(), 2); // USER_CONFIG + SECRET_KEY_0
+        assert_eq!(worker.get_bindings()?.len(), 2); // USER_CONFIG + MY_SECRET
 
         let binding0 = worker.get_bindings()?.get(0);
         assert_eq!(binding0.get_name()?, "USER_CONFIG");
@@ -285,7 +284,7 @@ mod tests {
         assert_eq!(user_config_json, untrusted.userdata_json);
 
         let binding1 = worker.get_bindings()?.get(1);
-        assert_eq!(binding1.get_name()?, "SECRET_KEY_0");
+        assert_eq!(binding1.get_name()?, "MY_SECRET");
         assert!(binding1.has_crypto_key());
 
         let worker::binding::CryptoKey(Ok(crypto_key)) = binding1.which()? else {
@@ -322,7 +321,7 @@ mod tests {
     fn test_build_config_python() -> Result<(), Box<dyn std::error::Error>> {
         let dir = tempdir()?;
         let uds_path = dir.path().join("py_test.sock");
-        let code = b"from js import Response\ndef on_fetch(req, env):\n  return Response.new(env.SECRET_KEY_0)";
+        let code = b"from js import Response\ndef on_fetch(req, env):\n  return Response.new(env.MY_SECRET)";
         let (untrusted, trusted) = create_mock_configs();
 
         let config_bytes = build_config(
@@ -360,7 +359,7 @@ mod tests {
 
         // Verify the crypto key binding for the Python worker
         let binding1 = worker.get_bindings()?.get(1);
-        assert_eq!(binding1.get_name()?, "SECRET_KEY_0");
+        assert_eq!(binding1.get_name()?, "MY_SECRET");
 
         let worker::binding::CryptoKey(Ok(crypto_key)) = binding1.which()? else {
             panic!("missing crypto key binding");

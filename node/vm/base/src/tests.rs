@@ -118,8 +118,10 @@ async fn test_e2e_with_client_binding() -> Result<(), Box<dyn Error>> {
         userdata_json: r#"{"key":"value"}"#.to_string(),
         advanced_vm_config: HashMap::new(),
     };
+    let mut secrets = HashMap::new();
+    secrets.insert("TEST_SECRET".to_string(), vec![10, 11, 12]);
     let trusted_config = TrustedConfig {
-        crypto_keys: vec![vec![10, 11, 12]], // Example serialized JWK
+        secrets,
         limits: None,
     };
     let start_result = client1

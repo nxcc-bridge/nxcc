@@ -72,8 +72,10 @@ message Limits {
 /// by the platform operator and potentially influencing the execution environment
 /// setup rather than being directly exposed to the worker code.
 message TrustedConfig {
-  /// Cryptographic keys to be provisioned securely.
-  repeated bytes crypto_keys = 1;
+  /// Cryptographic secrets to be provisioned securely.
+  /// The map key is the name that will be used inside the worker
+  /// environment (e.g. `env.MY_SECRET`).
+  map<string, bytes> secrets = 1;
   /// Resource limits enforced by the execution environment.
   Limits limits = 2;
 }
