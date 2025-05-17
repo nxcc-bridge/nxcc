@@ -7,8 +7,8 @@ edition = "2024"
 nxcc-interface = { path = "../interface" }
 nxcc-vm-base = { path = "../vm/base" }
 tokio = { version = "1.44.1", features = ["rt-multi-thread", "macros", "net", "sync", "signal"] }
-tokio-vsock = { version = "0.7.0", features = ["tonic012"], optional = true }
-tonic = { version = "0.12.3", features = ["transport", "tls"] }
+tokio-vsock = { version = "0.7.0", features = ["tonic013"], optional = true }
+tonic = { version = "0.13.1", features = ["transport", "tls-aws-lc"] }
 tracing = "0.1.41"
 tokio-stream = { version = "0.1.17", optional = true }
 serde = { version = "1.0", features = ["derive"] }

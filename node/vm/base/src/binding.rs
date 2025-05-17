@@ -9,7 +9,7 @@ use std::{
 use tokio::sync::Mutex;
 use tonic::{
     Status,
-    body::BoxBody,
+    body::Body,
     codegen::http::{self, Request, Response},
 };
 use tower::{Layer, Service};
@@ -90,9 +90,9 @@ pub struct ClientBindingService<S> {
     bound_client: BoundClient,
 }
 
-impl<S> Service<Request<BoxBody>> for ClientBindingService<S>
+impl<S> Service<Request<Body>> for ClientBindingService<S>
 where
-    S: Service<Request<BoxBody>, Response = Response<BoxBody>> + Send + 'static + Clone,
+    S: Service<Request<Body>, Response = Response<Body>> + Send + 'static + Clone,
     S::Future: Send + 'static,
     S::Error: Into<Box<dyn Error + Send + Sync>> + Send,
 {
@@ -104,7 +104,7 @@ where
         self.inner.poll_ready(cx).map_err(Into::into)
     }
 
-    fn call(&mut self, req: Request<BoxBody>) -> Self::Future {
+    fn call(&mut self, req: Request<Body>) -> Self::Future {
         // Extract the peer certificate DER bytes
         let client_cert_der = extract_client_cert(&req);
 
@@ -150,7 +150,7 @@ where
 }
 
 /// Helper function to extract client certificate from the request
-fn extract_client_cert(req: &Request<BoxBody>) -> Option<Vec<u8>> {
+fn extract_client_cert(req: &Request<Body>) -> Option<Vec<u8>> {
     req.extensions()
         .get::<tonic::transport::server::TlsConnectInfo<tonic::transport::server::TcpConnectInfo>>()
         .and_then(|tls_info| tls_info.peer_certs())
@@ -159,13 +159,13 @@ fn extract_client_cert(req: &Request<BoxBody>) -> Option<Vec<u8>> {
 }
 
 /// Helper function to create an error response with appropriate gRPC status headers
-fn create_error_response(http_status: http::StatusCode, status: Status) -> Response<BoxBody> {
+fn create_error_response(http_status: http::StatusCode, status: Status) -> Response<Body> {
     http::Response::builder()
         .status(http_status)
         .header("content-type", "application/grpc")
         .header("grpc-status", status.code().to_string())
         .header("grpc-message", status.message())
-        .body(BoxBody::default())
+        .body(Body::default())
         .unwrap()
 }
 
