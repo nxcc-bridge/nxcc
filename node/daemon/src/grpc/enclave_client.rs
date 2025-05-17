@@ -9,7 +9,7 @@ use nxcc_interface::{
         TerminateWorkerRequest, VmAddress as ProtoVmAddress, runner_client::RunnerClient,
         secrets_client::SecretsClient,
     },
-    types::{AttestationReport, EnvReport, FromProto as _, IntoProto as _, SecretId, SecretsBox},
+    types::{AttestationReport, EnvReport, SecretId, SecretsBox},
 };
 use tokio::net::UnixStream;
 use tonic::{
@@ -69,7 +69,7 @@ impl EnclaveClient {
         let mut client = self.secrets();
         let req = GetReportRequest { user_data };
         let resp = client.get_report(req).await.map_err(|e| e.to_string())?;
-        Ok(AttestationReport::from_proto(resp.into_inner()))
+        Ok(AttestationReport::from(resp.into_inner()))
     }
 
     pub async fn put_secrets(
@@ -79,8 +79,8 @@ impl EnclaveClient {
         let mut bundles = Vec::new();
         for (sb, env_report) in bundles_with_reports {
             bundles.push(ProtoSecretsBundle {
-                secrets_box: Some(sb.to_proto()),
-                env_report: Some(env_report.to_proto()),
+                secrets_box: Some(sb.into()),
+                env_report: Some(env_report.into()),
             });
         }
         let req = PutSecretsRequest {
@@ -99,19 +99,19 @@ impl EnclaveClient {
         let mut requests = Vec::new();
         for sid in secret_ids {
             requests.push(SecretRequest {
-                id: Some(sid.to_proto()),
+                id: Some(sid.into()),
             });
         }
         let req = GetSecretsRequest {
             requests,
-            requester_env_report: Some(env_report.to_proto()),
+            requester_env_report: Some(env_report.into()),
             policy_reports: vec![], // not used yet
         };
         let mut client = self.secrets();
         let resp = client.get_secrets(req).await.map_err(|e| e.to_string())?;
         let out = resp.into_inner();
         if let Some(box_proto) = out.secrets_box {
-            Ok(SecretsBox::from_proto(box_proto))
+            Ok(SecretsBox::from(box_proto))
         } else {
             Err("Enclave returned no SecretsBox".to_string())
         }
@@ -123,7 +123,7 @@ impl EnclaveClient {
     ) -> Result<Vec<(SecretId, bool, u64)>, String> {
         let mut proto_ids = Vec::new();
         for sid in ids.iter() {
-            proto_ids.push(sid.to_proto());
+            proto_ids.push((*sid).clone().into());
         }
         let req = CheckSecretsRequest { ids: proto_ids };
         let mut client = self.secrets();
@@ -132,7 +132,7 @@ impl EnclaveClient {
         let mut out = Vec::new();
         for st in statuses {
             if let Some(proto_id) = st.id {
-                let sid = SecretId::from_proto(proto_id);
+                let sid = SecretId::from(proto_id);
                 out.push((sid, st.found, st.expiry));
             }
         }
@@ -140,7 +140,7 @@ impl EnclaveClient {
     }
 
     pub async fn generate_secrets(&self, ids: Vec<SecretId>) -> Result<(), String> {
-        let proto_ids = ids.iter().map(|id| id.to_proto()).collect();
+        let proto_ids = ids.into_iter().map(Into::into).collect();
         let req = GenerateSecretsRequest { ids: proto_ids };
         let mut client = self.secrets();
         client
@@ -217,7 +217,7 @@ impl EnclaveClient {
         worker_id: String,
         contexts: Vec<nxcc_interface::types::PolicyExecutionRequest>,
     ) -> Result<Vec<nxcc_interface::types::PolicyExecutionRequest>, String> {
-        let proto_contexts = contexts.iter().map(|c| c.to_proto()).collect();
+        let proto_contexts = contexts.iter().cloned().map(Into::into).collect();
         let req = ProtoExecutePolicyRequest {
             worker_id,
             contexts: proto_contexts,
@@ -231,7 +231,7 @@ impl EnclaveClient {
         let satisfied = resp
             .satisfied_contexts
             .into_iter()
-            .map(nxcc_interface::types::PolicyExecutionRequest::from_proto)
+            .map(nxcc_interface::types::PolicyExecutionRequest::from)
             .collect();
         Ok(satisfied)
     }

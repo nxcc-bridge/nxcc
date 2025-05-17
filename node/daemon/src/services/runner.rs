@@ -4,7 +4,7 @@ use nxcc_interface::{
         ExecutePolicyRequest as ProtoExecutePolicyRequest, RunWorkerRequest,
         TerminateWorkerRequest, runner_client::RunnerClient,
     },
-    types::{EnvReport, FromProto as _, IntoProto as _, PolicyExecutionRequest, SecretId},
+    types::{EnvReport, PolicyExecutionRequest, SecretId},
 };
 use tonic::transport::Channel;
 use tracing::{debug, info, warn};
@@ -89,7 +89,7 @@ impl RunnerService {
         worker_id: String,
         contexts: Vec<PolicyExecutionRequest>,
     ) -> Result<Vec<PolicyExecutionRequest>, AppError> {
-        let proto_contexts = contexts.iter().map(|c| c.to_proto()).collect();
+        let proto_contexts = contexts.iter().cloned().map(Into::into).collect();
         let req = ProtoExecutePolicyRequest {
             worker_id,
             contexts: proto_contexts,
@@ -103,7 +103,7 @@ impl RunnerService {
         let satisfied = resp
             .satisfied_contexts
             .into_iter()
-            .map(PolicyExecutionRequest::from_proto)
+            .map(PolicyExecutionRequest::from)
             .collect();
         Ok(satisfied)
     }

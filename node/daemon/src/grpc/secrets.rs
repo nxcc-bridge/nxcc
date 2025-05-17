@@ -5,10 +5,7 @@ use nxcc_interface::{
         AttachVmRequest, AttachVmResponse, GetSecretsRequest, GetSecretsResponse,
         secrets_server::Secrets,
     },
-    types::{
-        AttestationReport, EnvReport, FromProto as _, IntoProto as _, SecretId, SecretRequest,
-        SecretsBox,
-    },
+    types::{AttestationReport, EnvReport, SecretId, SecretRequest, SecretsBox},
 };
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, info};
@@ -44,7 +41,7 @@ impl Secrets for SecretsDebugGrpc {
         let mut grouped_requests = HashMap::new();
         let mut all_secret_ids = Vec::new(); // Collect all requested IDs for the final fetch
         for proto_req in req.secret_requests {
-            let sr = SecretRequest::from_proto(proto_req);
+            let sr = SecretRequest::from(proto_req);
             all_secret_ids.push(sr.secret_id.clone());
             grouped_requests
                 .entry(sr.secret_id.clone())
@@ -95,7 +92,7 @@ impl Secrets for SecretsDebugGrpc {
                     Ok(secrets_box) => {
                         info!("Successfully retrieved final SecretsBox from enclave.");
                         let resp = GetSecretsResponse {
-                            secrets_box: Some(secrets_box.to_proto()),
+                            secrets_box: Some(secrets_box.into()),
                         };
                         Ok(Response::new(resp))
                     }
