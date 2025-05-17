@@ -12,7 +12,7 @@ use nxcc_interface::{
         ListRunningWorkersRequest, StartWorkerRequest, StopWorkerRequest, TrustedConfig,
         UntrustedConfig, WorkerStatus,
     },
-    types::{AttestationReport, FromProto as _},
+    types::AttestationReport,
 };
 use thiserror::Error;
 #[cfg(feature = "uds")]
@@ -244,7 +244,7 @@ impl VmClient for VmServiceClient {
         let response = self.inner.get_attestation(request).await?.into_inner();
 
         match response.report {
-            Some(report) => Ok(AttestationReport::from_proto(report)),
+            Some(report) => Ok(AttestationReport::from(report)),
             None => Err(ClientError::Grpc(Status::internal(
                 "No attestation report received",
             ))),

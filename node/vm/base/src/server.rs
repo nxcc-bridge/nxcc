@@ -87,7 +87,6 @@ use nxcc_interface::{
         StartWorkerResponse, StopWorkerRequest, StopWorkerResponse, WorkerStatus,
         vm_server::{Vm, VmServer},
     },
-    types::IntoProto as _,
 };
 
 pub struct VmServiceGrpc<T: VmRuntime> {
@@ -211,7 +210,7 @@ impl<T: VmRuntime> Vm for VmServiceGrpc<T> {
         match self.runtime.get_attestation(req.user_data).await {
             Ok(report) => {
                 debug!("Successfully retrieved attestation report");
-                let proto_report = report.to_proto();
+                let proto_report: nxcc_interface::proto::interface::AttestationReport = report.into();
                 Ok(Response::new(GetAttestationResponse {
                     report: Some(proto_report),
                 }))

@@ -13,9 +13,7 @@ use nxcc_interface::{
         },
         interface,
     },
-    types::{
-        EnvReport, FromProto, IntoProto, PolicyExecutionRequest, SecretId, SecretsBox, VmAddress,
-    },
+    types::{EnvReport, PolicyExecutionRequest, SecretId, SecretsBox, VmAddress},
 };
 use nxcc_vm_base::client::ClientError;
 use tonic::{Request, Response, Status, transport::Server};
@@ -51,7 +49,7 @@ impl SecretsServerTrait for SecretsGrpcService {
             user_data.len()
         );
         match self.secrets.get_report(user_data) {
-            Ok(report) => Ok(Response::new(report.to_proto())),
+            Ok(report) => Ok(Response::new(report.into())),
             Err(e) => {
                 error!("GetReport failed: {}", e);
                 Err(Status::internal(format!("Failed to get report: {e}")))
@@ -72,11 +70,11 @@ impl SecretsServerTrait for SecretsGrpcService {
         for bundle_proto in proto_req.secrets_bundles {
             let secrets_box = bundle_proto
                 .secrets_box
-                .map(SecretsBox::from_proto)
+                .map(SecretsBox::from)
                 .ok_or_else(|| Status::invalid_argument("Missing SecretsBox in bundle"))?;
             let env_report = bundle_proto
                 .env_report
-                .map(EnvReport::from_proto)
+                .map(EnvReport::from)
                 .ok_or_else(|| Status::invalid_argument("Missing EnvReport in bundle"))?;
             bundles.push((secrets_box, env_report));
         }
@@ -103,12 +101,12 @@ impl SecretsServerTrait for SecretsGrpcService {
         let secret_ids: Vec<SecretId> = proto_req
             .requests
             .into_iter()
-            .filter_map(|r| r.id.map(SecretId::from_proto))
+            .filter_map(|r| r.id.map(SecretId::from))
             .collect();
 
         let requester_env_report = proto_req
             .requester_env_report
-            .map(EnvReport::from_proto)
+            .map(EnvReport::from)
             .ok_or_else(|| Status::invalid_argument("Missing requester_env_report"))?;
 
         // Policy reports are currently unused, local auth store is checked
@@ -119,7 +117,7 @@ impl SecretsServerTrait for SecretsGrpcService {
             .get_secrets(secret_ids, requester_env_report, policy_reports)
         {
             Ok(secrets_box) => Ok(Response::new(GetSecretsResponse {
-                secrets_box: Some(secrets_box.to_proto()),
+                secrets_box: Some(secrets_box.into()),
             })),
             Err(e) => {
                 error!("GetSecrets failed: {}", e);
@@ -137,7 +135,7 @@ impl SecretsServerTrait for SecretsGrpcService {
         let ids: Vec<SecretId> = proto_req
             .ids
             .into_iter()
-            .map(SecretId::from_proto)
+            .map(SecretId::from)
             .collect();
 
         match self.secrets.check_secrets(ids) {
@@ -145,7 +143,7 @@ impl SecretsServerTrait for SecretsGrpcService {
                 let proto_statuses = statuses
                     .into_iter()
                     .map(|(id, found, expiry)| SecretStatus {
-                        id: Some(id.to_proto()),
+                        id: Some(id.into()),
                         found,
                         expiry,
                     })
@@ -173,7 +171,7 @@ impl SecretsServerTrait for SecretsGrpcService {
         let ids: Vec<SecretId> = proto_req
             .ids
             .into_iter()
-            .map(SecretId::from_proto)
+            .map(SecretId::from)
             .collect();
 
         match self.secrets.generate_secrets(ids) {
@@ -237,7 +235,7 @@ impl Runner for EnclaveRunnerGrpcService {
         debug!("gRPC AttachVm request for vm_id '{}'", req.vm_id);
         let address = req
             .address
-            .map(VmAddress::from_proto)
+            .map(VmAddress::from)
             .ok_or_else(|| Status::invalid_argument("Missing VM address"))?;
 
         match self.runner.attach_vm(req.vm_id, address).await {
@@ -346,7 +344,7 @@ impl Runner for EnclaveRunnerGrpcService {
         let internal_contexts: Vec<PolicyExecutionRequest> = req
             .contexts
             .into_iter()
-            .map(PolicyExecutionRequest::from_proto)
+            .map(PolicyExecutionRequest::from)
             .collect();
 
         match self
@@ -357,7 +355,7 @@ impl Runner for EnclaveRunnerGrpcService {
             Ok(satisfied_internal_contexts) => {
                 let satisfied_proto_contexts = satisfied_internal_contexts
                     .into_iter()
-                    .map(|ctx| ctx.to_proto())
+                    .map(Into::into)
                     .collect();
                 Ok(Response::new(ExecutePolicyResponse {
                     satisfied_contexts: satisfied_proto_contexts,

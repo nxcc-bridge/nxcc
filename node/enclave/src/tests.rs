@@ -13,8 +13,8 @@ use nxcc_interface::{
         secrets_server::Secrets as _,
     },
     types::{
-        AttestationReport, ConsumerInfo, EnvReport, FromProto as _, IntoProto as _,
-        PolicyExecutionReport, PolicyExecutionRequest, SecretId, SecretsBox,
+        AttestationReport, ConsumerInfo, EnvReport, PolicyExecutionReport,
+        PolicyExecutionRequest, SecretId, SecretsBox,
     },
 };
 use nxcc_vm_base::client::mock::{MockExecutionBehavior, MockVmServiceClient};
@@ -117,8 +117,8 @@ async fn test_enclave_workflow() {
 
     let put_secrets_req_fail = Request::new(ProtoPutSecretsRequest {
         secrets_bundles: vec![SecretsBundle {
-            secrets_box: Some(secrets_box_for_put.to_proto()),
-            env_report: Some(putter_env_report.to_proto()), // Putter uses its EnvReport
+            secrets_box: Some(secrets_box_for_put.clone().into()),
+            env_report: Some(putter_env_report.clone().into()), // Putter uses its EnvReport
         }],
     });
     let put_secrets_resp_fail = secrets_grpc
@@ -147,8 +147,8 @@ async fn test_enclave_workflow() {
     // --- 5. PutSecret succeeds ---
     let put_secrets_req_ok = Request::new(ProtoPutSecretsRequest {
         secrets_bundles: vec![SecretsBundle {
-            secrets_box: Some(secrets_box_for_put.to_proto()),
-            env_report: Some(putter_env_report.to_proto()), // Putter uses its EnvReport
+            secrets_box: Some(secrets_box_for_put.clone().into()),
+            env_report: Some(putter_env_report.clone().into()), // Putter uses its EnvReport
         }],
     });
     let put_secrets_resp_ok = secrets_grpc.put_secrets(put_secrets_req_ok).await.unwrap();
@@ -180,17 +180,17 @@ async fn test_enclave_workflow() {
     info!("Step 6b: Attempting GetSecret (expected fail - no auth for getter)");
     let get_secrets_req_fail = Request::new(ProtoGetSecretsRequest {
         requests: vec![SecretRequest {
-            id: Some(secret_id.to_proto()),
+            id: Some(secret_id.clone().into()),
         }],
         policy_reports: vec![],
-        requester_env_report: Some(getter_env_report.to_proto()), // Getter uses its EnvReport
+        requester_env_report: Some(getter_env_report.clone().into()), // Getter uses its EnvReport
     });
     let get_secrets_resp_fail = secrets_grpc
         .get_secrets(get_secrets_req_fail)
         .await
         .unwrap();
     let secrets_box_fail =
-        SecretsBox::from_proto(get_secrets_resp_fail.into_inner().secrets_box.unwrap());
+        SecretsBox::from(get_secrets_resp_fail.into_inner().secrets_box.unwrap());
     assert!(
         secrets_box_fail.contained_secret_ids.is_empty(),
         "GetSecrets should return empty box"
@@ -213,14 +213,14 @@ async fn test_enclave_workflow() {
     info!("Step 8: Attempting GetSecret (expected success)");
     let get_secrets_req_ok = Request::new(ProtoGetSecretsRequest {
         requests: vec![SecretRequest {
-            id: Some(secret_id.to_proto()),
+            id: Some(secret_id.clone().into()),
         }],
         policy_reports: vec![],
-        requester_env_report: Some(getter_env_report.to_proto()), // Getter uses its EnvReport
+        requester_env_report: Some(getter_env_report.clone().into()), // Getter uses its EnvReport
     });
     let get_secrets_resp_ok = secrets_grpc.get_secrets(get_secrets_req_ok).await.unwrap();
     let secrets_box_ok =
-        SecretsBox::from_proto(get_secrets_resp_ok.into_inner().secrets_box.unwrap());
+        SecretsBox::from(get_secrets_resp_ok.into_inner().secrets_box.unwrap());
     assert_eq!(secrets_box_ok.contained_secret_ids.len(), 1);
     assert_eq!(secrets_box_ok.contained_secret_ids[0], secret_id);
 
@@ -235,17 +235,17 @@ async fn test_enclave_workflow() {
     info!("Step 9: Attempting further GetSecret (expected success - auth not consumed)");
     let get_secrets_req_ok_2 = Request::new(ProtoGetSecretsRequest {
         requests: vec![SecretRequest {
-            id: Some(secret_id.to_proto()),
+            id: Some(secret_id.clone().into()),
         }],
         policy_reports: vec![],
-        requester_env_report: Some(getter_env_report.to_proto()), // Getter uses its EnvReport
+        requester_env_report: Some(getter_env_report.clone().into()), // Getter uses its EnvReport
     });
     let get_secrets_resp_ok_2 = secrets_grpc
         .get_secrets(get_secrets_req_ok_2)
         .await
         .unwrap();
     let secrets_box_ok_2 =
-        SecretsBox::from_proto(get_secrets_resp_ok_2.into_inner().secrets_box.unwrap());
+        SecretsBox::from(get_secrets_resp_ok_2.into_inner().secrets_box.unwrap());
     assert_eq!(secrets_box_ok_2.contained_secret_ids.len(), 1);
     info!("Step 9: Further GetSecret succeeded");
 }
@@ -368,7 +368,7 @@ async fn execute_policy_with_env_report(
 
     let execute_req = Request::new(ProtoExecutePolicyRequest {
         worker_id: worker_id.to_string(),
-        contexts: vec![policy_req_internal.to_proto()],
+        contexts: vec![policy_req_internal.into()],
     });
 
     let execute_resp = runner_grpc
@@ -421,7 +421,7 @@ async fn get_secret_status(
     secret_id: &SecretId,
 ) -> Option<(bool, u64)> {
     let check_req = Request::new(nxcc_interface::proto::enclave::CheckSecretsRequest {
-        ids: vec![secret_id.to_proto()],
+        ids: vec![secret_id.clone().into()],
     });
     let check_resp = secrets_grpc
         .check_secrets(check_req)
@@ -503,8 +503,8 @@ async fn test_put_secrets_mismatched_binding_hash() {
 
     let put_secrets_req = Request::new(ProtoPutSecretsRequest {
         secrets_bundles: vec![SecretsBundle {
-            secrets_box: Some(secrets_box.to_proto()),
-            env_report: Some(putter_env_report_bad_hash.to_proto()),
+            secrets_box: Some(secrets_box.into()),
+            env_report: Some(putter_env_report_bad_hash.into()),
         }],
     });
     let put_secrets_resp = secrets_grpc.put_secrets(put_secrets_req).await.unwrap();
@@ -555,8 +555,8 @@ async fn test_put_secrets_invalid_secrets_box_structure() {
 
     let put_secrets_req = Request::new(ProtoPutSecretsRequest {
         secrets_bundles: vec![SecretsBundle {
-            secrets_box: Some(bad_secrets_box.to_proto()),
-            env_report: Some(putter_env_report_for_bad_box.to_proto()),
+            secrets_box: Some(bad_secrets_box.clone().into()),
+            env_report: Some(putter_env_report_for_bad_box.into()),
         }],
     });
     let put_secrets_resp = secrets_grpc.put_secrets(put_secrets_req).await.unwrap();
@@ -609,8 +609,8 @@ async fn test_put_secrets_decryption_failure() {
 
     let put_secrets_req = Request::new(ProtoPutSecretsRequest {
         secrets_bundles: vec![SecretsBundle {
-            secrets_box: Some(secrets_box_wrong_key.to_proto()),
-            env_report: Some(putter_env_report_for_wrong_key_box.to_proto()),
+            secrets_box: Some(secrets_box_wrong_key.clone().into()),
+            env_report: Some(putter_env_report_for_wrong_key_box.into()),
         }],
     });
     let put_secrets_resp = secrets_grpc.put_secrets(put_secrets_req).await.unwrap();
@@ -664,8 +664,8 @@ async fn test_get_secrets_unauthorized_node() {
     .await;
     let put_req = Request::new(ProtoPutSecretsRequest {
         secrets_bundles: vec![SecretsBundle {
-            secrets_box: Some(secrets_box_put.to_proto()),
-            env_report: Some(putter_env_report.to_proto()),
+            secrets_box: Some(secrets_box_put.clone().into()),
+            env_report: Some(putter_env_report.clone().into()),
         }],
     });
     let put_resp = secrets_grpc.put_secrets(put_req).await.unwrap();
@@ -701,14 +701,14 @@ async fn test_get_secrets_unauthorized_node() {
 
     let get_req_unauth = Request::new(ProtoGetSecretsRequest {
         requests: vec![SecretRequest {
-            id: Some(secret_id.to_proto()),
+            id: Some(secret_id.clone().into()),
         }],
         policy_reports: vec![],
-        requester_env_report: Some(unauthorized_getter_env_report.to_proto()),
+        requester_env_report: Some(unauthorized_getter_env_report.clone().into()),
     });
     let get_resp_unauth = secrets_grpc.get_secrets(get_req_unauth).await.unwrap();
     let secrets_box_unauth =
-        SecretsBox::from_proto(get_resp_unauth.into_inner().secrets_box.unwrap());
+        SecretsBox::from(get_resp_unauth.into_inner().secrets_box.unwrap());
     assert!(
         secrets_box_unauth.contained_secret_ids.is_empty(),
         "Unauthorized GetSecrets should yield empty box"
@@ -718,13 +718,13 @@ async fn test_get_secrets_unauthorized_node() {
     // 4. Verify authorized node *can* get it
     let get_req_auth = Request::new(ProtoGetSecretsRequest {
         requests: vec![SecretRequest {
-            id: Some(secret_id.to_proto()),
+            id: Some(secret_id.clone().into()),
         }],
         policy_reports: vec![],
-        requester_env_report: Some(authorized_getter_env_report.to_proto()),
+        requester_env_report: Some(authorized_getter_env_report.clone().into()),
     });
     let get_resp_auth = secrets_grpc.get_secrets(get_req_auth).await.unwrap();
-    let secrets_box_auth = SecretsBox::from_proto(get_resp_auth.into_inner().secrets_box.unwrap());
+    let secrets_box_auth = SecretsBox::from(get_resp_auth.into_inner().secrets_box.unwrap());
     assert_eq!(secrets_box_auth.contained_secret_ids.len(), 1);
     info!("Test OK: Authorized node successfully retrieved secret");
 }
@@ -740,8 +740,8 @@ async fn test_get_secrets_invalid_requester_report() {
     let secret_id = test_secret_id(2005);
     let getter_node_id = "node-getter-badreport";
 
-    let mut bad_env_report_proto =
-        test_env_report_for_client(getter_node_id, &[0; 32], vec![]).to_proto();
+    let mut bad_env_report_proto: nxcc_interface::proto::interface::EnvReport =
+        test_env_report_for_client(getter_node_id, &[0; 32], vec![]).into();
     // Tamper with the attestation part of the proto directly
     bad_env_report_proto
         .attestation
@@ -751,7 +751,7 @@ async fn test_get_secrets_invalid_requester_report() {
 
     let get_secrets_req = Request::new(ProtoGetSecretsRequest {
         requests: vec![SecretRequest {
-            id: Some(secret_id.to_proto()),
+            id: Some(secret_id.clone().into()),
         }],
         policy_reports: vec![],
         requester_env_report: Some(bad_env_report_proto),
@@ -862,7 +862,7 @@ async fn test_generate_secrets_workflow() {
 
     // 1. Attempt GenerateSecrets without authorization -> Skips, no error
     let gen_req_unauth = Request::new(GenerateSecretsRequest {
-        ids: vec![secret_id_gen.to_proto()],
+        ids: vec![secret_id_gen.clone().into()],
     });
     assert!(secrets_grpc.generate_secrets(gen_req_unauth).await.is_ok());
     assert!(!check_secret_exists(&secrets_grpc, &secret_id_gen).await);
@@ -877,7 +877,7 @@ async fn test_generate_secrets_workflow() {
 
     // 3. GenerateSecrets successfully
     let gen_req_auth = Request::new(GenerateSecretsRequest {
-        ids: vec![secret_id_gen.to_proto()],
+        ids: vec![secret_id_gen.clone().into()],
     });
     assert!(secrets_grpc.generate_secrets(gen_req_auth).await.is_ok());
     assert!(check_secret_exists(&secrets_grpc, &secret_id_gen).await);
@@ -885,7 +885,7 @@ async fn test_generate_secrets_workflow() {
 
     // 4. Attempt GenerateSecrets again for the same ID -> Fails (AlreadyExists)
     let gen_req_dup = Request::new(GenerateSecretsRequest {
-        ids: vec![secret_id_gen.to_proto()],
+        ids: vec![secret_id_gen.clone().into()],
     });
     assert_eq!(
         secrets_grpc
@@ -927,8 +927,8 @@ async fn test_generate_secrets_workflow() {
     .await;
     let put_req = Request::new(ProtoPutSecretsRequest {
         secrets_bundles: vec![SecretsBundle {
-            secrets_box: Some(secrets_box_put.to_proto()),
-            env_report: Some(putter_env_report.to_proto()),
+            secrets_box: Some(secrets_box_put.clone().into()),
+            env_report: Some(putter_env_report.clone().into()),
         }],
     });
     let put_resp = secrets_grpc.put_secrets(put_req).await.unwrap();
@@ -958,13 +958,13 @@ async fn test_generate_secrets_workflow() {
 
     let get_req = Request::new(ProtoGetSecretsRequest {
         requests: vec![SecretRequest {
-            id: Some(secret_id_gen.to_proto()),
+            id: Some(secret_id_gen.clone().into()),
         }],
         policy_reports: vec![],
-        requester_env_report: Some(getter_env_report.to_proto()),
+        requester_env_report: Some(getter_env_report.clone().into()),
     });
     let get_resp = secrets_grpc.get_secrets(get_req).await.unwrap();
-    let secrets_box_get = SecretsBox::from_proto(get_resp.into_inner().secrets_box.unwrap());
+    let secrets_box_get = SecretsBox::from(get_resp.into_inner().secrets_box.unwrap());
     assert_eq!(secrets_box_get.contained_secret_ids.len(), 1); // This was the failing assertion
     assert_eq!(secrets_box_get.contained_secret_ids[0], secret_id_gen);
 
