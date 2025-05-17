@@ -15,28 +15,9 @@ use tracing::{debug, error, info, trace, warn};
 
 use crate::{config::Config, error::AppError, web3::gateways::GatewayManager};
 
-#[derive(Clone, Copy)]
-pub struct ManifestChecker;
-
-impl ManifestChecker {
-    pub fn check_manifest(&self, manifest: &PolicyManifest) -> Result<(), AppError> {
-        // This is a dummy implementation that just logs the manifest and accepts it
-        debug!("Checking policy manifest: {}", manifest.name);
-
-        // In a real implementation, we would check:
-        // - Version compatibility
-        // - Resource constraints
-        // - Security policies
-        // - Signature verification
-
-        Ok(())
-    }
-}
-
 #[derive(Clone)]
 pub struct PolicyManager {
     gateway_manager: GatewayManager,
-    manifest_checker: ManifestChecker,
     memory_cache: Arc<RwLock<HashMap<SecretId, PolicyBundle>>>,
     disk_cache_path: Option<PathBuf>,
 }
@@ -63,7 +44,6 @@ impl PolicyManager {
 
         Ok(Self {
             gateway_manager,
-            manifest_checker: ManifestChecker,
             memory_cache: Arc::new(RwLock::new(HashMap::new())),
             disk_cache_path,
         })
@@ -81,8 +61,6 @@ impl PolicyManager {
         // 2. Check disk cache
         if let Some(policy) = self.load_from_disk(secret_id).await? {
             debug!("Policy disk cache hit for secret {:?}", secret_id);
-            // Validate manifest before returning from disk cache
-            self.manifest_checker.check_manifest(&policy.manifest)?;
             // Add to memory cache
             self.memory_cache
                 .write()
@@ -94,10 +72,6 @@ impl PolicyManager {
 
         // 3. Fetch from network
         let policy = self.fetch_from_network(secret_id).await?;
-
-        // 4. Validate manifest
-        self.manifest_checker.check_manifest(&policy.manifest)?;
-        debug!("Manifest check passed for policy of secret {:?}", secret_id);
 
         // 5. Store in caches
         self.store_to_disk(secret_id, &policy).await?;
@@ -167,14 +141,6 @@ impl PolicyManager {
             let worker_code = tokio::fs::read(&worker_code_path_abs)
                 .await
                 .map_err(|e| AppError::Io(e))?;
-
-            // Validate the loaded manifest
-            self.manifest_checker
-                .check_manifest(&policy_bundle.manifest)?;
-            debug!(
-                "Manifest check passed for mock policy of secret {:?}",
-                secret_id
-            );
 
             // Return the fully constructed bundle
             return Ok(PolicyBundle {
