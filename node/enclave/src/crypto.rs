@@ -138,7 +138,7 @@ fn decrypt_aead(
 pub fn encrypt_secrets_box(
     our_kx_keypair: &KeyExchangeKeyPair,
     recipient_kx_pk: &PublicKey,
-    secrets: &Vec<(SecretId, Vec<u8>, u64)>, // (id, data, expiry)
+    secrets: &Vec<(SecretId, Vec<u8>, u64, u64)>, // (id, data, expiry, generation_ts)
 ) -> Result<SecretsBox, CryptoError> {
     let shared_secret = our_kx_keypair.diffie_hellman(recipient_kx_pk);
     let symmetric_key = derive_symmetric_key(&shared_secret);
@@ -159,7 +159,8 @@ pub fn encrypt_secrets_box(
     encrypted_payload.extend(ciphertext);
 
     // Extract contained IDs
-    let contained_secret_ids: Vec<SecretId> = secrets.iter().map(|(id, _, _)| id.clone()).collect();
+    let contained_secret_ids: Vec<SecretId> =
+        secrets.iter().map(|(id, _, _, _)| id.clone()).collect();
 
     Ok(SecretsBox {
         encrypted_payload,
@@ -175,7 +176,7 @@ pub fn encrypt_secrets_box(
 pub fn decrypt_secrets_box(
     our_kx_keypair: &KeyExchangeKeyPair,
     secrets_box: &SecretsBox,
-) -> Result<Vec<(SecretId, Vec<u8>, u64)>, CryptoError> {
+) -> Result<Vec<(SecretId, Vec<u8>, u64, u64)>, CryptoError> {
     if secrets_box.alg != "X25519_AES-GCM-SIV" {
         return Err(CryptoError::OperationFailed(format!(
             "Unsupported SecretsBox algorithm: {}",
@@ -215,7 +216,8 @@ pub fn decrypt_secrets_box(
     let plaintext = decrypt_aead(&symmetric_key, nonce, ciphertext, &aad)?;
 
     // Deserialize secrets
-    let secrets: Vec<(SecretId, Vec<u8>, u64)> = ciborium::from_reader(plaintext.as_slice())
+    let secrets: Vec<(SecretId, Vec<u8>, u64, u64)> =
+        ciborium::from_reader(plaintext.as_slice())
         .map_err(|e| CryptoError::Deserialization(e.to_string()))?;
 
     Ok(secrets)
@@ -288,8 +290,8 @@ mod tests {
             identity_id: U256::from(456),
         };
         let secrets_to_send = vec![
-            (secret_id1.clone(), b"secret_data_1".to_vec(), 1000),
-            (secret_id2.clone(), b"secret_data_2".to_vec(), 2000),
+            (secret_id1.clone(), b"secret_data_1".to_vec(), 1000, 1),
+            (secret_id2.clone(), b"secret_data_2".to_vec(), 2000, 2),
         ];
 
         let secrets_box =

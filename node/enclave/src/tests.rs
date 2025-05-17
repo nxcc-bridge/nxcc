@@ -91,7 +91,7 @@ async fn test_enclave_workflow() {
     let enclave_pk_for_putter = x25519_dalek::PublicKey::from(
         <[u8; 32]>::try_from(enclave_report_for_putter.ephemeral_public_key.as_slice()).unwrap(),
     );
-    let secrets_to_send = vec![(secret_id.clone(), secret_data.clone(), secret_expiry)];
+    let secrets_to_send = vec![(secret_id.clone(), secret_data.clone(), secret_expiry, 1)];
     let secrets_box_for_put =
         encrypt_secrets_box(&putter_kx, &enclave_pk_for_putter, &secrets_to_send).unwrap();
     let binding_hash_for_put = secrets_box_for_put.calculate_binding_hash();
@@ -229,6 +229,7 @@ async fn test_enclave_workflow() {
     assert_eq!(decrypted_secrets[0].0, secret_id);
     assert_eq!(decrypted_secrets[0].1, secret_data);
     assert_eq!(decrypted_secrets[0].2, secret_expiry);
+    assert_eq!(decrypted_secrets[0].3, 1);
     info!("Step 8: GetSecret succeeded and data verified");
 
     // --- 9. Further GetSecret succeeds (auth not consumed by default) ---
@@ -475,7 +476,7 @@ async fn test_put_secrets_mismatched_binding_hash() {
         .ephemeral_public_key;
     let enclave_pk =
         x25519_dalek::PublicKey::from(<[u8; 32]>::try_from(enclave_pk_bytes.as_slice()).unwrap());
-    let secrets_to_send = vec![(secret_id.clone(), b"data".to_vec(), 0)];
+    let secrets_to_send = vec![(secret_id.clone(), b"data".to_vec(), 0, 1)];
     let secrets_box = encrypt_secrets_box(&putter_kx, &enclave_pk, &secrets_to_send).unwrap();
 
     let correct_binding_hash = secrets_box.calculate_binding_hash();
@@ -582,7 +583,7 @@ async fn test_put_secrets_decryption_failure() {
     let putter_kx = KeyExchangeKeyPair::generate();
     let wrong_recipient_kx = KeyExchangeKeyPair::generate(); // Encrypt for this wrong key
 
-    let secrets_to_send = vec![(secret_id.clone(), b"data".to_vec(), 0)];
+    let secrets_to_send = vec![(secret_id.clone(), b"data".to_vec(), 0, 1)];
     let secrets_box_wrong_key = encrypt_secrets_box(
         &putter_kx,
         wrong_recipient_kx.public_key(), // Encrypt for wrong recipient
@@ -645,7 +646,7 @@ async fn test_get_secrets_unauthorized_node() {
         .ephemeral_public_key;
     let enclave_pk =
         x25519_dalek::PublicKey::from(<[u8; 32]>::try_from(enclave_pk_bytes.as_slice()).unwrap());
-    let secrets_to_send = vec![(secret_id.clone(), secret_data.clone(), 0)];
+    let secrets_to_send = vec![(secret_id.clone(), secret_data.clone(), 0, 1)];
     let secrets_box_put = encrypt_secrets_box(&putter_kx, &enclave_pk, &secrets_to_send).unwrap();
     let binding_hash_put = secrets_box_put.calculate_binding_hash();
     let putter_env_report = test_env_report_for_client(
@@ -907,7 +908,7 @@ async fn test_generate_secrets_workflow() {
         .ephemeral_public_key;
     let enclave_pk =
         x25519_dalek::PublicKey::from(<[u8; 32]>::try_from(enclave_pk_bytes.as_slice()).unwrap());
-    let secrets_to_send_put = vec![(secret_id_gen.clone(), b"overwrite attempt".to_vec(), 0)];
+    let secrets_to_send_put = vec![(secret_id_gen.clone(), b"overwrite attempt".to_vec(), 0, 1)];
     let secrets_box_put =
         encrypt_secrets_box(&putter_kx, &enclave_pk, &secrets_to_send_put).unwrap();
     let binding_hash_put = secrets_box_put.calculate_binding_hash();
@@ -974,5 +975,6 @@ async fn test_generate_secrets_workflow() {
     assert_eq!(decrypted_secrets[0].1.len(), 32);
     assert_ne!(decrypted_secrets[0].1, b"overwrite attempt".to_vec());
     assert_eq!(decrypted_secrets[0].2, 0);
+    assert!(decrypted_secrets[0].3 > 0);
     info!("Test OK: GetSecrets retrieved generated secret successfully");
 }

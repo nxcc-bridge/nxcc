@@ -220,33 +220,56 @@ impl Secrets {
             );
 
             // 5. Store the decrypted secrets
-            for (secret_id, data, expiry) in decrypted_secrets {
+            for (secret_id, data, expiry, generation_timestamp) in decrypted_secrets {
                 if expiry != 0 && expiry <= current_time {
                     info!(
                         "Ignoring expired secret {:?} from node {}",
                         secret_id, env_report.node_id
                     );
                     continue;
-                } // Check if secret already exists
-                if let Some(existing_secret) = secrets_map.get(&secret_id) {
-                    // Existing secret is canonical, ignore the incoming one.
-                    warn!(
-                        "Ignoring incoming secret {:?} from node {}: already exists with \
-                         timestamp {}",
-                        secret_id, env_report.node_id, existing_secret.generation_timestamp
-                    );
-                } else {
-                    let stored_secret = StoredSecret {
-                        data,
-                        expiry,
-                        generation_timestamp: current_time,
-                    };
-                    info!(
-                        "Storing new secret {:?} with expiry {} and timestamp {}",
-                        secret_id, expiry, current_time
-                    );
-                    secrets_map.insert(secret_id, stored_secret);
-                    secrets_added_count += 1;
+                }
+                match secrets_map.get(&secret_id) {
+                    Some(existing_secret) => {
+                        if generation_timestamp > existing_secret.generation_timestamp {
+                            info!(
+                                "Updating secret {:?} from node {} with newer timestamp {} > {}",
+                                secret_id,
+                                env_report.node_id,
+                                generation_timestamp,
+                                existing_secret.generation_timestamp
+                            );
+                            secrets_map.insert(
+                                secret_id,
+                                StoredSecret {
+                                    data,
+                                    expiry,
+                                    generation_timestamp,
+                                },
+                            );
+                            secrets_added_count += 1;
+                        } else {
+                            warn!(
+                                "Ignoring incoming secret {:?} from node {}: existing timestamp {} >= incoming {}",
+                                secret_id,
+                                env_report.node_id,
+                                existing_secret.generation_timestamp,
+                                generation_timestamp
+                            );
+                        }
+                    }
+                    None => {
+                        let stored_secret = StoredSecret {
+                            data,
+                            expiry,
+                            generation_timestamp,
+                        };
+                        info!(
+                            "Storing new secret {:?} with expiry {} and timestamp {}",
+                            secret_id, expiry, generation_timestamp
+                        );
+                        secrets_map.insert(secret_id, stored_secret);
+                        secrets_added_count += 1;
+                    }
                 }
             }
         }
@@ -362,7 +385,7 @@ impl Secrets {
         let requester_kx_pk = PublicKey::from(requester_kx_pk_bytes);
 
         // 2. Check authorization and retrieve secrets
-        let mut secrets_to_pack: Vec<(SecretId, Vec<u8>, u64)> = Vec::new();
+        let mut secrets_to_pack: Vec<(SecretId, Vec<u8>, u64, u64)> = Vec::new();
         {
             // Acquire read locks
             let secrets_map = self.secrets_storage.read().unwrap();
@@ -387,6 +410,7 @@ impl Secrets {
                                 secret_id.clone(),
                                 stored_secret.data.clone(),
                                 stored_secret.expiry,
+                                stored_secret.generation_timestamp,
                             ));
                         } else {
                             info!("Secret {:?} found but expired", secret_id);
@@ -697,7 +721,7 @@ mod tests {
         let sender_kx = KeyExchangeKeyPair::generate(); // Sender's key for DH and attestation
 
         // Create secrets box
-        let secrets_to_send = vec![(secret_id.clone(), secret_data.clone(), expiry)];
+        let secrets_to_send = vec![(secret_id.clone(), secret_data.clone(), expiry, 1)];
         let secrets_box = encrypt_secrets_box(
             &sender_kx,
             secrets.ephemeral_kx_keypair.public_key(),
@@ -746,6 +770,7 @@ mod tests {
             secret_id.clone(),
             vec![11, 21, 31],
             Utc::now().timestamp() as u64 + 3600,
+            1,
         )];
         let secrets_box = encrypt_secrets_box(
             &sender_kx,
@@ -803,7 +828,7 @@ mod tests {
         let sender_kx = KeyExchangeKeyPair::generate();
 
         // --- First Put ---
-        let secrets_to_send1 = vec![(secret_id.clone(), initial_secret_data.clone(), 0)];
+        let secrets_to_send1 = vec![(secret_id.clone(), initial_secret_data.clone(), 0, 1)];
         let secrets_box1 = encrypt_secrets_box(
             &sender_kx,
             secrets.ephemeral_kx_keypair.public_key(),
@@ -838,7 +863,8 @@ mod tests {
 
         // --- Second Put (attempt to overwrite) ---
         let new_secret_data = vec![2, 2, 2];
-        let secrets_to_send2 = vec![(secret_id.clone(), new_secret_data.clone(), 9999)];
+        let expiry2 = Utc::now().timestamp() as u64 + 3600;
+        let secrets_to_send2 = vec![(secret_id.clone(), new_secret_data.clone(), expiry2, 2)];
         // Use same sender_kx, so attestation's PK is same. Box content changes, so binding_hash changes.
         let secrets_box2 = encrypt_secrets_box(
             &sender_kx,
@@ -869,7 +895,7 @@ mod tests {
 
         let result2 = secrets.put_secrets(vec![(secrets_box2, env_report2.clone())]);
         assert!(result2.is_ok());
-        assert!(!result2.unwrap()); // Should be false as secret exists
+        assert!(result2.unwrap()); // Should update with newer timestamp
 
         let stored_after = secrets
             .secrets_storage
@@ -878,8 +904,8 @@ mod tests {
             .get(&secret_id)
             .unwrap()
             .clone();
-        assert_eq!(stored_after.data, initial_secret_data);
-        assert_eq!(stored_after.generation_timestamp, initial_timestamp);
+        assert_eq!(stored_after.data, new_secret_data);
+        assert!(stored_after.generation_timestamp > initial_timestamp);
     }
 
     #[test]
@@ -889,7 +915,7 @@ mod tests {
         let secret_id = test_secret_id(567);
 
         let sender_kx = KeyExchangeKeyPair::generate();
-        let secrets_to_send = vec![(secret_id.clone(), vec![10, 20, 30], 0)];
+        let secrets_to_send = vec![(secret_id.clone(), vec![10, 20, 30], 0, 1)];
         let secrets_box = encrypt_secrets_box(
             &sender_kx,
             secrets.ephemeral_kx_keypair.public_key(),
@@ -927,7 +953,7 @@ mod tests {
         let expiry = Utc::now().timestamp() as u64 - 3600; // Expired
 
         let sender_kx = KeyExchangeKeyPair::generate();
-        let secrets_to_send = vec![(secret_id.clone(), vec![10, 20, 30], expiry)];
+        let secrets_to_send = vec![(secret_id.clone(), vec![10, 20, 30], expiry, 1)];
         let secrets_box = encrypt_secrets_box(
             &sender_kx,
             secrets.ephemeral_kx_keypair.public_key(),
@@ -962,6 +988,67 @@ mod tests {
     }
 
     #[test]
+    fn test_put_secrets_older_ignored() {
+        let secrets = Secrets::new();
+        let node_id = "test-node-old";
+        let secret_id = test_secret_id(679);
+
+        let sender_kx = KeyExchangeKeyPair::generate();
+
+        // First put with newer timestamp
+        let secrets_to_send1 = vec![(secret_id.clone(), vec![1], 0, 2)];
+        let box1 = encrypt_secrets_box(
+            &sender_kx,
+            secrets.ephemeral_kx_keypair.public_key(),
+            &secrets_to_send1,
+        )
+        .unwrap();
+        let bh1 = box1.calculate_binding_hash();
+        let env1 = test_env_report(
+            node_id,
+            test_attestation_report(sender_kx.public_key().as_bytes().to_vec(), bh1.to_vec()),
+        );
+        let auth_req1 = PolicyExecutionRequest {
+            secret_ids: vec![secret_id.clone()],
+            consumer: ConsumerInfo::default(),
+            env_report: env1.clone(),
+        };
+        secrets.store_authorization(test_policy_report(auth_req1, true));
+        assert!(secrets.put_secrets(vec![(box1, env1.clone())]).unwrap());
+
+        // Second put with older timestamp
+        let secrets_to_send2 = vec![(secret_id.clone(), vec![2], 0, 1)];
+        let box2 = encrypt_secrets_box(
+            &sender_kx,
+            secrets.ephemeral_kx_keypair.public_key(),
+            &secrets_to_send2,
+        )
+        .unwrap();
+        let env2 = test_env_report(
+            node_id,
+            test_attestation_report(sender_kx.public_key().as_bytes().to_vec(), box2.calculate_binding_hash().to_vec()),
+        );
+        let auth_req2 = PolicyExecutionRequest {
+            secret_ids: vec![secret_id.clone()],
+            consumer: ConsumerInfo::default(),
+            env_report: env2.clone(),
+        };
+        secrets.store_authorization(test_policy_report(auth_req2, true));
+        let res2 = secrets.put_secrets(vec![(box2, env2.clone())]).unwrap();
+        assert!(!res2);
+
+        let stored = secrets
+            .secrets_storage
+            .read()
+            .unwrap()
+            .get(&secret_id)
+            .unwrap()
+            .clone();
+        assert_eq!(stored.data, vec![1]);
+        assert_eq!(stored.generation_timestamp, 2);
+    }
+
+    #[test]
     fn test_put_secrets_multiple_bundles() {
         let secrets = Secrets::new();
         let node_id1 = "test-node-7a";
@@ -975,8 +1062,8 @@ mod tests {
 
         // --- Bundle 1 Prep (node1, secret1 - auth, secret3 - unauth) ---
         let secrets_to_send1 = vec![
-            (secret_id1.clone(), vec![1, 2, 3], 0),
-            (secret_id3_unauth.clone(), vec![9, 9, 9], 0),
+            (secret_id1.clone(), vec![1, 2, 3], 0, 1),
+            (secret_id3_unauth.clone(), vec![9, 9, 9], 0, 1),
         ];
         let secrets_box1 = encrypt_secrets_box(
             &sender_kx1,
@@ -1001,7 +1088,7 @@ mod tests {
         // Node1 is NOT authorized for secret_id3_unauth with attestation1
 
         // --- Bundle 2 Prep (node2, secret2 - auth) ---
-        let secrets_to_send2 = vec![(secret_id2.clone(), vec![4, 5, 6], 0)];
+        let secrets_to_send2 = vec![(secret_id2.clone(), vec![4, 5, 6], 0, 1)];
         let secrets_box2 = encrypt_secrets_box(
             &sender_kx2,
             secrets.ephemeral_kx_keypair.public_key(),
