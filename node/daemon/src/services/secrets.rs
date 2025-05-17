@@ -656,7 +656,7 @@ impl SecretsService {
         // Could be batched if the policy worker supports it.
         for secret_id in &ids {
             // 1. Construct self EnvReport (hash doesn't matter for self-auth check)
-            let self_env_report = self.get_own_env_report(vec![0u8; 32]).await?;
+            let self_env_report = self.get_own_env_report(vec![]).await?;
 
             // 1.5 Get Policy
             let policy = self.policy_manager.get_policy(secret_id).await?;
