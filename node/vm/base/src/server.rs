@@ -79,14 +79,12 @@ pub trait VmRuntime: Send + Sync + 'static {
     async fn get_worker_logs(&self, id: String) -> Result<String, VmError>;
 }
 
-use nxcc_interface::{
-    proto::vm::{
-        GetAttestationRequest, GetAttestationResponse, GetWorkerLogsRequest, GetWorkerLogsResponse,
-        GetWorkerStatusRequest, GetWorkerStatusResponse, InvokeWorkerRequest, InvokeWorkerResponse,
-        ListRunningWorkersRequest, ListRunningWorkersResponse, StartWorkerRequest,
-        StartWorkerResponse, StopWorkerRequest, StopWorkerResponse, WorkerStatus,
-        vm_server::{Vm, VmServer},
-    },
+use nxcc_interface::proto::vm::{
+    GetAttestationRequest, GetAttestationResponse, GetWorkerLogsRequest, GetWorkerLogsResponse,
+    GetWorkerStatusRequest, GetWorkerStatusResponse, InvokeWorkerRequest, InvokeWorkerResponse,
+    ListRunningWorkersRequest, ListRunningWorkersResponse, StartWorkerRequest, StartWorkerResponse,
+    StopWorkerRequest, StopWorkerResponse, WorkerStatus,
+    vm_server::{Vm, VmServer},
 };
 
 pub struct VmServiceGrpc<T: VmRuntime> {
@@ -210,7 +208,8 @@ impl<T: VmRuntime> Vm for VmServiceGrpc<T> {
         match self.runtime.get_attestation(req.user_data).await {
             Ok(report) => {
                 debug!("Successfully retrieved attestation report");
-                let proto_report: nxcc_interface::proto::interface::AttestationReport = report.into();
+                let proto_report: nxcc_interface::proto::interface::AttestationReport =
+                    report.into();
                 Ok(Response::new(GetAttestationResponse {
                     report: Some(proto_report),
                 }))
@@ -340,8 +339,7 @@ pub async fn run_vm_server<T: VmRuntime>(
     let client_binding_layer = ClientBindingLayer::new(bound_client);
     let grpc_service = VmServiceGrpc::new(runtime);
 
-    let server_builder = Server::builder()
-        .add_service(VmServer::new(grpc_service));
+    let server_builder = Server::builder().add_service(VmServer::new(grpc_service));
 
     match config {
         #[cfg(feature = "uds")]

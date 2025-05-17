@@ -218,7 +218,7 @@ pub fn decrypt_secrets_box(
     // Deserialize secrets
     let secrets: Vec<(SecretId, Vec<u8>, u64, u64)> =
         ciborium::from_reader(plaintext.as_slice())
-        .map_err(|e| CryptoError::Deserialization(e.to_string()))?;
+            .map_err(|e| CryptoError::Deserialization(e.to_string()))?;
 
     Ok(secrets)
 }

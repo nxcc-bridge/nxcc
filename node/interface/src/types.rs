@@ -158,7 +158,9 @@ impl From<interface::EnvReport> for EnvReport {
             attestation: p
                 .attestation
                 .map(AttestationReport::from)
-                .unwrap_or_else(|| AttestationReport::from(interface::AttestationReport::default())),
+                .unwrap_or_else(
+                    || AttestationReport::from(interface::AttestationReport::default()),
+                ),
             operator_signature: p.operator_signature,
             node_id: p.node_id,
         }
@@ -370,7 +372,9 @@ impl From<UdsAddress> for enclave::UdsAddress {
 
 impl From<&UdsAddress> for enclave::UdsAddress {
     fn from(value: &UdsAddress) -> Self {
-        enclave::UdsAddress { path: value.path.clone() }
+        enclave::UdsAddress {
+            path: value.path.clone(),
+        }
     }
 }
 
@@ -417,9 +421,15 @@ pub enum VmAddress {
 impl From<enclave::VmAddress> for VmAddress {
     fn from(p: enclave::VmAddress) -> Self {
         match p.address_type {
-            Some(enclave::vm_address::AddressType::Tcp(tcp)) => VmAddress::Tcp(TcpAddress::from(tcp)),
-            Some(enclave::vm_address::AddressType::Uds(uds)) => VmAddress::Uds(UdsAddress::from(uds)),
-            Some(enclave::vm_address::AddressType::Vsock(vsock)) => VmAddress::Vsock(VsockAddress::from(vsock)),
+            Some(enclave::vm_address::AddressType::Tcp(tcp)) => {
+                VmAddress::Tcp(TcpAddress::from(tcp))
+            }
+            Some(enclave::vm_address::AddressType::Uds(uds)) => {
+                VmAddress::Uds(UdsAddress::from(uds))
+            }
+            Some(enclave::vm_address::AddressType::Vsock(vsock)) => {
+                VmAddress::Vsock(VsockAddress::from(vsock))
+            }
             None => panic!("VmAddress proto is missing address_type"), // Or return an error
         }
     }

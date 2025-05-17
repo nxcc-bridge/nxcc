@@ -132,11 +132,7 @@ impl SecretsServerTrait for SecretsGrpcService {
     ) -> Result<Response<CheckSecretsResponse>, Status> {
         let proto_req = request.into_inner();
         debug!("gRPC CheckSecrets request for {} IDs", proto_req.ids.len());
-        let ids: Vec<SecretId> = proto_req
-            .ids
-            .into_iter()
-            .map(SecretId::from)
-            .collect();
+        let ids: Vec<SecretId> = proto_req.ids.into_iter().map(SecretId::from).collect();
 
         match self.secrets.check_secrets(ids) {
             Ok(statuses) => {
@@ -168,11 +164,7 @@ impl SecretsServerTrait for SecretsGrpcService {
             "gRPC GenerateSecrets request for {} IDs",
             proto_req.ids.len()
         );
-        let ids: Vec<SecretId> = proto_req
-            .ids
-            .into_iter()
-            .map(SecretId::from)
-            .collect();
+        let ids: Vec<SecretId> = proto_req.ids.into_iter().map(SecretId::from).collect();
 
         match self.secrets.generate_secrets(ids) {
             Ok(()) => Ok(Response::new(())),

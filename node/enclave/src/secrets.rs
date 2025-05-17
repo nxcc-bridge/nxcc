@@ -249,7 +249,8 @@ impl Secrets {
                             secrets_added_count += 1;
                         } else {
                             warn!(
-                                "Ignoring incoming secret {:?} from node {}: existing timestamp {} >= incoming {}",
+                                "Ignoring incoming secret {:?} from node {}: existing timestamp \
+                                 {} >= incoming {}",
                                 secret_id,
                                 env_report.node_id,
                                 existing_secret.generation_timestamp,
@@ -1026,7 +1027,10 @@ mod tests {
         .unwrap();
         let env2 = test_env_report(
             node_id,
-            test_attestation_report(sender_kx.public_key().as_bytes().to_vec(), box2.calculate_binding_hash().to_vec()),
+            test_attestation_report(
+                sender_kx.public_key().as_bytes().to_vec(),
+                box2.calculate_binding_hash().to_vec(),
+            ),
         );
         let auth_req2 = PolicyExecutionRequest {
             secret_ids: vec![secret_id.clone()],

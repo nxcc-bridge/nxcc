@@ -13,8 +13,8 @@ use nxcc_interface::{
         secrets_server::Secrets as _,
     },
     types::{
-        AttestationReport, ConsumerInfo, EnvReport, PolicyExecutionReport,
-        PolicyExecutionRequest, SecretId, SecretsBox,
+        AttestationReport, ConsumerInfo, EnvReport, PolicyExecutionReport, PolicyExecutionRequest,
+        SecretId, SecretsBox,
     },
 };
 use nxcc_vm_base::client::mock::{MockExecutionBehavior, MockVmServiceClient};
@@ -219,8 +219,7 @@ async fn test_enclave_workflow() {
         requester_env_report: Some(getter_env_report.clone().into()), // Getter uses its EnvReport
     });
     let get_secrets_resp_ok = secrets_grpc.get_secrets(get_secrets_req_ok).await.unwrap();
-    let secrets_box_ok =
-        SecretsBox::from(get_secrets_resp_ok.into_inner().secrets_box.unwrap());
+    let secrets_box_ok = SecretsBox::from(get_secrets_resp_ok.into_inner().secrets_box.unwrap());
     assert_eq!(secrets_box_ok.contained_secret_ids.len(), 1);
     assert_eq!(secrets_box_ok.contained_secret_ids[0], secret_id);
 
@@ -708,8 +707,7 @@ async fn test_get_secrets_unauthorized_node() {
         requester_env_report: Some(unauthorized_getter_env_report.clone().into()),
     });
     let get_resp_unauth = secrets_grpc.get_secrets(get_req_unauth).await.unwrap();
-    let secrets_box_unauth =
-        SecretsBox::from(get_resp_unauth.into_inner().secrets_box.unwrap());
+    let secrets_box_unauth = SecretsBox::from(get_resp_unauth.into_inner().secrets_box.unwrap());
     assert!(
         secrets_box_unauth.contained_secret_ids.is_empty(),
         "Unauthorized GetSecrets should yield empty box"
