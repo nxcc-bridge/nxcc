@@ -7,11 +7,11 @@ use std::{
 };
 
 use alloy_primitives::hex;
-use percent_encoding::percent_decode_str;
 use nxcc_interface::types::{
     DSSE_WORKER_BUNDLE_PAYLOAD_TYPE, DsseEnvelope, DsseSignatureEntry, FullPolicyPackage, SecretId,
     WorkerBundle, WorkerBundlePayload, WorkerBundlePointer, WorkerManifest,
 };
+use percent_encoding::percent_decode_str;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, trace, warn};
 
@@ -192,7 +192,7 @@ impl PolicyManager {
         Ok(manifest)
     }
 
-    async fn fetch_worker_bundle(
+    pub(crate) async fn fetch_worker_bundle(
         &self,
         bundle_pointer: &WorkerBundlePointer,
         manifest_url_for_context: &str, // Used to resolve relative file URLs for mocks
@@ -448,8 +448,9 @@ fn decode_data_url(url: &str) -> Result<Vec<u8>, AppError> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use alloy_primitives::{Address, U256};
+
+    use super::*;
 
     #[tokio::test]
     #[tracing_test::traced_test]
@@ -473,7 +474,10 @@ mod tests {
             }],
         };
         let dsse_bytes = serde_json::to_vec(&dsse).unwrap();
-        let data_url = format!("data:application/json;base64,{}", base64::encode(&dsse_bytes));
+        let data_url = format!(
+            "data:application/json;base64,{}",
+            base64::encode(&dsse_bytes)
+        );
         let pointer = WorkerBundlePointer {
             source: data_url.parse().unwrap(),
             hash: None,

@@ -75,13 +75,13 @@ async fn main() -> anyhow::Result<()> {
         config.enclave.clone(),
     ));
     let gateway_manager = GatewayManager::new();
-    let policy_manager = Arc::new(PolicyManager::new(gateway_manager, &config).await?);
+    let policy_manager = Arc::new(PolicyManager::new(gateway_manager.clone(), &config).await?);
 
-    // Attach the policy VM to the enclave's runner service
+    // Attach the default VM to the enclave's runner service
     runner_service
-        .attach_policy_vm()
+        .attach_default_vm()
         .await
-        .expect("Failed to attach policy VM to enclave runner");
+        .expect("Failed to attach default VM to enclave runner");
 
     let secrets_service = SecretsService::new(
         secrets_tx.clone(),
@@ -89,7 +89,6 @@ async fn main() -> anyhow::Result<()> {
         policy_manager.clone(),
         runner_service.clone(), // Inject RunnerService
         local_key.clone(),      // Pass the local keypair
-                                // Arc::new(config.clone()), // Pass config if needed
     );
 
     {
@@ -115,11 +114,21 @@ async fn main() -> anyhow::Result<()> {
         let secrets_service_clone = secrets_service.clone();
         // Pass enclave client to gRPC server for the final get_secrets call
         let enclave_client_clone = enclave_client.clone();
+        // Create WorkOrderOrchestrator here and pass it
+        let work_order_orchestrator =
+            crate::services::work_order_orchestrator::WorkOrderOrchestrator::new(
+                enclave_client.clone(),
+                secrets_service.clone(),
+                policy_manager.clone(), // Pass the already created PolicyManager
+                Arc::new(config.clone()), // Pass the main config
+            );
+
         tokio::spawn(async move {
             if let Err(e) = crate::grpc::start_grpc_server(
                 &grpc_config,
                 secrets_service_clone,
-                enclave_client_clone, // Pass enclave client here
+                work_order_orchestrator,
+                enclave_client_clone,
                 shutdown_rx,
             )
             .await

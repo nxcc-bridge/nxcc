@@ -35,3 +35,6 @@ tempfile = "3.19.1"
 base64 = "0.22.1"
 sha2 = "0.10.9"
 percent-encoding = "2.3.1"
+
+[dev-dependencies]
+tracing-test = "0.2.5"

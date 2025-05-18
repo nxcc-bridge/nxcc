@@ -140,23 +140,23 @@ pub struct EnclaveConfig {
 
     /// The identifier for the VM instance attached to the enclave for policy execution.
     /// This ID is used in RunWorker requests to the enclave.
-    #[clap(long, default_value = "policy-vm-0")]
-    #[serde(default = "default_policy_vm_id")]
-    pub policy_vm_id: String,
+    #[clap(long, default_value = "nxcc/workerd")]
+    #[serde(default = "default_default_vm_id")]
+    pub default_vm_id: String,
 
     /// The UDS path for the VM gRPC service that the enclave should connect to.
     /// The daemon tells the enclave this path via AttachVm.
     #[clap(long, default_value = "/tmp/nxcc-workerd-vmm.sock")]
-    #[serde(default = "default_policy_vm_uds_path")]
-    pub policy_vm_uds_path: String,
+    #[serde(default = "default_default_vm_uds_path")]
+    pub default_vm_uds_path: String,
 }
 
 impl Default for EnclaveConfig {
     fn default() -> Self {
         Self {
             enclave_uds_path: default_enclave_uds_path(),
-            policy_vm_id: default_policy_vm_id(),
-            policy_vm_uds_path: default_policy_vm_uds_path(),
+            default_vm_id: default_default_vm_id(),
+            default_vm_uds_path: default_default_vm_uds_path(),
         }
     }
 }
@@ -164,10 +164,10 @@ impl Default for EnclaveConfig {
 fn default_enclave_uds_path() -> String {
     "/tmp/enclave_grpc.sock".to_string()
 }
-fn default_policy_vm_id() -> String {
-    "policy-vm-0".to_string()
+fn default_default_vm_id() -> String {
+    "nxcc/workerd".to_string()
 }
-fn default_policy_vm_uds_path() -> String {
+fn default_default_vm_uds_path() -> String {
     "/tmp/nxcc-workerd-vmm.sock".to_string()
 }
 

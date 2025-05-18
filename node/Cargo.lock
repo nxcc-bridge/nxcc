@@ -4032,6 +4032,7 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-subscriber",
+ "tracing-test",
  "url",
 ]
 

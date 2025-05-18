@@ -4,10 +4,10 @@ use nxcc_interface::{
         AttachVmRequest, AuthorizeEnclaveForWorkerSecretsRequest, CheckSecretsRequest,
         DetachVmRequest, ExecutePolicyRequest as ProtoExecutePolicyRequest,
         ExecutePolicyResponse as ProtoExecutePolicyResponse, GenerateSecretsRequest,
-        GetReportRequest, GetSecretsRequest, PutSecretsRequest, PutSecretsResponse,
-        RunWorkerRequest, RunWorkerResponse, SecretsBundle as ProtoSecretsBundle,
-        TerminateWorkerRequest, VmAddress as ProtoVmAddress, runner_client::RunnerClient,
-        secrets_client::SecretsClient,
+        GetReportRequest, GetSecretsRequest, InvokeWorkerRequest, PutSecretsRequest,
+        PutSecretsResponse, RunWorkerRequest, RunWorkerResponse,
+        SecretsBundle as ProtoSecretsBundle, TerminateWorkerRequest, VmAddress as ProtoVmAddress,
+        runner_client::RunnerClient, secrets_client::SecretsClient,
     },
     types::{AttestationReport, ConsumerInfo, EnvReport, SecretId, SecretsBox},
 };
@@ -234,6 +234,13 @@ impl EnclaveClient {
                 inner.error_message
             ))
         }
+    }
+
+    pub async fn invoke_worker(&self, worker_id: String, payload: Vec<u8>) -> Result<(), String> {
+        let req = InvokeWorkerRequest { worker_id, payload };
+        let mut client = self.runner();
+        client.invoke_worker(req).await.map_err(|e| e.to_string())?;
+        Ok(())
     }
 
     pub async fn terminate_worker(&self, worker_id: String) -> Result<(), String> {

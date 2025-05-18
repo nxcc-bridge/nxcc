@@ -48,7 +48,7 @@ impl From<&AttestationReport> for interface::AttestationReport {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SecretId {
     pub chain_id: u64,
     pub identity_address: Address,
@@ -606,4 +606,31 @@ mod serde_base64 {
 pub struct FullPolicyPackage {
     pub manifest: WorkerManifest,
     pub bundle: WorkerBundle,
+}
+
+/// The inner payload of a `WorkOrder` that gets signed.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkOrderPayload {
+    /// An arbitrary identifier for this work order.
+    /// Useful for debugging and ensuring uniqueness when broadcasting over the p2p network.
+    pub id: String,
+    /// The worker to run, and its inputs and configuration.
+    pub worker: WorkerManifest,
+    /// Event listeners for the daemon to set up. The daemon will invoke the worker when they happen.
+    pub events: Vec<WorkerEvent>,
+}
+
+/// An event that can trigger a worker.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkerEvent {
+    pub kind: WorkerEventKind,
+}
+
+/// The kind of an event that can trigger a worker.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub enum WorkerEventKind {
+    /// Runs whenever the worker is freshly started.
+    Launch,
 }

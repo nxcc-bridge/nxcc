@@ -838,7 +838,10 @@ impl SecretsService {
     }
 
     /// Constructs the EnvReport for the current node.
-    async fn get_own_env_report(&self, user_data_hash: Vec<u8>) -> Result<EnvReport, AppError> {
+    pub(crate) async fn get_own_env_report(
+        &self,
+        user_data_hash: Vec<u8>,
+    ) -> Result<EnvReport, AppError> {
         let attestation = self
             .enclave_client
             .get_report(user_data_hash)

@@ -17,7 +17,7 @@ use crate::{config::EnclaveConfig, error::AppError};
 #[derive(Clone)]
 pub struct RunnerService {
     client: RunnerClient<Channel>,
-    enclave_config: EnclaveConfig, // Needed for policy_vm_id
+    enclave_config: EnclaveConfig, // Needed for default_vm_id
 }
 
 impl RunnerService {
@@ -28,23 +28,23 @@ impl RunnerService {
         }
     }
 
-    /// Attaches the configured policy VM to the enclave runner.
-    pub async fn attach_policy_vm(&self) -> Result<bool, AppError> {
+    /// Attaches the configured default VM to the enclave runner.
+    pub async fn attach_default_vm(&self) -> Result<bool, AppError> {
         info!(
-            "Attaching policy VM ({}) to enclave runner at UDS path {}...",
-            self.enclave_config.policy_vm_id, self.enclave_config.policy_vm_uds_path
+            "Attaching default VM ({}) to enclave runner at UDS path {}...",
+            self.enclave_config.default_vm_id, self.enclave_config.default_vm_uds_path
         );
         let address = nxcc_interface::proto::enclave::VmAddress {
             address_type: Some(
                 nxcc_interface::proto::enclave::vm_address::AddressType::Uds(
                     nxcc_interface::proto::enclave::UdsAddress {
-                        path: self.enclave_config.policy_vm_uds_path.clone(),
+                        path: self.enclave_config.default_vm_uds_path.clone(),
                     },
                 ),
             ),
         };
         let req = nxcc_interface::proto::enclave::AttachVmRequest {
-            vm_id: self.enclave_config.policy_vm_id.clone(),
+            vm_id: self.enclave_config.default_vm_id.clone(),
             address: Some(address),
         };
         let mut client = self.client.clone();
@@ -54,15 +54,15 @@ impl RunnerService {
             .map_err(|e| AppError::Service(format!("Failed to attach VM: {}", e)))?;
         let attached = resp.into_inner().attached;
         if attached {
-            info!("Successfully attached policy VM.");
+            info!("Successfully attached default VM.");
         } else {
-            warn!("Failed to attach policy VM (enclave reported not attached).");
+            warn!("Failed to attach default VM (enclave reported not attached).");
         }
         Ok(attached)
     }
 
-    /// Runs a worker (typically a policy worker) in the pre-configured policy VM.
-    async fn run_worker_in_policy_vm(
+    /// Runs a worker (typically a policy worker) in the pre-configured default VM.
+    async fn run_worker_in_default_vm(
         &self,
         manifest: &WorkerManifest,
         bundle: &WorkerBundle,
@@ -70,7 +70,7 @@ impl RunnerService {
         let manifest_bytes = serde_json::to_vec(manifest).unwrap();
         let bundle_bytes = bundle.0.clone();
         let req = RunWorkerRequest {
-            vm_id: self.enclave_config.policy_vm_id.clone(),
+            vm_id: self.enclave_config.default_vm_id.clone(),
             worker_manifest_bytes: manifest_bytes,
             worker_bundle_bytes: bundle_bytes,
         };
@@ -82,13 +82,13 @@ impl RunnerService {
         let inner = resp.into_inner();
         if inner.success {
             debug!(
-                "Successfully started worker {} in policy VM",
+                "Successfully started worker {} in default VM",
                 inner.worker_id
             );
             Ok(inner.worker_id)
         } else {
             Err(AppError::Service(format!(
-                "Enclave runner failed to start worker in policy VM: {}",
+                "Enclave runner failed to start worker in default VM: {}",
                 inner.error_message
             )))
         }
@@ -150,7 +150,7 @@ impl RunnerService {
         let FullPolicyPackage { manifest, bundle } = policy_package;
 
         // 1. Start Worker
-        let worker_id = self.run_worker_in_policy_vm(&manifest, &bundle).await?;
+        let worker_id = self.run_worker_in_default_vm(&manifest, &bundle).await?;
         info!(
             "Started policy worker {} for node {}",
             worker_id, env_report.node_id

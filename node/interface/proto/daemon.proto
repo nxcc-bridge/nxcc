@@ -39,3 +39,18 @@ message AttachVmRequest {
 message AttachVmResponse {
   bool success = 1;
 }
+
+// Work Order service for submitting work orders to the daemon.
+service WorkOrder {
+  rpc SubmitWorkOrder (SubmitWorkOrderRequest) returns (SubmitWorkOrderResponse);
+}
+
+message SubmitWorkOrderRequest {
+  bytes work_order_dsse_bytes = 1; // Serialized DsseEnvelope (JSON bytes) containing WorkOrderPayload
+}
+
+message SubmitWorkOrderResponse {
+  string work_order_id = 1; // The ID from the WorkOrderPayload
+  bool success = 2;
+  string message = 3; // e.g., "Work order submitted" or error details
+}
