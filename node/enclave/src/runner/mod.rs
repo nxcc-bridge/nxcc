@@ -237,11 +237,11 @@ impl RunnerService {
         let mut worker_secrets_for_vm = HashMap::new();
         if !worker_manifest.identities.is_empty() {
             let bundle_payload_hash = worker_bundle.hash_signed_payload();
-            let cose_signature = worker_bundle.get_cose_signature();
+            let dsse_signature = worker_bundle.get_dsse_signature();
 
             let worker_consumer_info = ConsumerInfo {
                 bundle_hash: bundle_payload_hash,
-                signature: cose_signature,
+                signature: dsse_signature,
             };
 
             match self.secrets.get_secrets_for_local_worker(

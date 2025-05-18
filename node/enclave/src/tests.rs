@@ -14,9 +14,9 @@ use nxcc_interface::{
     },
     proto::interface::SecretRequest, // Added correct import
     types::{
-        AttestationReport, ConsumerInfo, EnvReport, PolicyExecutionReport, PolicyExecutionRequest,
-        SecretId, SecretsBox, WorkerBundle, WorkerBundlePayload, WorkerBundlePointer,
-        WorkerManifest,
+        AttestationReport, ConsumerInfo, DSSE_WORKER_BUNDLE_PAYLOAD_TYPE, DsseEnvelope,
+        DsseSignatureEntry, EnvReport, PolicyExecutionReport, PolicyExecutionRequest, SecretId,
+        SecretsBox, WorkerBundle, WorkerBundlePayload, WorkerBundlePointer, WorkerManifest,
     },
 };
 use nxcc_vm_base::client::mock::{MockExecutionBehavior, MockVmServiceClient};
@@ -207,7 +207,7 @@ async fn test_enclave_workflow() {
         &runner_grpc,
         &mock_vm_client,
         &policy_worker_id,
-        getter_env_report.clone(), // Getter presents its EnvReport
+        getter_env_report.clone(), // Getter presents its EnvReport again
         vec![secret_id.clone()],
         true, // Expect policy to succeed for getter
     )
@@ -304,11 +304,22 @@ async fn run_policy_worker(
         identities: vec![], // Policies typically don't request secrets themselves
         userdata: Default::default(),
     };
-    let policy_bundle_obj = WorkerBundle::new_from_payload(&WorkerBundlePayload {
+    let policy_payload_struct = WorkerBundlePayload {
         vm: "mock-vm".to_string(),
         executable: policy_executable_code.clone(),
         metadata: Default::default(),
-    });
+    };
+    let json_payload_bytes = serde_json::to_vec(&policy_payload_struct).unwrap();
+
+    let policy_dsse_envelope = DsseEnvelope {
+        payload: base64::encode(&json_payload_bytes),
+        payload_type: DSSE_WORKER_BUNDLE_PAYLOAD_TYPE.to_string(),
+        signatures: vec![DsseSignatureEntry {
+            key_id: Some("mock_policy_worker_key_id".to_string()),
+            sig: base64::encode(b"mock_policy_worker_signature_bytes_for_dsse"),
+        }],
+    };
+    let policy_bundle_obj = WorkerBundle(serde_json::to_vec(&policy_dsse_envelope).unwrap());
 
     let policy_manifest_bytes = serde_json::to_vec(&policy_manifest_obj).unwrap();
     let policy_bundle_bytes = policy_bundle_obj.0.clone();
@@ -1040,11 +1051,21 @@ async fn test_local_worker_secret_authorization_flow() {
         identities: vec![(secret_id_for_worker.clone(), secret_name_in_worker.clone())],
         userdata: Default::default(),
     };
-    let worker_bundle_obj = WorkerBundle::new_from_payload(&WorkerBundlePayload {
+    let local_worker_payload_struct = WorkerBundlePayload {
         vm: "local-vm".to_string(),
         executable: b"local worker code".to_vec(),
         metadata: Default::default(),
-    });
+    };
+    let mut json_local_worker_payload = serde_json::to_vec(&local_worker_payload_struct).unwrap();
+    let local_worker_dsse_envelope = DsseEnvelope {
+        payload: base64::encode(&json_local_worker_payload),
+        payload_type: DSSE_WORKER_BUNDLE_PAYLOAD_TYPE.to_string(),
+        signatures: vec![DsseSignatureEntry {
+            key_id: Some("local_worker_key_id".to_string()),
+            sig: base64::encode(b"local_worker_signature_bytes_for_dsse_test"),
+        }],
+    };
+    let worker_bundle_obj = WorkerBundle(serde_json::to_vec(&local_worker_dsse_envelope).unwrap());
 
     // 3. Daemon (simulated by test) calls Enclave to authorize enclave for worker secrets
     let daemon_env_report = test_env_report_for_client(
@@ -1054,7 +1075,7 @@ async fn test_local_worker_secret_authorization_flow() {
     );
     let worker_consumer_info = ConsumerInfo {
         bundle_hash: worker_bundle_obj.hash_signed_payload(),
-        signature: worker_bundle_obj.get_cose_signature(),
+        signature: worker_bundle_obj.get_dsse_signature(),
     };
     let auth_req = Request::new(AuthorizeEnclaveForWorkerSecretsRequest {
         secret_ids: vec![secret_id_for_worker.clone().into()],

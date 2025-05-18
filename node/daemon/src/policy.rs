@@ -6,9 +6,10 @@ use std::{
     time::SystemTime,
 };
 
+use alloy_primitives::hex;
 use nxcc_interface::types::{
-    FullPolicyPackage, SecretId, WorkerBundle, WorkerBundlePayload, WorkerBundlePointer,
-    WorkerManifest,
+    DSSE_WORKER_BUNDLE_PAYLOAD_TYPE, DsseEnvelope, DsseSignatureEntry, FullPolicyPackage, SecretId,
+    WorkerBundle, WorkerBundlePayload, WorkerBundlePointer, WorkerManifest,
 };
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, trace, warn};
@@ -190,10 +191,13 @@ impl PolicyManager {
             secret_id_for_log, bundle_url_str
         );
 
-        let executable_bytes = if bundle_pointer.source.scheme() == "file" {
+        let dsse_envelope_bytes = if bundle_pointer.source.scheme() == "file" {
             // Handle local file paths, potentially relative for mock scenarios
             let path_str = bundle_pointer.source.path();
             let path = PathBuf::from(path_str.strip_prefix('/').unwrap_or(path_str)); // Handle absolute file paths
+            let current_dir = std::env::current_dir().map_err(|e| {
+                AppError::Internal(format!("Failed to get current directory: {}", e))
+            })?;
 
             let absolute_path = if path.is_absolute() {
                 path
@@ -230,9 +234,43 @@ impl PolicyManager {
                 "Loading worker executable from: {}",
                 absolute_path.display()
             );
-            tokio::fs::read(&absolute_path)
+            let file_content_bytes = tokio::fs::read(&absolute_path)
                 .await
-                .map_err(AppError::Io)?
+                .map_err(AppError::Io)?;
+
+            // If it's a local file (likely for mocking/testing), and it looks like raw executable (e.g. .js)
+            // wrap it in a mock DSSE envelope.
+            // In a production scenario, file:// URLs should point to complete DSSE envelopes.
+            if absolute_path
+                .extension()
+                .map_or(false, |ext| ext == "js" || ext == "wasm")
+            {
+                warn!(
+                    "Local file bundle source {} appears to be raw executable; wrapping in mock \
+                     DSSE envelope for policy {:?}",
+                    absolute_path.display(),
+                    secret_id_for_log
+                );
+
+                let payload_struct = WorkerBundlePayload {
+                    vm: "nxcc/workerd".to_string(), // TODO: Get from manifest or bundle itself?
+                    executable: file_content_bytes,
+                    metadata: HashMap::new(),
+                };
+                let json_payload_bytes = serde_json::to_vec(&payload_struct).unwrap();
+
+                let dsse_envelope = DsseEnvelope {
+                    payload: base64::encode(&json_payload_bytes),
+                    payload_type: DSSE_WORKER_BUNDLE_PAYLOAD_TYPE.to_string(),
+                    signatures: vec![DsseSignatureEntry {
+                        key_id: Some("mock_policy_key_id".to_string()),
+                        sig: base64::encode(b"mock_policy_signature_bytes"),
+                    }],
+                };
+                serde_json::to_vec(&dsse_envelope).unwrap()
+            } else {
+                file_content_bytes // Assume it's already a DSSE envelope
+            }
         } else if bundle_pointer.source.scheme().starts_with("http") {
             // Fetch from HTTP/HTTPS
             let response = reqwest::get(bundle_pointer.source.clone())
@@ -268,19 +306,30 @@ impl PolicyManager {
             )));
         };
 
-        // TODO: Validate hash if bundle_pointer.hash is Some
-        // let calculated_hash = sha512_hash(&executable_bytes);
-        // if let Some(expected_hash) = &bundle_pointer.hash {
-        //    if &calculated_hash != expected_hash { return Err(...) }
-        // }
+        // Validate hash of the fetched DSSE envelope itself, if provided in the pointer
+        if let Some(expected_hash_bytes) = &bundle_pointer.hash {
+            use sha2::{Digest, Sha512};
+            let calculated_hash_bytes = Sha512::digest(&dsse_envelope_bytes).to_vec();
+            if &calculated_hash_bytes != expected_hash_bytes {
+                return Err(AppError::Service(format!(
+                    "WorkerBundle (DSSE envelope) hash mismatch for {}. Expected {}, got {}",
+                    bundle_url_str,
+                    hex::encode(expected_hash_bytes),
+                    hex::encode(calculated_hash_bytes)
+                )));
+            }
+            debug!(
+                "WorkerBundle (DSSE envelope) hash verified for {}",
+                bundle_url_str
+            );
+        }
 
-        let payload = WorkerBundlePayload {
-            vm: "nxcc/workerd".to_string(), // TODO: Get from manifest or bundle itself? For now, assume workerd for policies.
-            executable: executable_bytes,
-            metadata: HashMap::new(), // TODO: Populate if bundle format includes it
-        };
+        let bundle = WorkerBundle(dsse_envelope_bytes);
+        // Perform a quick validation that it's a parseable DSSE envelope
+        // and that its payloadType is correct. This will panic on errors.
+        let _ = bundle.payload();
 
-        Ok(WorkerBundle::new_from_payload(&payload))
+        Ok(bundle)
     }
 
     fn get_cache_filepath(&self, secret_id: &SecretId) -> Option<PathBuf> {

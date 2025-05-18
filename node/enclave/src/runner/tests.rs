@@ -3,7 +3,8 @@ use std::sync::Arc;
 use nxcc_interface::{
     proto::vm::WorkerStatus,
     types::{
-        AttestationReport, ConsumerInfo, EnvReport, PolicyExecutionRequest, SecretId, WorkerBundle,
+        AttestationReport, ConsumerInfo, DSSE_WORKER_BUNDLE_PAYLOAD_TYPE, DsseEnvelope,
+        DsseSignatureEntry, EnvReport, PolicyExecutionRequest, SecretId, WorkerBundle,
         WorkerBundlePayload, WorkerBundlePointer, WorkerManifest,
     },
 };
@@ -79,12 +80,23 @@ fn test_worker_manifest() -> WorkerManifest {
 
 // Helper to create a default WorkerBundle for tests
 fn test_worker_bundle(executable_code: Vec<u8>) -> WorkerBundle {
-    let payload = WorkerBundlePayload {
+    let payload_struct = WorkerBundlePayload {
         vm: "test-vm".to_string(),
         executable: executable_code,
         metadata: Default::default(),
     };
-    WorkerBundle::new_from_payload(&payload)
+    let json_payload_bytes = serde_json::to_vec(&payload_struct).unwrap();
+
+    let dsse_envelope = DsseEnvelope {
+        payload: base64::encode(&json_payload_bytes),
+        payload_type: DSSE_WORKER_BUNDLE_PAYLOAD_TYPE.to_string(),
+        signatures: vec![DsseSignatureEntry {
+            key_id: Some("test_key_id".to_string()),
+            // Using a valid base64 string for the mock signature
+            sig: base64::encode(b"mock_signature_bytes_longer_than_32_for_base64"),
+        }],
+    };
+    WorkerBundle(serde_json::to_vec(&dsse_envelope).unwrap())
 }
 
 #[tokio::test]

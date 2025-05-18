@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use alloy_primitives::{Address, U256};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use serde::{Deserialize, Serialize};
 
 use crate::proto::{enclave, interface};
@@ -489,54 +490,113 @@ pub struct WorkerManifest {
     pub userdata: HashMap<String, String>,
 }
 
+/// Represents a signature entry in a DSSE envelope.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct DsseSignatureEntry {
+    #[serde(rename = "keyid", skip_serializing_if = "Option::is_none")]
+    pub key_id: Option<String>,
+    pub sig: String, // base64 encoded
+}
+
+/// Represents a DSSE (Dead Simple Signing Envelope).
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct DsseEnvelope {
+    pub payload: String, // base64 encoded
+    #[serde(rename = "payloadType")]
+    pub payload_type: String,
+    pub signatures: Vec<DsseSignatureEntry>,
+}
+
 /// The inner payload of a `WorkerBundle` that gets signed.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorkerBundlePayload {
     /// The VM in which the worker must execute (e.g., "nxcc/workerd").
     pub vm: String,
     /// The executable code (e.g., JS, Python, WASM).
+    #[serde(with = "serde_base64")]
     pub executable: Vec<u8>,
     /// Arbitrary metadata added by the publisher. Not interpreted by nXCC.
     pub metadata: HashMap<String, String>,
 }
 
-/// An executable (WorkerBundlePayload) that is signed by its author/publisher.
-/// This struct holds the COSE Sign1 envelope as raw bytes.
+/// An executable `WorkerBundlePayload` wrapped in a DSSE envelope.
+/// This struct holds the DSSE envelope as raw JSON bytes.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorkerBundle(pub Vec<u8>);
 
+/// The IANA media type for the WorkerBundlePayload when wrapped in DSSE.
+pub const DSSE_WORKER_BUNDLE_PAYLOAD_TYPE: &str =
+    "application/vnd.nxcc.workerbundlepayload.v1+json";
+
 impl WorkerBundle {
-    /// Creates a new `WorkerBundle` from its payload.
-    /// In a real implementation, this would CBOR encode and sign the payload.
-    /// For now, it just CBOR encodes the payload.
-    pub fn new_from_payload(payload: &WorkerBundlePayload) -> Self {
-        let mut bytes = Vec::new();
-        ciborium::into_writer(payload, &mut bytes)
-            .expect("Failed to CBOR encode WorkerBundlePayload");
-        Self(bytes)
+    /// Parses the DSSE envelope from the raw bytes of the WorkerBundle.
+    fn dsse_envelope(&self) -> Result<DsseEnvelope, serde_json::Error> {
+        serde_json::from_slice(&self.0)
     }
 
-    /// Retrieves the `WorkerBundlePayload` from the bundle.
-    /// In a real implementation, this would verify the COSE signature before decoding.
-    /// For now, it just CBOR decodes the payload.
+    /// Retrieves the `WorkerBundlePayload` from the DSSE envelope.
     pub fn payload(&self) -> WorkerBundlePayload {
-        ciborium::from_reader(&self.0[..])
-            .expect("Failed to CBOR decode WorkerBundlePayload from WorkerBundle")
+        let envelope = self
+            .dsse_envelope()
+            .expect("Failed to parse DSSE envelope from WorkerBundle bytes");
+        if envelope.payload_type != DSSE_WORKER_BUNDLE_PAYLOAD_TYPE {
+            panic!(
+                "Unexpected DSSE payloadType: expected {}, got {}",
+                DSSE_WORKER_BUNDLE_PAYLOAD_TYPE, envelope.payload_type
+            );
+        }
+        let payload_bytes = BASE64_STANDARD
+            .decode(&envelope.payload)
+            .expect("Failed to base64 decode DSSE payload");
+        serde_json::from_slice(&payload_bytes[..])
+            .expect("Failed to decode WorkerBundlePayload from DSSE payload")
     }
 
-    /// Calculates the SHA512 hash of the CBOR-encoded `WorkerBundlePayload`.
-    /// This is what COSE signs, and is used for `ConsumerInfo.bundle_hash`.
+    /// Calculates the SHA512 hash of the encoded `WorkerBundlePayload`.
+    /// This hash is used for `ConsumerInfo.bundle_hash`.
+    // TODO: remove this in favor of having the enclave verify the signer or having the hash of the executable be part of the signed data or something. right now it's totally broken, as the consumer cannot be verified with all of the arbitrary metadata in it
     pub fn hash_signed_payload(&self) -> Vec<u8> {
         use sha2::{Digest, Sha512};
-        let payload = self.payload(); // Decodes and verifies if COSE lib were used
-        let mut cbor_payload = Vec::new();
-        ciborium::into_writer(&payload, &mut cbor_payload).unwrap();
-        Sha512::digest(cbor_payload).to_vec()
+        let payload_struct = self.payload();
+        let payload_bytes = serde_json::to_vec(&payload_struct)
+            .expect("Failed to encode WorkerBundlePayload for hashing");
+        Sha512::digest(payload_bytes).to_vec()
     }
 
-    /// Placeholder for extracting the COSE signature. Returns the whole bundle for now.
-    pub fn get_cose_signature(&self) -> Vec<u8> {
-        self.0.clone()
+    /// Extracts the first signature from the DSSE envelope.
+    pub fn get_dsse_signature(&self) -> Vec<u8> {
+        let envelope = self
+            .dsse_envelope()
+            .expect("Failed to parse DSSE envelope for signature extraction");
+        if envelope.signatures.is_empty() {
+            panic!("DSSE envelope has no signatures");
+        }
+        // Return the raw bytes of the first signature
+        BASE64_STANDARD
+            .decode(&envelope.signatures[0].sig)
+            .expect("Failed to base64 decode DSSE signature")
+    }
+}
+
+mod serde_base64 {
+    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(bytes: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&BASE64_STANDARD.encode(bytes))
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        BASE64_STANDARD
+            .decode(s.as_bytes())
+            .map_err(serde::de::Error::custom)
     }
 }
 
