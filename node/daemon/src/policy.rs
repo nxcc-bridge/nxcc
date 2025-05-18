@@ -7,6 +7,7 @@ use std::{
 };
 
 use alloy_primitives::hex;
+use percent_encoding::percent_decode_str;
 use nxcc_interface::types::{
     DSSE_WORKER_BUNDLE_PAYLOAD_TYPE, DsseEnvelope, DsseSignatureEntry, FullPolicyPackage, SecretId,
     WorkerBundle, WorkerBundlePayload, WorkerBundlePointer, WorkerManifest,
@@ -126,6 +127,18 @@ impl PolicyManager {
             "Fetching worker manifest for policy {:?} from URL: {}",
             secret_id_for_log, manifest_url
         );
+
+        // Handle data URLs directly embedded in the manifest URL
+        if manifest_url.starts_with("data:") {
+            let bytes = decode_data_url(manifest_url)?;
+            let manifest: WorkerManifest = serde_json::from_slice(&bytes).map_err(|e| {
+                AppError::Service(format!(
+                    "Failed to parse worker manifest JSON from data URL: {}",
+                    e
+                ))
+            })?;
+            return Ok(manifest);
+        }
 
         // Handle mock URLs for testing/dev
         if manifest_url.starts_with("mock://") {
@@ -298,8 +311,10 @@ impl PolicyManager {
                     ))
                 })?
                 .to_vec()
+        } else if bundle_pointer.source.scheme() == "data" {
+            decode_data_url(bundle_url_str)?
         } else {
-            // TODO: Support data URLs, IPFS, etc.
+            // TODO: Support IPFS, etc.
             return Err(AppError::Service(format!(
                 "Unsupported bundle source scheme: {}",
                 bundle_pointer.source.scheme()
@@ -411,5 +426,68 @@ impl PolicyManager {
             }
         }
         Ok(())
+    }
+}
+
+fn decode_data_url(url: &str) -> Result<Vec<u8>, AppError> {
+    let without_scheme = url
+        .strip_prefix("data:")
+        .ok_or_else(|| AppError::Service(format!("Invalid data URL: {}", url)))?;
+    let (meta, data) = without_scheme
+        .split_once(',')
+        .ok_or_else(|| AppError::Service(format!("Invalid data URL: {}", url)))?;
+
+    if meta.ends_with(";base64") {
+        base64::decode(data).map_err(|e| {
+            AppError::Service(format!("Failed to decode base64 data URL {}: {}", url, e))
+        })
+    } else {
+        Ok(percent_decode_str(data).collect::<Vec<u8>>())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{Address, U256};
+
+    #[tokio::test]
+    #[tracing_test::traced_test]
+    async fn test_fetch_worker_bundle_from_data_url() {
+        let gateway = GatewayManager::new();
+        let config = Config::default();
+        let pm = PolicyManager::new(gateway, &config).await.unwrap();
+
+        let payload_struct = WorkerBundlePayload {
+            vm: "test-vm".to_string(),
+            executable: b"console.log('hi');".to_vec(),
+            metadata: HashMap::new(),
+        };
+        let json_payload = serde_json::to_vec(&payload_struct).unwrap();
+        let dsse = DsseEnvelope {
+            payload: base64::encode(&json_payload),
+            payload_type: DSSE_WORKER_BUNDLE_PAYLOAD_TYPE.to_string(),
+            signatures: vec![DsseSignatureEntry {
+                key_id: Some("test".to_string()),
+                sig: base64::encode(b"sig"),
+            }],
+        };
+        let dsse_bytes = serde_json::to_vec(&dsse).unwrap();
+        let data_url = format!("data:application/json;base64,{}", base64::encode(&dsse_bytes));
+        let pointer = WorkerBundlePointer {
+            source: data_url.parse().unwrap(),
+            hash: None,
+        };
+        let sid = SecretId {
+            chain_id: 0,
+            identity_address: Address::ZERO,
+            identity_id: U256::ZERO,
+        };
+
+        let bundle = pm
+            .fetch_worker_bundle(&pointer, "mock://manifest", &sid)
+            .await
+            .expect("bundle fetch");
+        assert_eq!(bundle.0, dsse_bytes);
     }
 }

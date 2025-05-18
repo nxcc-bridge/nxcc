@@ -4016,6 +4016,7 @@ dependencies = [
  "hyper-util",
  "libp2p",
  "nxcc-interface",
+ "percent-encoding",
  "prost",
  "rand 0.9.1",
  "reqwest",
