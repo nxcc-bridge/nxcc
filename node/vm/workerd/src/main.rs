@@ -1,3 +1,5 @@
+#![allow(warnings)]
+
 mod config;
 mod config_builder;
 mod errors;

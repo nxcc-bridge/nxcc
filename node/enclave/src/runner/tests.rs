@@ -26,8 +26,8 @@ fn test_policy_request(node_id: &str, secret_ids: Vec<SecretId>) -> PolicyExecut
     PolicyExecutionRequest {
         secret_ids,
         consumer: ConsumerInfo {
-            code_hash: vec![1; 32],
-            signature: vec![2; 64],
+            bundle_hash: vec![1; 32], // Changed from code_hash
+            signature: vec![2; 64],   // Assuming signature remains
         },
         env_report: EnvReport {
             attestation: AttestationReport {
@@ -293,11 +293,11 @@ async fn test_terminate_worker_not_found_in_vm() {
 
 #[tokio::test]
 async fn test_terminate_worker_not_found_locally() {
-    let (_secrets, runner_service, mock_client) = setup();
+    let (_secrets, runner_service, _mock_client) = setup();
     let vm_id = "vm-term-nf-local";
     let worker_id = "worker-nf-local";
 
-    attach_mock_vm(&runner_service, vm_id, mock_client.clone()).await;
+    attach_mock_vm(&runner_service, vm_id, _mock_client).await;
     // Do NOT add worker mapping
 
     assert!(
@@ -531,9 +531,21 @@ async fn test_execute_policy_success_some_satisfied() {
     );
 
     // Check initial authorization state
-    assert!(!secrets.check_authorization(&context1.env_report.attestation, &secret_id_1));
-    assert!(!secrets.check_authorization(&context2.env_report.attestation, &secret_id_2));
-    assert!(!secrets.check_authorization(&context2.env_report.attestation, &secret_id_3));
+    assert!(!secrets.check_authorization(
+        &context1.env_report.attestation,
+        &secret_id_1,
+        &context1.consumer
+    ));
+    assert!(!secrets.check_authorization(
+        &context2.env_report.attestation,
+        &secret_id_2,
+        &context2.consumer
+    ));
+    assert!(!secrets.check_authorization(
+        &context2.env_report.attestation,
+        &secret_id_3,
+        &context2.consumer
+    ));
 
     let result = runner_service
         .execute_policy(worker_id.to_string(), contexts.clone())
@@ -551,9 +563,21 @@ async fn test_execute_policy_success_some_satisfied() {
     assert_eq!(satisfied_contexts[0].secret_ids, context1.secret_ids);
 
     // Verify authorization stored only for satisfied context
-    assert!(secrets.check_authorization(&context1.env_report.attestation, &secret_id_1));
-    assert!(!secrets.check_authorization(&context2.env_report.attestation, &secret_id_2)); // context2 failed
-    assert!(!secrets.check_authorization(&context2.env_report.attestation, &secret_id_3)); // context2 failed
+    assert!(secrets.check_authorization(
+        &context1.env_report.attestation,
+        &secret_id_1,
+        &context1.consumer
+    ));
+    assert!(!secrets.check_authorization(
+        &context2.env_report.attestation,
+        &secret_id_2,
+        &context2.consumer
+    )); // context2 failed
+    assert!(!secrets.check_authorization(
+        &context2.env_report.attestation,
+        &secret_id_3,
+        &context2.consumer
+    )); // context2 failed
 }
 
 #[tokio::test]
@@ -586,7 +610,11 @@ async fn test_execute_policy_success_all_satisfied() {
         MockExecutionBehavior::Fixed(vm_response_payload),
     );
 
-    assert!(!secrets.check_authorization(&context1.env_report.attestation, &secret_id_1));
+    assert!(!secrets.check_authorization(
+        &context1.env_report.attestation,
+        &secret_id_1,
+        &context1.consumer
+    ));
 
     let result = runner_service
         .execute_policy(worker_id.to_string(), contexts.clone())
@@ -598,7 +626,11 @@ async fn test_execute_policy_success_all_satisfied() {
         satisfied_contexts[0].env_report.node_id,
         context1.env_report.node_id
     );
-    assert!(secrets.check_authorization(&context1.env_report.attestation, &secret_id_1));
+    assert!(secrets.check_authorization(
+        &context1.env_report.attestation,
+        &secret_id_1,
+        &context1.consumer
+    ));
 }
 
 #[tokio::test]
@@ -631,7 +663,11 @@ async fn test_execute_policy_success_none_satisfied() {
         MockExecutionBehavior::Fixed(vm_response_payload),
     );
 
-    assert!(!secrets.check_authorization(&context1.env_report.attestation, &secret_id_1));
+    assert!(!secrets.check_authorization(
+        &context1.env_report.attestation,
+        &secret_id_1,
+        &context1.consumer
+    ));
 
     let result = runner_service
         .execute_policy(worker_id.to_string(), contexts.clone())
@@ -639,7 +675,11 @@ async fn test_execute_policy_success_none_satisfied() {
     let satisfied_contexts = result.unwrap();
 
     assert!(satisfied_contexts.is_empty());
-    assert!(!secrets.check_authorization(&context1.env_report.attestation, &secret_id_1)); // Still not authorized
+    assert!(!secrets.check_authorization(
+        &context1.env_report.attestation,
+        &secret_id_1,
+        &context1.consumer
+    )); // Still not authorized
 }
 
 #[tokio::test]
@@ -676,7 +716,11 @@ async fn test_execute_policy_vm_invocation_fails() {
     assert!(
         matches!(result, Err(RunnerError::VmConnection(ClientError::Grpc(status))) if status.message() == error_msg)
     );
-    assert!(!secrets.check_authorization(&context1.env_report.attestation, &secret_id_1)); // No authorization granted
+    assert!(!secrets.check_authorization(
+        &context1.env_report.attestation,
+        &secret_id_1,
+        &context1.consumer
+    )); // No authorization granted
 }
 
 #[tokio::test]
@@ -713,7 +757,11 @@ async fn test_execute_policy_deserialization_error() {
         .await;
 
     assert!(matches!(result, Err(RunnerError::Deserialization(_))));
-    assert!(!secrets.check_authorization(&context1.env_report.attestation, &secret_id_1)); // No authorization granted
+    assert!(!secrets.check_authorization(
+        &context1.env_report.attestation,
+        &secret_id_1,
+        &context1.consumer
+    )); // No authorization granted
 }
 
 #[tokio::test]
@@ -753,7 +801,11 @@ async fn test_execute_policy_mismatched_result_count() {
     assert!(
         matches!(result, Err(RunnerError::PolicyExecutionFailed(msg)) if msg == "Mismatched result count")
     );
-    assert!(!secrets.check_authorization(&context1.env_report.attestation, &secret_id_1)); // No authorization granted
+    assert!(!secrets.check_authorization(
+        &context1.env_report.attestation,
+        &secret_id_1,
+        &context1.consumer
+    )); // No authorization granted
 }
 
 #[tokio::test]
@@ -775,7 +827,11 @@ async fn test_execute_policy_worker_not_found_locally() {
         .await;
 
     assert!(matches!(result, Err(RunnerError::WorkerNotFound(id)) if id == worker_id));
-    assert!(!secrets.check_authorization(&context1.env_report.attestation, &secret_id_1)); // No authorization granted
+    assert!(!secrets.check_authorization(
+        &context1.env_report.attestation,
+        &secret_id_1,
+        &context1.consumer
+    )); // No authorization granted
 }
 
 #[tokio::test]
@@ -809,5 +865,9 @@ async fn test_execute_policy_vm_detached_consistency_issue() {
 
     // It finds the worker mapping, tries to get the VM client, fails.
     assert!(matches!(result, Err(RunnerError::VmNotAttached(id)) if id == vm_id));
-    assert!(!secrets.check_authorization(&context1.env_report.attestation, &secret_id_1)); // No authorization granted
+    assert!(!secrets.check_authorization(
+        &context1.env_report.attestation,
+        &secret_id_1,
+        &context1.consumer
+    )); // No authorization granted
 }

@@ -13,7 +13,10 @@ use nxcc_interface::{
         },
         interface,
     },
-    types::{EnvReport, PolicyExecutionRequest, SecretId, SecretsBox, VmAddress},
+    types::{
+        ConsumerInfo, EnvReport, PolicyExecutionRequest, SecretId, SecretRequest, SecretsBox,
+        VmAddress,
+    },
 };
 use nxcc_vm_base::client::ClientError;
 use tonic::{Request, Response, Status, transport::Server};
@@ -76,7 +79,11 @@ impl SecretsServerTrait for SecretsGrpcService {
                 .env_report
                 .map(EnvReport::from)
                 .ok_or_else(|| Status::invalid_argument("Missing EnvReport in bundle"))?;
-            bundles.push((secrets_box, env_report));
+            let consumer_info = bundle_proto
+                .consumer_info
+                .map(ConsumerInfo::from)
+                .ok_or_else(|| Status::invalid_argument("Missing ConsumerInfo in bundle"))?;
+            bundles.push((secrets_box, env_report, consumer_info));
         }
 
         match self.secrets.put_secrets(bundles) {
@@ -93,15 +100,17 @@ impl SecretsServerTrait for SecretsGrpcService {
         request: Request<GetSecretsRequest>,
     ) -> Result<Response<GetSecretsResponse>, Status> {
         let proto_req = request.into_inner();
+        // proto_req.requests is Vec<nxcc_interface::proto::interface::SecretRequest>
         debug!(
             "gRPC GetSecrets request for {} secret requests",
             proto_req.requests.len()
         );
 
-        let secret_ids: Vec<SecretId> = proto_req
+        let internal_requests: Vec<(SecretId, ConsumerInfo)> = proto_req
             .requests
             .into_iter()
-            .filter_map(|r| r.id.map(SecretId::from))
+            .map(SecretRequest::from) // Convert proto to internal SecretRequest
+            .map(|sr| (sr.secret_id, sr.consumer)) // Extract parts
             .collect();
 
         let requester_env_report = proto_req
@@ -114,7 +123,7 @@ impl SecretsServerTrait for SecretsGrpcService {
 
         match self
             .secrets
-            .get_secrets(secret_ids, requester_env_report, policy_reports)
+            .get_secrets(internal_requests, requester_env_report, policy_reports)
         {
             Ok(secrets_box) => Ok(Response::new(GetSecretsResponse {
                 secrets_box: Some(secrets_box.into()),
@@ -160,13 +169,18 @@ impl SecretsServerTrait for SecretsGrpcService {
         request: Request<GenerateSecretsRequest>,
     ) -> Result<Response<()>, Status> {
         let proto_req = request.into_inner();
+        // proto_req.requests is Vec<nxcc_interface::proto::interface::SecretRequest>
         debug!(
-            "gRPC GenerateSecrets request for {} IDs",
-            proto_req.ids.len()
+            "gRPC GenerateSecrets request for {} ID-Consumer pairs",
+            proto_req.requests.len()
         );
-        let ids: Vec<SecretId> = proto_req.ids.into_iter().map(SecretId::from).collect();
-
-        match self.secrets.generate_secrets(ids) {
+        let internal_requests: Vec<(SecretId, ConsumerInfo)> = proto_req
+            .requests
+            .into_iter()
+            .map(SecretRequest::from)
+            .map(|sr| (sr.secret_id, sr.consumer))
+            .collect();
+        match self.secrets.generate_secrets(internal_requests) {
             Ok(()) => Ok(Response::new(())),
             Err(e) => {
                 error!("GenerateSecrets failed: {}", e);

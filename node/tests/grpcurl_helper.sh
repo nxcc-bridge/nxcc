@@ -77,7 +77,7 @@ grpcurl_get_secrets() {
                 "identity_id": "'"${_identity_id_num}"'"
               },
               "consumer": {
-                 "code_hash": "AAECAwQFBgcICQoLDA0ODw==",
+                 "bundle_hash": "AAECAwQFBgcICQoLDA0ODw==",
                  "signature": "AAECAwQFBgcICQoLDA0ODwECAwQFBgcICQoLDA0ODw=="
                }
             }
@@ -188,4 +188,3 @@ poll_until_secret_found() {
 # If it fails, the main script needs to define these directly or use "." to source.
 export PROTO_DIR DAEMON_PROTO ENCLAVE_PROTO
 export -f check_grpcurl grpcurl_attach_vm grpcurl_get_secrets grpcurl_check_secrets_enclave poll_until_secret_found
-

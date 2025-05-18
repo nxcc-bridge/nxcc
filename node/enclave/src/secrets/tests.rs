@@ -80,7 +80,7 @@ fn test_store_and_check_authorization() {
     let other_kx = KeyExchangeKeyPair::generate();
     let other_attestation =
         test_attestation_report(other_kx.public_key().as_bytes().to_vec(), vec![1u8; 32]);
-    assert!(!secrets.check_authorization(&other_attestation, &secret_id));
+    assert!(!secrets.check_authorization(&other_attestation, &secret_id, &ConsumerInfo::default()));
 
     // Create and store a policy report with a positive decision, using client_env_report
     let policy_request = PolicyExecutionRequest {
@@ -88,16 +88,20 @@ fn test_store_and_check_authorization() {
         consumer: ConsumerInfo::default(),
         env_report: client_env_report.clone(),
     };
-    let policy_report_obj = test_policy_report(policy_request, true);
+    let policy_report_obj = test_policy_report(policy_request.clone(), true);
     secrets.store_authorization(policy_report_obj);
 
     // Now authorization should exist when checking with the *same* attestation
-    assert!(secrets.check_authorization(&client_attestation, &secret_id));
+    assert!(secrets.check_authorization(&client_attestation, &secret_id, &policy_request.consumer));
 
     // Check with a different attestation (should fail)
-    assert!(!secrets.check_authorization(&other_attestation, &secret_id));
+    assert!(!secrets.check_authorization(&other_attestation, &secret_id, &policy_request.consumer));
     // Check with same attestation but different secret (should fail)
-    assert!(!secrets.check_authorization(&client_attestation, &test_secret_id(456)));
+    assert!(!secrets.check_authorization(
+        &client_attestation,
+        &test_secret_id(456),
+        &policy_request.consumer
+    ));
 }
 
 #[test]
@@ -119,7 +123,11 @@ fn test_store_authorization_with_negative_decision() {
     let policy_report_obj = test_policy_report(policy_request, false); // Negative decision
     secrets.store_authorization(policy_report_obj);
 
-    assert!(!secrets.check_authorization(&client_attestation, &secret_id));
+    assert!(!secrets.check_authorization(
+        &client_attestation,
+        &secret_id,
+        &ConsumerInfo::default()
+    ));
 }
 
 #[test]
@@ -145,10 +153,15 @@ fn test_authorization_expiry() {
     secrets.store_authorization(policy_report_obj);
 
     // Authorization should not be valid because it's expired
-    assert!(!secrets.check_authorization(&client_attestation, &secret_id));
+    assert!(!secrets.check_authorization(
+        &client_attestation,
+        &secret_id,
+        &ConsumerInfo::default()
+    ));
 
     // Manually check the authorizations map
-    let auth_id = calculate_authorization_id(&client_attestation, &secret_id);
+    let auth_id =
+        calculate_authorization_id(&client_attestation, &secret_id, &ConsumerInfo::default());
     let auth_map = secrets.authorizations.read().unwrap();
     assert!(auth_map.contains_key(&auth_id)); // Should be present
     assert!(*auth_map.get(&auth_id).unwrap() < Utc::now().timestamp() as u64); // But expired
@@ -189,10 +202,18 @@ fn test_put_secrets_attestation_binding_success() {
     };
     let auth_report_obj = test_policy_report(auth_request, true);
     secrets.store_authorization(auth_report_obj);
-    assert!(secrets.check_authorization(&presented_attestation, &secret_id));
+    assert!(secrets.check_authorization(
+        &presented_attestation,
+        &secret_id,
+        &ConsumerInfo::default()
+    ));
 
     // --- Receiver Side ---
-    let result = secrets.put_secrets(vec![(secrets_box.clone(), presented_env_report.clone())]);
+    let result = secrets.put_secrets(vec![(
+        secrets_box.clone(),
+        presented_env_report.clone(),
+        ConsumerInfo::default(),
+    )]);
     assert!(result.is_ok(), "put_secrets failed: {:?}", result.err());
     assert!(result.unwrap(), "put_secrets returned false, expected true");
 
@@ -249,7 +270,11 @@ fn test_put_secrets_attestation_binding_hash_mismatch() {
     let presented_env_report_bad_hash =
         test_env_report(sender_node_id, presented_attestation_bad_hash);
 
-    let result = secrets.put_secrets(vec![(secrets_box.clone(), presented_env_report_bad_hash)]);
+    let result = secrets.put_secrets(vec![(
+        secrets_box.clone(),
+        presented_env_report_bad_hash,
+        ConsumerInfo::default(),
+    )]);
     assert!(result.is_ok());
     assert!(!result.unwrap()); // Should fail due to hash mismatch
     assert!(
@@ -292,7 +317,11 @@ fn test_put_secrets_existing_is_canonical() {
     };
     secrets.store_authorization(test_policy_report(auth_req1, true));
 
-    let result1 = secrets.put_secrets(vec![(secrets_box1, env_report1.clone())]);
+    let result1 = secrets.put_secrets(vec![(
+        secrets_box1,
+        env_report1.clone(),
+        ConsumerInfo::default(),
+    )]);
     assert!(result1.is_ok() && result1.unwrap());
     let initial_timestamp = secrets
         .secrets_storage
@@ -336,7 +365,11 @@ fn test_put_secrets_existing_is_canonical() {
     };
     secrets.store_authorization(test_policy_report(auth_req2, true)); // Authorize the second attempt
 
-    let result2 = secrets.put_secrets(vec![(secrets_box2, env_report2.clone())]);
+    let result2 = secrets.put_secrets(vec![(
+        secrets_box2,
+        env_report2.clone(),
+        ConsumerInfo::default(),
+    )]);
     assert!(result2.is_ok());
     assert!(result2.unwrap()); // Should update with newer timestamp
 
@@ -374,9 +407,17 @@ fn test_put_secrets_unauthorized_with_attestation() {
     let presented_env_report = test_env_report(sender_node_id, presented_attestation.clone());
 
     // Do NOT authorize
-    assert!(!secrets.check_authorization(&presented_attestation, &secret_id));
+    assert!(!secrets.check_authorization(
+        &presented_attestation,
+        &secret_id,
+        &ConsumerInfo::default()
+    ));
 
-    let result = secrets.put_secrets(vec![(secrets_box, presented_env_report)]);
+    let result = secrets.put_secrets(vec![(
+        secrets_box,
+        presented_env_report,
+        ConsumerInfo::default(),
+    )]);
     assert!(result.is_ok());
     assert!(!result.unwrap()); // Should be false due to no auth
     assert!(
@@ -418,7 +459,11 @@ fn test_put_secrets_expired() {
     };
     secrets.store_authorization(test_policy_report(auth_req, true));
 
-    let result = secrets.put_secrets(vec![(secrets_box, presented_env_report)]);
+    let result = secrets.put_secrets(vec![(
+        secrets_box,
+        presented_env_report,
+        ConsumerInfo::default(),
+    )]);
     assert!(result.is_ok());
     assert!(!result.unwrap()); // False because secret was expired
     assert!(
@@ -457,7 +502,13 @@ fn test_put_secrets_older_ignored() {
         env_report: env1.clone(),
     };
     secrets.store_authorization(test_policy_report(auth_req1, true));
-    assert!(secrets.put_secrets(vec![(box1, env1.clone())]).unwrap());
+    assert!(
+        secrets
+            .put_secrets(vec![(box1, env1.clone(), ConsumerInfo::default())])
+            .unwrap()
+    );
+
+    let consumer_info_for_auth_req2 = ConsumerInfo::default(); // Define it for auth_req2
 
     // Second put with older timestamp
     let secrets_to_send2 = vec![(secret_id.clone(), vec![2], 0, 1)];
@@ -476,11 +527,14 @@ fn test_put_secrets_older_ignored() {
     );
     let auth_req2 = PolicyExecutionRequest {
         secret_ids: vec![secret_id.clone()],
-        consumer: ConsumerInfo::default(),
+        consumer: consumer_info_for_auth_req2.clone(), // Use the defined consumer_info
         env_report: env2.clone(),
     };
     secrets.store_authorization(test_policy_report(auth_req2, true));
-    let res2 = secrets.put_secrets(vec![(box2, env2.clone())]).unwrap();
+    let res2 = secrets
+        .put_secrets(vec![(box2, env2.clone(), consumer_info_for_auth_req2)]) // Pass it here
+        .unwrap();
+
     assert!(!res2);
 
     let stored = secrets
@@ -524,13 +578,17 @@ fn test_put_secrets_multiple_bundles() {
     );
     let env_report1 = test_env_report(node_id1, attestation1.clone());
 
+    let consumer_info1 = ConsumerInfo {
+        bundle_hash: vec![1],
+        signature: vec![1],
+    };
     // Authorize node1 for secret1 (using attestation1)
     let auth_req1 = PolicyExecutionRequest {
         secret_ids: vec![secret_id1.clone()],
-        consumer: ConsumerInfo::default(),
+        consumer: consumer_info1.clone(),
         env_report: env_report1.clone(),
     };
-    secrets.store_authorization(test_policy_report(auth_req1, true));
+    secrets.store_authorization(test_policy_report(auth_req1.clone(), true));
     // Node1 is NOT authorized for secret_id3_unauth with attestation1
 
     // --- Bundle 2 Prep (node2, secret2 - auth) ---
@@ -548,20 +606,25 @@ fn test_put_secrets_multiple_bundles() {
     );
     let env_report2 = test_env_report(node_id2, attestation2.clone());
 
+    let consumer_info2 = ConsumerInfo {
+        bundle_hash: vec![2],
+        signature: vec![2],
+    };
     // Authorize node2 for secret2 (using attestation2)
     let auth_req2 = PolicyExecutionRequest {
         secret_ids: vec![secret_id2.clone()],
-        consumer: ConsumerInfo::default(),
+        consumer: consumer_info2.clone(),
         env_report: env_report2.clone(),
     };
-    secrets.store_authorization(test_policy_report(auth_req2, true));
+    secrets.store_authorization(test_policy_report(auth_req2.clone(), true));
 
     // --- Put Bundles ---
     let result = secrets.put_secrets(vec![
-        (secrets_box1, env_report1),
-        (secrets_box2, env_report2),
+        (secrets_box1, env_report1, consumer_info1),
+        (secrets_box2, env_report2, consumer_info2),
     ]);
     assert!(result.is_ok());
+
     assert!(result.unwrap()); // True because bundle 2 succeeded
 
     let secrets_map = secrets.secrets_storage.read().unwrap();
@@ -604,16 +667,20 @@ fn test_get_secrets_authorization_check() {
         test_attestation_report(requester_kx.public_key().as_bytes().to_vec(), vec![0u8; 32]);
     let requester_env_report = test_env_report(requester_node_id, requester_attestation.clone());
 
+    let consumer_for_auth_req = ConsumerInfo::default();
     // Authorize requester for secret_id1 only, using their specific attestation
     let auth_req = PolicyExecutionRequest {
         secret_ids: vec![secret_id1.clone()],
-        consumer: ConsumerInfo::default(),
+        consumer: consumer_for_auth_req.clone(),
         env_report: requester_env_report.clone(),
     };
     secrets.store_authorization(test_policy_report(auth_req, true));
 
     let result = secrets.get_secrets(
-        vec![secret_id1.clone(), secret_id2.clone()],
+        vec![
+            (secret_id1.clone(), consumer_for_auth_req.clone()),
+            (secret_id2.clone(), consumer_for_auth_req), // Use same consumer for simplicity
+        ],
         requester_env_report.clone(), // Requester presents their EnvReport
         vec![],
     );

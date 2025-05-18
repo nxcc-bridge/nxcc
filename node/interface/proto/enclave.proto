@@ -34,6 +34,7 @@ message PutSecretsRequest {
 message SecretsBundle {
   interface.SecretsBox secrets_box = 1;
   interface.EnvReport env_report = 2;
+  interface.ConsumerInfo consumer_info = 3;
 }
 
 message PutSecretsResponse {
@@ -41,13 +42,9 @@ message PutSecretsResponse {
 }
 
 message GetSecretsRequest {
-  repeated SecretRequest requests = 1;
+  repeated interface.SecretRequest requests = 1;
   repeated PolicyExecutionReport policy_reports = 2; // TODO: Define how these are used or verified if needed.
   interface.EnvReport requester_env_report = 3;
-}
-
-message SecretRequest {
-  interface.SecretIdentifier id = 1;
 }
 
 // TODO: Define what proves successful policy execution if needed beyond internal auth store.
@@ -68,7 +65,7 @@ message CheckSecretsResponse {
 }
 
 message GenerateSecretsRequest {
-  repeated interface.SecretIdentifier ids = 1;
+  repeated interface.SecretRequest requests = 1;
 }
 
 message SecretStatus {

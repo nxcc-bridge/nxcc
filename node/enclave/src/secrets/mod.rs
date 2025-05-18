@@ -9,7 +9,7 @@ use std::{
 
 use chrono::Utc;
 use nxcc_interface::types::{
-    AttestationReport, EnvReport, PolicyExecutionReport, SecretId, SecretsBox,
+    AttestationReport, ConsumerInfo, EnvReport, PolicyExecutionReport, SecretId, SecretsBox,
 };
 use once_cell::sync::Lazy;
 use sha2::{Digest, Sha256};
@@ -52,10 +52,12 @@ impl std::fmt::Debug for AuthorizationId {
 fn calculate_authorization_id(
     attestation_report: &AttestationReport,
     secret_id: &SecretId,
+    consumer_info: &ConsumerInfo,
 ) -> AuthorizationId {
     let mut hasher = Sha256::new();
     ciborium::into_writer(secret_id, &mut hasher).unwrap();
     ciborium::into_writer(attestation_report, &mut hasher).unwrap();
+    ciborium::into_writer(consumer_info, &mut hasher).unwrap();
     AuthorizationId(<[u8; 32]>::from(hasher.finalize()))
 }
 
@@ -122,17 +124,22 @@ impl Secrets {
     }
 
     /// Stores secrets received from peers after verifying authorization and attestation binding.
-    pub fn put_secrets(&self, bundles: Vec<(SecretsBox, EnvReport)>) -> Result<bool, String> {
+    pub fn put_secrets(
+        &self,
+        bundles: Vec<(SecretsBox, EnvReport, ConsumerInfo)>,
+    ) -> Result<bool, String> {
         let mut secrets_added_count = 0;
         let current_time = Utc::now().timestamp() as u64;
 
         // Acquire write lock once for efficiency
         let mut secrets_map = self.secrets_storage.write().unwrap();
 
-        for (secrets_box, env_report) in bundles {
+        for (secrets_box, env_report, local_consumer_info) in bundles {
             debug!(
-                "Processing secrets box from node {} containing {} secrets",
+                "Processing secrets box from node {} for consumer bundle_hash {:?} containing {} \
+                 secrets",
                 env_report.node_id,
+                local_consumer_info.bundle_hash,
                 secrets_box.contained_secret_ids.len()
             );
 
@@ -185,12 +192,15 @@ impl Secrets {
             // to send us this secret.
             let mut all_secrets_authorized = true;
             for secret_id in &secrets_box.contained_secret_ids {
-                if !self.check_authorization(&env_report.attestation, secret_id) {
+                if !self.check_authorization(
+                    &env_report.attestation,
+                    secret_id,
+                    &local_consumer_info,
+                ) {
                     warn!(
-                        "Skipping bundle from node {}: Not authorized locally (via attestation) \
-                         to receive secret {:?} from this node",
-                        env_report.node_id,
-                        secret_id // node_id for logging
+                        "Skipping bundle from node {}: Not authorized locally to receive secret \
+                         {:?} from this node for consumer bundle_hash {:?}",
+                        env_report.node_id, secret_id, local_consumer_info.bundle_hash
                     );
                     all_secrets_authorized = false;
                     break;
@@ -285,8 +295,11 @@ impl Secrets {
     }
 
     /// Generates new secrets from entropy if authorized and not already existing.
-    pub fn generate_secrets(&self, ids: Vec<SecretId>) -> Result<(), String> {
-        info!("GenerateSecrets request for {} IDs", ids.len());
+    pub fn generate_secrets(&self, requests: Vec<(SecretId, ConsumerInfo)>) -> Result<(), String> {
+        info!(
+            "GenerateSecrets request for {} ID-Consumer pairs",
+            requests.len()
+        );
         let current_time = Utc::now().timestamp() as u64;
         let mut secrets_generated_count = 0;
 
@@ -297,12 +310,13 @@ impl Secrets {
         // Use empty user_data for self-attestation in this context.
         let self_attestation_report = self.get_report(vec![])?;
 
-        for secret_id in ids {
+        for (secret_id, consumer_info) in requests {
             // 1. Check authorization for self-generation
-            if !self.check_authorization(&self_attestation_report, &secret_id) {
+            if !self.check_authorization(&self_attestation_report, &secret_id, &consumer_info) {
                 warn!(
-                    "Not authorized to self-generate secret {:?}. Skipping.",
-                    secret_id
+                    "Not authorized to self-generate secret {:?} for consumer bundle_hash {:?}. \
+                     Skipping.",
+                    secret_id, consumer_info.bundle_hash
                 );
                 // Continue to check other secrets, but return error if any fail auth?
                 // For now, just skip. Consider returning a partial success/failure later.
@@ -346,15 +360,15 @@ impl Secrets {
     /// Verifies the requester's attestation before proceeding.
     pub fn get_secrets(
         &self,
-        secret_ids: Vec<SecretId>,
+        requests: Vec<(SecretId, ConsumerInfo)>,
         requester_env_report: EnvReport,
         // policy_reports are currently unused per instructions, checking local auth store instead
         _policy_reports: Vec<PolicyExecutionReport>,
     ) -> Result<SecretsBox, String> {
         info!(
-            "GetSecrets request from node {} for {} secrets",
+            "GetSecrets request from node {} for {} secret-consumer pairs",
             requester_env_report.node_id,
-            secret_ids.len()
+            requests.len()
         );
         let current_time = Utc::now().timestamp() as u64;
 
@@ -394,13 +408,19 @@ impl Secrets {
             // Acquire read locks
             let secrets_map = self.secrets_storage.read().unwrap();
 
-            for secret_id in &secret_ids {
+            for (secret_id, consumer_info) in &requests {
                 // Check if *we* are authorized (by *our* runner) to release this secret *to the requester*.
-                if !self.check_authorization(&requester_env_report.attestation, secret_id) {
+                if !self.check_authorization(
+                    &requester_env_report.attestation,
+                    secret_id,
+                    consumer_info,
+                ) {
                     warn!(
-                        "Not authorized to release secret {:?} to node {} (attestation: {:?})",
+                        "Not authorized to release secret {:?} to node {} for consumer \
+                         bundle_hash {:?} (attestation measurement: {:?})",
                         secret_id,
                         requester_env_report.node_id,
+                        consumer_info.bundle_hash,
                         requester_env_report.attestation.measurement // Log part of attestation
                     );
                     continue; // Skip this secret
@@ -490,6 +510,7 @@ impl Secrets {
         }
 
         let attestation_report_for_auth = &report.request.env_report.attestation;
+        let consumer_info_for_auth = &report.request.consumer;
         let timestamp = report.timestamp; // Use timestamp from the report
 
         // TODO: Consider a suitable expiry/TTL for authorizations. Using grant timestamp for now.
@@ -497,11 +518,19 @@ impl Secrets {
 
         let mut auth_map = self.authorizations.write().unwrap();
         for secret_id in report.request.secret_ids {
-            let auth_id = calculate_authorization_id(attestation_report_for_auth, &secret_id);
+            let auth_id = calculate_authorization_id(
+                attestation_report_for_auth,
+                &secret_id,
+                consumer_info_for_auth,
+            );
             info!(
-                "Storing authorization grant {} for attestation measurement {:?} / secret {:?} \
-                 with expiry {}",
-                auth_id, attestation_report_for_auth.measurement, secret_id, expiry_time
+                "Storing authorization grant {} for attestation measurement {:?} / secret {:?} / \
+                 consumer bundle_hash {:?} with expiry {}",
+                auth_id,
+                attestation_report_for_auth.measurement,
+                secret_id,
+                consumer_info_for_auth.bundle_hash,
+                expiry_time
             );
             auth_map.insert(auth_id, expiry_time);
         }
@@ -513,9 +542,10 @@ impl Secrets {
         &self,
         attestation_report: &AttestationReport,
         secret_id: &SecretId,
+        consumer_info: &ConsumerInfo,
     ) -> bool {
-        let auth_id = calculate_authorization_id(attestation_report, secret_id);
-        let auth_map = self.authorizations.read().unwrap(); // Keep this for now, will change
+        let auth_id = calculate_authorization_id(attestation_report, secret_id, consumer_info);
+        let auth_map = self.authorizations.read().unwrap();
 
         match auth_map.get(&auth_id) {
             Some(&expiry) => {
@@ -523,29 +553,33 @@ impl Secrets {
                 let is_valid = expiry > current_time;
                 if !is_valid {
                     debug!(
-                        "Authorization {} found for node {} / secret {:?}, but expired at {} \
-                         (current: {}). Attestation measurement: {:?}",
+                        "Authorization {} found for attestation measurement {:?} / secret {:?} / \
+                         consumer bundle_hash {:?}, but expired at {} (current: {}).",
                         auth_id,
-                        "N/A",
+                        attestation_report.measurement,
                         secret_id,
+                        consumer_info.bundle_hash,
                         expiry,
-                        current_time,
-                        attestation_report.measurement // node_id no longer direct key
+                        current_time
                     );
                     // TODO: Clean up expired authorizations?
                 } else {
                     debug!(
                         "Authorization {} found and valid for attestation measurement {:?} / \
-                         secret {:?}",
-                        auth_id, attestation_report.measurement, secret_id
+                         secret {:?} / consumer bundle_hash {:?}",
+                        auth_id,
+                        attestation_report.measurement,
+                        secret_id,
+                        consumer_info.bundle_hash
                     );
                 }
                 is_valid
             }
             None => {
                 debug!(
-                    "No authorization {} found for attestation measurement {:?} / secret {:?}",
-                    auth_id, attestation_report.measurement, secret_id
+                    "No authorization {} found for attestation measurement {:?} / secret {:?} / \
+                     consumer bundle_hash {:?}",
+                    auth_id, attestation_report.measurement, secret_id, consumer_info.bundle_hash
                 );
                 false
             }

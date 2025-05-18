@@ -6,12 +6,19 @@ use std::{
 use alloy_primitives::{Address, U256};
 use nxcc_interface::{
     proto::enclave::{
-        DetachVmRequest, ExecutePolicyRequest as ProtoExecutePolicyRequest, GenerateSecretsRequest,
-        GetSecretsRequest as ProtoGetSecretsRequest, InvokeWorkerRequest,
-        PutSecretsRequest as ProtoPutSecretsRequest, RunWorkerRequest, SecretRequest,
-        SecretsBundle, TerminateWorkerRequest, runner_server::Runner as _,
+        DetachVmRequest,
+        ExecutePolicyRequest as ProtoExecutePolicyRequest,
+        GenerateSecretsRequest,
+        GetSecretsRequest as ProtoGetSecretsRequest,
+        InvokeWorkerRequest,
+        PutSecretsRequest as ProtoPutSecretsRequest,
+        RunWorkerRequest, // SecretRequest removed from here
+        SecretsBundle,
+        TerminateWorkerRequest,
+        runner_server::Runner as _,
         secrets_server::Secrets as _,
     },
+    proto::interface::SecretRequest, // Added correct import
     types::{
         AttestationReport, ConsumerInfo, EnvReport, PolicyExecutionReport, PolicyExecutionRequest,
         SecretId, SecretsBox,
@@ -38,8 +45,8 @@ fn test_secret_id(id_num: u64) -> SecretId {
 
 fn test_consumer_info() -> ConsumerInfo {
     ConsumerInfo {
-        code_hash: vec![1; 32],
-        signature: vec![2; 64],
+        bundle_hash: vec![1; 32], // Changed from code_hash
+        signature: vec![2; 64],   // Assuming signature remains
     }
 }
 
@@ -119,6 +126,7 @@ async fn test_enclave_workflow() {
         secrets_bundles: vec![SecretsBundle {
             secrets_box: Some(secrets_box_for_put.clone().into()),
             env_report: Some(putter_env_report.clone().into()), // Putter uses its EnvReport
+            consumer_info: Some(test_consumer_info().into()),
         }],
     });
     let put_secrets_resp_fail = secrets_grpc
@@ -149,6 +157,7 @@ async fn test_enclave_workflow() {
         secrets_bundles: vec![SecretsBundle {
             secrets_box: Some(secrets_box_for_put.clone().into()),
             env_report: Some(putter_env_report.clone().into()), // Putter uses its EnvReport
+            consumer_info: Some(test_consumer_info().into()),
         }],
     });
     let put_secrets_resp_ok = secrets_grpc.put_secrets(put_secrets_req_ok).await.unwrap();
@@ -180,7 +189,8 @@ async fn test_enclave_workflow() {
     info!("Step 6b: Attempting GetSecret (expected fail - no auth for getter)");
     let get_secrets_req_fail = Request::new(ProtoGetSecretsRequest {
         requests: vec![SecretRequest {
-            id: Some(secret_id.clone().into()),
+            secret_id: Some(secret_id.clone().into()),
+            consumer: Some(test_consumer_info().into()),
         }],
         policy_reports: vec![],
         requester_env_report: Some(getter_env_report.clone().into()), // Getter uses its EnvReport
@@ -213,7 +223,8 @@ async fn test_enclave_workflow() {
     info!("Step 8: Attempting GetSecret (expected success)");
     let get_secrets_req_ok = Request::new(ProtoGetSecretsRequest {
         requests: vec![SecretRequest {
-            id: Some(secret_id.clone().into()),
+            secret_id: Some(secret_id.clone().into()),
+            consumer: Some(test_consumer_info().into()),
         }],
         policy_reports: vec![],
         requester_env_report: Some(getter_env_report.clone().into()), // Getter uses its EnvReport
@@ -235,7 +246,8 @@ async fn test_enclave_workflow() {
     info!("Step 9: Attempting further GetSecret (expected success - auth not consumed)");
     let get_secrets_req_ok_2 = Request::new(ProtoGetSecretsRequest {
         requests: vec![SecretRequest {
-            id: Some(secret_id.clone().into()),
+            secret_id: Some(secret_id.clone().into()),
+            consumer: Some(test_consumer_info().into()),
         }],
         policy_reports: vec![],
         requester_env_report: Some(getter_env_report.clone().into()), // Getter uses its EnvReport
@@ -505,6 +517,7 @@ async fn test_put_secrets_mismatched_binding_hash() {
         secrets_bundles: vec![SecretsBundle {
             secrets_box: Some(secrets_box.into()),
             env_report: Some(putter_env_report_bad_hash.into()),
+            consumer_info: Some(test_consumer_info().into()),
         }],
     });
     let put_secrets_resp = secrets_grpc.put_secrets(put_secrets_req).await.unwrap();
@@ -557,6 +570,7 @@ async fn test_put_secrets_invalid_secrets_box_structure() {
         secrets_bundles: vec![SecretsBundle {
             secrets_box: Some(bad_secrets_box.clone().into()),
             env_report: Some(putter_env_report_for_bad_box.into()),
+            consumer_info: Some(test_consumer_info().into()),
         }],
     });
     let put_secrets_resp = secrets_grpc.put_secrets(put_secrets_req).await.unwrap();
@@ -611,6 +625,7 @@ async fn test_put_secrets_decryption_failure() {
         secrets_bundles: vec![SecretsBundle {
             secrets_box: Some(secrets_box_wrong_key.clone().into()),
             env_report: Some(putter_env_report_for_wrong_key_box.into()),
+            consumer_info: Some(test_consumer_info().into()),
         }],
     });
     let put_secrets_resp = secrets_grpc.put_secrets(put_secrets_req).await.unwrap();
@@ -666,6 +681,7 @@ async fn test_get_secrets_unauthorized_node() {
         secrets_bundles: vec![SecretsBundle {
             secrets_box: Some(secrets_box_put.clone().into()),
             env_report: Some(putter_env_report.clone().into()),
+            consumer_info: Some(test_consumer_info().into()),
         }],
     });
     let put_resp = secrets_grpc.put_secrets(put_req).await.unwrap();
@@ -701,7 +717,8 @@ async fn test_get_secrets_unauthorized_node() {
 
     let get_req_unauth = Request::new(ProtoGetSecretsRequest {
         requests: vec![SecretRequest {
-            id: Some(secret_id.clone().into()),
+            secret_id: Some(secret_id.clone().into()),
+            consumer: Some(test_consumer_info().into()),
         }],
         policy_reports: vec![],
         requester_env_report: Some(unauthorized_getter_env_report.clone().into()),
@@ -717,7 +734,8 @@ async fn test_get_secrets_unauthorized_node() {
     // 4. Verify authorized node *can* get it
     let get_req_auth = Request::new(ProtoGetSecretsRequest {
         requests: vec![SecretRequest {
-            id: Some(secret_id.clone().into()),
+            secret_id: Some(secret_id.clone().into()),
+            consumer: Some(test_consumer_info().into()),
         }],
         policy_reports: vec![],
         requester_env_report: Some(authorized_getter_env_report.clone().into()),
@@ -750,7 +768,8 @@ async fn test_get_secrets_invalid_requester_report() {
 
     let get_secrets_req = Request::new(ProtoGetSecretsRequest {
         requests: vec![SecretRequest {
-            id: Some(secret_id.clone().into()),
+            secret_id: Some(secret_id.clone().into()),
+            consumer: Some(test_consumer_info().into()),
         }],
         policy_reports: vec![],
         requester_env_report: Some(bad_env_report_proto),
@@ -861,7 +880,10 @@ async fn test_generate_secrets_workflow() {
 
     // 1. Attempt GenerateSecrets without authorization -> Skips, no error
     let gen_req_unauth = Request::new(GenerateSecretsRequest {
-        ids: vec![secret_id_gen.clone().into()],
+        requests: vec![SecretRequest {
+            secret_id: Some(secret_id_gen.clone().into()),
+            consumer: Some(test_consumer_info().into()),
+        }],
     });
     assert!(secrets_grpc.generate_secrets(gen_req_unauth).await.is_ok());
     assert!(!check_secret_exists(&secrets_grpc, &secret_id_gen).await);
@@ -876,7 +898,10 @@ async fn test_generate_secrets_workflow() {
 
     // 3. GenerateSecrets successfully
     let gen_req_auth = Request::new(GenerateSecretsRequest {
-        ids: vec![secret_id_gen.clone().into()],
+        requests: vec![SecretRequest {
+            secret_id: Some(secret_id_gen.clone().into()),
+            consumer: Some(test_consumer_info().into()),
+        }],
     });
     assert!(secrets_grpc.generate_secrets(gen_req_auth).await.is_ok());
     assert!(check_secret_exists(&secrets_grpc, &secret_id_gen).await);
@@ -884,7 +909,10 @@ async fn test_generate_secrets_workflow() {
 
     // 4. Attempt GenerateSecrets again for the same ID -> Fails (AlreadyExists)
     let gen_req_dup = Request::new(GenerateSecretsRequest {
-        ids: vec![secret_id_gen.clone().into()],
+        requests: vec![SecretRequest {
+            secret_id: Some(secret_id_gen.clone().into()),
+            consumer: Some(test_consumer_info().into()),
+        }],
     });
     assert_eq!(
         secrets_grpc
@@ -928,6 +956,7 @@ async fn test_generate_secrets_workflow() {
         secrets_bundles: vec![SecretsBundle {
             secrets_box: Some(secrets_box_put.clone().into()),
             env_report: Some(putter_env_report.clone().into()),
+            consumer_info: Some(test_consumer_info().into()),
         }],
     });
     let put_resp = secrets_grpc.put_secrets(put_req).await.unwrap();
@@ -957,7 +986,8 @@ async fn test_generate_secrets_workflow() {
 
     let get_req = Request::new(ProtoGetSecretsRequest {
         requests: vec![SecretRequest {
-            id: Some(secret_id_gen.clone().into()),
+            secret_id: Some(secret_id_gen.clone().into()),
+            consumer: Some(test_consumer_info().into()),
         }],
         policy_reports: vec![],
         requester_env_report: Some(getter_env_report.clone().into()),

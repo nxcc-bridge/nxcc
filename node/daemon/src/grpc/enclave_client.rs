@@ -5,11 +5,11 @@ use nxcc_interface::{
         ExecutePolicyRequest as ProtoExecutePolicyRequest,
         ExecutePolicyResponse as ProtoExecutePolicyResponse, GenerateSecretsRequest,
         GetReportRequest, GetSecretsRequest, PutSecretsRequest, PutSecretsResponse,
-        RunWorkerRequest, RunWorkerResponse, SecretRequest, SecretsBundle as ProtoSecretsBundle,
+        RunWorkerRequest, RunWorkerResponse, SecretsBundle as ProtoSecretsBundle,
         TerminateWorkerRequest, VmAddress as ProtoVmAddress, runner_client::RunnerClient,
         secrets_client::SecretsClient,
     },
-    types::{AttestationReport, EnvReport, SecretId, SecretsBox},
+    types::{AttestationReport, ConsumerInfo, EnvReport, SecretId, SecretsBox},
 };
 use tokio::net::UnixStream;
 use tonic::{
@@ -74,17 +74,18 @@ impl EnclaveClient {
 
     pub async fn put_secrets(
         &self,
-        bundles_with_reports: Vec<(SecretsBox, EnvReport)>,
+        bundles_with_reports_and_consumers: Vec<(SecretsBox, EnvReport, ConsumerInfo)>,
     ) -> Result<bool, String> {
-        let mut bundles = Vec::new();
-        for (sb, env_report) in bundles_with_reports {
-            bundles.push(ProtoSecretsBundle {
+        let mut bundles_proto = Vec::new();
+        for (sb, env_report, consumer_info) in bundles_with_reports_and_consumers {
+            bundles_proto.push(ProtoSecretsBundle {
                 secrets_box: Some(sb.into()),
                 env_report: Some(env_report.into()),
+                consumer_info: Some(consumer_info.into()),
             });
         }
         let req = PutSecretsRequest {
-            secrets_bundles: bundles,
+            secrets_bundles: bundles_proto,
         };
         let mut client = self.secrets();
         let resp = client.put_secrets(req).await.map_err(|e| e.to_string())?;
@@ -93,19 +94,20 @@ impl EnclaveClient {
 
     pub async fn get_secrets(
         &self,
-        secret_ids: Vec<SecretId>,
+        secret_requests_with_consumer: Vec<(SecretId, ConsumerInfo)>,
         env_report: EnvReport,
     ) -> Result<SecretsBox, String> {
-        let mut requests = Vec::new();
-        for sid in secret_ids {
-            requests.push(SecretRequest {
-                id: Some(sid.into()),
+        let mut proto_requests = Vec::new();
+        for (sid, ci) in secret_requests_with_consumer {
+            proto_requests.push(nxcc_interface::proto::interface::SecretRequest {
+                secret_id: Some(sid.into()),
+                consumer: Some(ci.into()),
             });
         }
         let req = GetSecretsRequest {
-            requests,
+            requests: proto_requests,
             requester_env_report: Some(env_report.into()),
-            policy_reports: vec![], // not used yet
+            policy_reports: vec![],
         };
         let mut client = self.secrets();
         let resp = client.get_secrets(req).await.map_err(|e| e.to_string())?;
@@ -139,9 +141,22 @@ impl EnclaveClient {
         Ok(out)
     }
 
-    pub async fn generate_secrets(&self, ids: Vec<SecretId>) -> Result<(), String> {
-        let proto_ids = ids.into_iter().map(Into::into).collect();
-        let req = GenerateSecretsRequest { ids: proto_ids };
+    pub async fn generate_secrets(
+        &self,
+        requests_with_consumer: Vec<(SecretId, ConsumerInfo)>,
+    ) -> Result<(), String> {
+        let proto_requests = requests_with_consumer
+            .into_iter()
+            .map(
+                |(sid, ci)| nxcc_interface::proto::interface::SecretRequest {
+                    secret_id: Some(sid.into()),
+                    consumer: Some(ci.into()),
+                },
+            )
+            .collect();
+        let req = GenerateSecretsRequest {
+            requests: proto_requests,
+        };
         let mut client = self.secrets();
         client
             .generate_secrets(req)

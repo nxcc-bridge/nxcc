@@ -1,4 +1,4 @@
-#![allow(unused)]
+#![allow(warnings)]
 
 mod config;
 mod error;

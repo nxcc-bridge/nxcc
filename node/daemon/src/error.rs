@@ -16,6 +16,9 @@ pub enum AppError {
 
     #[error("Service error: {0}")]
     Service(String),
+
+    #[error("Internal error: {0}")]
+    Internal(String),
 }
 
 impl From<libp2p::core::transport::TransportError<std::io::Error>> for AppError {

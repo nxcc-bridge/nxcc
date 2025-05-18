@@ -1,3 +1,5 @@
+#![allow(warnings)]
+
 pub mod binding;
 pub mod client;
 pub mod config;

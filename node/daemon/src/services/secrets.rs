@@ -11,7 +11,7 @@ use futures::channel::mpsc;
 use libp2p::PeerId; // Import PeerId
 use libp2p::identity::Keypair; // Import Keypair
 use nxcc_interface::types::{
-    EnvReport, PolicyExecutionRequest, SecretId, SecretRequest, SecretsBox,
+    ConsumerInfo, EnvReport, PolicyExecutionRequest, SecretId, SecretRequest, SecretsBox,
 };
 use tokio::sync::{Mutex, RwLock, oneshot};
 use tracing::{debug, error, info, warn};
@@ -45,6 +45,8 @@ pub struct SecretsService {
 struct PendingRequest {
     // All secret IDs originally requested that were missing locally
     requested_ids: HashSet<SecretId>,
+    // Store the ConsumerInfo for each originally requested SecretId
+    consumers_by_id: HashMap<SecretId, ConsumerInfo>,
     // Bundles received from peers, along with their EnvReport
     collected_bundles: Vec<(SecretsBox, EnvReport)>,
     // Count of responses received
@@ -81,23 +83,23 @@ impl SecretsService {
     /// needs to be retrieved separately via the gRPC handler after this returns Ok.
     pub async fn get_secrets(
         self: Arc<Self>,
-        secret_requests: HashMap<SecretId, Vec<SecretRequest>>,
-        env_report: EnvReport,
+        secret_requests_map: HashMap<SecretId, Vec<SecretRequest>>,
+        caller_env_report: EnvReport,
     ) -> Result<(), AppError> {
         info!(
             "get_secrets called with {} unique secret IDs",
-            secret_requests.len()
+            secret_requests_map.len()
         );
 
         // 1. Determine local/missing secrets
-        let (local_ids, missing_requests) = self.check_local(&secret_requests).await?;
+        let (local_ids, missing_requests_map) = self.check_local(&secret_requests_map).await?;
         debug!(
             "Local secrets: {}, Missing secrets: {}",
             local_ids.len(),
-            missing_requests.len()
+            missing_requests_map.len()
         );
 
-        if missing_requests.is_empty() {
+        if missing_requests_map.is_empty() {
             info!("All requested secrets are available locally.");
             // All secrets are local, nothing more to do here.
             // The gRPC handler will call enclave's get_secrets later.
@@ -106,15 +108,33 @@ impl SecretsService {
 
         // 2. Fetch and validate policies for missing secrets using PolicyManager
         let mut policies = HashMap::new();
-        let missing_ids: HashSet<SecretId> = missing_requests.keys().cloned().collect();
+        let missing_ids: HashSet<SecretId> = missing_requests_map.keys().cloned().collect();
+
+        // Extract a representative ConsumerInfo for each missing SecretId
+        // This assumes all SecretRequest in the Vec for a given SecretId have the same ConsumerInfo,
+        // or that the first one is representative.
+        let mut missing_consumers_by_id = HashMap::new();
+        for (id, req_vec) in &missing_requests_map {
+            if let Some(first_req) = req_vec.first() {
+                missing_consumers_by_id.insert(id.clone(), first_req.consumer.clone());
+            } else {
+                // This case should ideally not be reached if missing_requests_map is well-formed
+                error!("Empty request vector for missing secret ID: {:?}", id);
+                return Err(AppError::Internal(format!(
+                    "No consumer info found for secret ID: {:?}",
+                    id
+                )));
+            }
+        }
+
+        let self_env_report = self.get_own_env_report(vec![]).await?;
 
         for secret_id in &missing_ids {
-            match self.policy_manager.get_policy(secret_id).await {
-                // Returns FullPolicyPackage
+            let policy_package = match self.policy_manager.get_policy(secret_id).await {
                 Ok(policy_package) => {
                     // PolicyManager.get_policy now handles manifest validation (no identities)
                     debug!("Policy validated for secret {:?}", secret_id);
-                    policies.insert(secret_id.clone(), policy_package);
+                    policy_package
                 }
                 Err(e) => {
                     error!(
@@ -123,6 +143,35 @@ impl SecretsService {
                     );
                     return Err(e); // Propagate policy fetch/validation error
                 }
+            };
+            policies.insert(secret_id.clone(), policy_package.clone());
+
+            let consumer_info = missing_consumers_by_id.get(secret_id).ok_or_else(|| {
+                AppError::Internal(format!("ConsumerInfo missing for secret {:?}", secret_id))
+            })?;
+
+            // TODO: This policy check is for the *daemon* to be able to *request* the secret
+            // for a given consumer. The enclave will perform its own checks later.
+            // The EnvReport here is the daemon's own.
+            match self
+                .runner_service
+                .check_policy_for_env(
+                    policy_package,
+                    &self_env_report, // Our node's env report
+                    secret_id,
+                    consumer_info, // The consumer specified in the original request
+                )
+                .await
+            {
+                Ok(true) => { /* Allowed to proceed with P2P request/generation */ }
+                Ok(false) => {
+                    return Err(AppError::Service(format!(
+                        "Policy denied for self to request secret {:?} for consumer bundle_hash \
+                         {:?}",
+                        secret_id, consumer_info.bundle_hash
+                    )));
+                }
+                Err(e) => return Err(e),
             }
         }
         info!(
@@ -140,6 +189,7 @@ impl SecretsService {
                 request_id,
                 PendingRequest {
                     requested_ids: missing_ids.clone(), // Store only the IDs
+                    consumers_by_id: missing_consumers_by_id.clone(),
                     collected_bundles: Vec::new(),
                     response_count: 0,
                     threshold: RESPONSE_THRESHOLD, // Use constant for now
@@ -199,8 +249,8 @@ impl SecretsService {
             .clone()
             .try_send(SecretsMessage::PublishSecretsRequest {
                 request_id,
-                secret_requests: BTreeMap::from_iter(missing_requests.clone().into_iter()),
-                env_report: env_report.clone(),
+                secret_requests: BTreeMap::from_iter(missing_requests_map.clone().into_iter()),
+                env_report: caller_env_report.clone(),
             })
             .map_err(|e| AppError::Service(format!("Failed to publish secrets request: {e}")))?;
 
@@ -249,15 +299,23 @@ impl SecretsService {
             for secret_id in &secrets_box.contained_secret_ids {
                 // Fetch policy needed for the check
                 let policy_package = self.policy_manager.get_policy(secret_id).await?;
+                let consumer_info = p.consumers_by_id.get(secret_id).ok_or_else(|| {
+                    AppError::Internal(format!(
+                        "ConsumerInfo missing for secret {:?} in pending request {}",
+                        secret_id, request_id
+                    ))
+                })?;
+
                 match self
                     .runner_service
-                    .check_policy_for_env(policy_package, &env_report, secret_id)
+                    .check_policy_for_env(policy_package, &env_report, secret_id, consumer_info)
                     .await
                 {
                     Ok(false) => {
                         warn!(
-                            "Policy check failed for secret {:?} from responder node {}",
-                            secret_id, env_report.node_id
+                            "Policy check failed for secret {:?} from responder node {} for \
+                             consumer bundle_hash {:?}",
+                            secret_id, env_report.node_id, consumer_info.bundle_hash
                         );
                         is_valid_response = false;
                         break; // One failure invalidates the whole bundle for now
@@ -335,11 +393,11 @@ impl SecretsService {
     pub async fn handle_incoming_secret_batch_request(
         &self,
         _request_id: u64,
-        secret_requests: BTreeMap<SecretId, Vec<SecretRequest>>,
-        requester_env_report: EnvReport, // The EnvReport of the node asking for secrets
+        secret_requests_from_peer: BTreeMap<SecretId, Vec<SecretRequest>>,
+        requester_env_report: EnvReport,
     ) -> Option<(SecretsBox, EnvReport)> {
         // Return tuple including our EnvReport
-        let found_ids = self.gather_local(&secret_requests).await;
+        let found_ids = self.gather_local(&secret_requests_from_peer).await;
         if found_ids.is_empty() {
             debug!("No local secrets found for incoming request.");
             return None;
@@ -350,8 +408,24 @@ impl SecretsService {
         );
 
         // 1. Policy check: Verify the requester is allowed to get these secrets
-        let mut authorized_ids = Vec::new();
+        let mut authorized_ids_and_consumers = Vec::new();
         for secret_id in found_ids {
+            // Extract the ConsumerInfo from the peer's request for this specific secret_id
+            let consumer_info_for_peer_worker = match secret_requests_from_peer
+                .get(&secret_id)
+                .and_then(|req_vec| req_vec.first().map(|req| req.consumer.clone()))
+            {
+                Some(ci) => ci,
+                None => {
+                    error!(
+                        "ConsumerInfo missing in peer's request for secret {:?}, skipping \
+                         authorization check.",
+                        secret_id
+                    );
+                    continue;
+                }
+            };
+
             let policy_package = match self.policy_manager.get_policy(&secret_id).await {
                 Ok(p) => p,
                 Err(e) => {
@@ -361,14 +435,23 @@ impl SecretsService {
             };
             match self
                 .runner_service
-                .check_policy_for_env(policy_package, &requester_env_report, &secret_id)
+                .check_policy_for_env(
+                    policy_package,
+                    &requester_env_report,
+                    &secret_id,
+                    &consumer_info_for_peer_worker,
+                )
                 .await
             {
-                Ok(true) => authorized_ids.push(secret_id),
+                Ok(true) => {
+                    authorized_ids_and_consumers.push((secret_id, consumer_info_for_peer_worker))
+                }
                 Ok(false) => warn!(
                     // Policy denied is not an error, just a denial
-                    "Policy denied for requester {} for secret {:?}",
-                    requester_env_report.node_id, secret_id
+                    "Policy denied for requester {} for secret {:?} with consumer bundle_hash {:?}",
+                    requester_env_report.node_id,
+                    secret_id,
+                    consumer_info_for_peer_worker.bundle_hash
                 ),
                 Err(e) => error!(
                     "Policy execution failed for requester {}: {}",
@@ -377,7 +460,7 @@ impl SecretsService {
             }
         }
 
-        if authorized_ids.is_empty() {
+        if authorized_ids_and_consumers.is_empty() {
             info!(
                 "No secrets authorized for requester {}",
                 requester_env_report.node_id
@@ -388,7 +471,7 @@ impl SecretsService {
         // 2. Get the authorized secrets from the enclave
         match self
             .enclave_client
-            .get_secrets(authorized_ids, requester_env_report) // Pass requester's report
+            .get_secrets(authorized_ids_and_consumers, requester_env_report) // Pass requester's report
             .await
         {
             Ok(sb) => {
@@ -430,8 +513,30 @@ impl SecretsService {
             request_id, p.response_count, p.threshold
         );
 
-        // Attempt generation for all originally missing IDs
-        let ids_to_generate: Vec<SecretId> = p.requested_ids.iter().cloned().collect();
+        let mut ids_to_generate = Vec::new();
+        for id_to_generate_sid in p.requested_ids.iter() {
+            if let Some(consumer) = p.consumers_by_id.get(id_to_generate_sid) {
+                ids_to_generate.push((id_to_generate_sid.clone(), consumer.clone()));
+            } else {
+                error!(
+                    "ConsumerInfo missing for secret {:?} in pending request {} during timeout \
+                     finalization",
+                    id_to_generate_sid, request_id
+                );
+            }
+        }
+
+        if ids_to_generate.is_empty() && !p.requested_ids.is_empty() {
+            warn!(
+                "No valid (secret, consumer) pairs for generation in request {}",
+                request_id
+            );
+            let _ = p.responder.send(Err(AppError::Internal(
+                "No valid consumers for generation".into(),
+            )));
+            return Ok(());
+        }
+
         match self.generate_secrets_flow(ids_to_generate).await {
             Ok(()) => {
                 info!("Secret generation successful for request {}", request_id);
@@ -473,14 +578,41 @@ impl SecretsService {
             return Ok(());
         }
 
-        // 7. Store valid secrets in the enclave using put_secrets with EnvReports
+        // 7. Store valid secrets in the enclave using put_secrets with EnvReports and ConsumerInfo
         info!(
-            "Calling put_secrets for request {} with {} bundles.",
+            "Preparing to call put_secrets for request {} with {} bundles.",
             request_id,
             p.collected_bundles.len()
         );
-        // Pass the collected (SecretsBox, EnvReport) tuples directly
-        match self.enclave_client.put_secrets(p.collected_bundles).await {
+
+        let mut bundles_for_enclave = Vec::new();
+        for (secrets_box, env_report) in p.collected_bundles {
+            // TODO: This is a simplification. If a SecretsBox contains secrets originally
+            // requested for *different* local consumers, this logic is insufficient.
+            // The `PutSecretsRequest::SecretsBundle` in proto associates one `ConsumerInfo`
+            // with one `SecretsBox`. This implies all secrets in that box are for that consumer.
+            // For now, we pick the ConsumerInfo associated with the *first* secret ID in the box.
+            // A more robust solution might involve splitting the SecretsBox or having the enclave
+            // handle multiple consumers per box if the proto is updated.
+            if let Some(first_sid) = secrets_box.contained_secret_ids.first() {
+                if let Some(consumer_info) = p.consumers_by_id.get(first_sid) {
+                    bundles_for_enclave.push((secrets_box, env_report, consumer_info.clone()));
+                } else {
+                    warn!(
+                        "ConsumerInfo not found for primary secret {:?} in SecretsBox from peer, \
+                         request_id {}. Skipping bundle.",
+                        first_sid, request_id
+                    );
+                }
+            } else {
+                warn!(
+                    "Received empty SecretsBox from peer for request_id {}. Skipping bundle.",
+                    request_id
+                );
+            }
+        }
+
+        match self.enclave_client.put_secrets(bundles_for_enclave).await {
             Ok(success) => {
                 if !success {
                     warn!(
@@ -647,39 +779,49 @@ impl SecretsService {
     }
 
     /// Orchestrates the secret generation flow for a list of IDs.
-    async fn generate_secrets_flow(&self, ids: Vec<SecretId>) -> Result<(), AppError> {
-        info!("Starting generation flow for {} secrets", ids.len());
-        if ids.is_empty() {
+    async fn generate_secrets_flow(
+        &self,
+        requests_with_consumer: Vec<(SecretId, ConsumerInfo)>,
+    ) -> Result<(), AppError> {
+        info!(
+            "Starting generation flow for {} secret-consumer pairs",
+            requests_with_consumer.len()
+        );
+        if requests_with_consumer.is_empty() {
             return Ok(());
         }
 
-        // For simplicity, we execute policy for each ID individually.
-        // Could be batched if the policy worker supports it.
-        for secret_id in &ids {
-            // 1. Construct self EnvReport (hash doesn't matter for self-auth check)
-            let self_env_report = self.get_own_env_report(vec![]).await?;
+        let self_env_report = self.get_own_env_report(vec![]).await?;
 
-            // 1.5 Get Policy
+        for (secret_id, consumer_info) in &requests_with_consumer {
             let policy_package = self.policy_manager.get_policy(secret_id).await?;
 
             // 2. Execute policy for self-authorization
             match self
                 .runner_service
-                .check_policy_for_env(policy_package, &self_env_report, secret_id)
+                .check_policy_for_env(policy_package, &self_env_report, secret_id, consumer_info)
                 .await
             {
                 Ok(true) => {
-                    info!("Self-authorization successful for secret {:?}", secret_id);
+                    info!(
+                        "Self-authorization successful for secret {:?} and consumer bundle_hash \
+                         {:?}",
+                        secret_id, consumer_info.bundle_hash
+                    );
                     // Authorization is stored implicitly by execute_policy_for_env via enclave
                 }
                 Ok(false) => {
-                    warn!("Self-authorization denied for secret {:?}", secret_id);
+                    warn!(
+                        "Self-authorization denied for secret {:?} and consumer bundle_hash {:?}",
+                        secret_id, consumer_info.bundle_hash
+                    );
                     // Continue to try others, but maybe return partial failure?
                 }
                 Err(e) => {
                     error!(
-                        "Policy execution failed during self-authorization for secret {:?}: {}",
-                        secret_id, e
+                        "Policy execution failed during self-authorization for secret {:?} and \
+                         consumer bundle_hash {:?}: {}",
+                        secret_id, consumer_info.bundle_hash, e
                     );
                     // Propagate the error for now
                     return Err(e);
@@ -689,7 +831,7 @@ impl SecretsService {
 
         // 3. Call enclave's generate_secrets (which checks internal auth store)
         self.enclave_client
-            .generate_secrets(ids)
+            .generate_secrets(requests_with_consumer)
             .await
             .map_err(|e| AppError::Service(format!("Enclave generate_secrets failed: {}", e)))
     }

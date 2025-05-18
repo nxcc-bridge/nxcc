@@ -84,16 +84,16 @@ impl From<&SecretId> for interface::SecretIdentifier {
     }
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct ConsumerInfo {
-    pub code_hash: Vec<u8>,
+    pub bundle_hash: Vec<u8>,
     pub signature: Vec<u8>,
 }
 
 impl From<interface::ConsumerInfo> for ConsumerInfo {
     fn from(p: interface::ConsumerInfo) -> Self {
         Self {
-            code_hash: p.code_hash,
+            bundle_hash: p.bundle_hash,
             signature: p.signature,
         }
     }
@@ -102,7 +102,7 @@ impl From<interface::ConsumerInfo> for ConsumerInfo {
 impl From<ConsumerInfo> for interface::ConsumerInfo {
     fn from(value: ConsumerInfo) -> Self {
         interface::ConsumerInfo {
-            code_hash: value.code_hash,
+            bundle_hash: value.bundle_hash,
             signature: value.signature,
         }
     }
@@ -111,7 +111,7 @@ impl From<ConsumerInfo> for interface::ConsumerInfo {
 impl From<&ConsumerInfo> for interface::ConsumerInfo {
     fn from(value: &ConsumerInfo) -> Self {
         interface::ConsumerInfo {
-            code_hash: value.code_hash.clone(),
+            bundle_hash: value.bundle_hash.clone(),
             signature: value.signature.clone(),
         }
     }

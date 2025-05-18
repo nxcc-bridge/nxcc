@@ -4,7 +4,7 @@ use nxcc_interface::{
         TerminateWorkerRequest, runner_client::RunnerClient,
     },
     types::{
-        EnvReport, FullPolicyPackage, PolicyExecutionRequest, SecretId, WorkerBundle,
+        ConsumerInfo, EnvReport, FullPolicyPackage, PolicyExecutionRequest, SecretId, WorkerBundle,
         WorkerManifest,
     },
 };
@@ -139,10 +139,11 @@ impl RunnerService {
         policy_package: FullPolicyPackage,
         env_report: &EnvReport,
         secret_id: &SecretId,
+        consumer_info: &ConsumerInfo,
     ) -> Result<bool, AppError> {
         info!(
-            "Executing policy check for secret {:?} against node {}",
-            secret_id, env_report.node_id
+            "Executing policy check for secret {:?} against node {} for consumer bundle_hash {:?}",
+            secret_id, env_report.node_id, consumer_info.bundle_hash
         );
         let FullPolicyPackage { manifest, bundle } = policy_package;
 
@@ -156,11 +157,7 @@ impl RunnerService {
         // 2. Execute Policy
         let policy_request = PolicyExecutionRequest {
             secret_ids: vec![secret_id.clone()],
-            consumer: nxcc_interface::types::ConsumerInfo {
-                // TODO: Populate consumer info if needed/available
-                code_hash: vec![],
-                signature: vec![],
-            },
+            consumer: consumer_info.clone(),
             env_report: env_report.clone(),
         };
 

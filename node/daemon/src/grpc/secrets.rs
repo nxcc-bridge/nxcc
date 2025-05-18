@@ -42,13 +42,12 @@ impl Secrets for SecretsDebugGrpc {
         let mut all_secret_ids = Vec::new(); // Collect all requested IDs for the final fetch
         for proto_req in req.secret_requests {
             let sr = SecretRequest::from(proto_req);
-            all_secret_ids.push(sr.secret_id.clone());
+            all_secret_ids.push((sr.secret_id.clone(), Default::default()));
             grouped_requests
                 .entry(sr.secret_id.clone())
                 .or_insert_with(Vec::new)
                 .push(sr);
         }
-        all_secret_ids.dedup(); // Ensure unique IDs
 
         // --- Generate Daemon's Own EnvReport ---
         let user_data_hash = Default::default();
