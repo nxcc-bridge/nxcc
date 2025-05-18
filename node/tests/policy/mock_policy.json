@@ -1,13 +1,15 @@
 {
-  "manifest": {
+  "bundle": {
+    "source": "file:tests/policy/mock_worker.js",
+    "hash": null
+  },
+  "identities": [],
+  "userdata": {
     "version": "1.0",
     "name": "Mock Allow All Policy",
     "description": "A policy that allows any request from any node with a valid EnvReport.",
-    "execution_constraints": {
-      "max_memory_mb": 128,
-      "max_execution_time_ms": 500,
-      "allowed_network_calls": false
-    }
-  },
-  "executable": "tests/policy/mock_worker.js"
+    "max_memory_mb": "128",
+    "max_execution_time_ms": "500",
+    "allowed_network_calls": "false"
+  }
 }

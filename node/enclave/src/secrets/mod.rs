@@ -38,7 +38,7 @@ struct AuthorizationId([u8; 32]);
 
 impl std::fmt::Display for AuthorizationId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", hex::encode(&self.0))
+        write!(f, "{}", hex::encode(self.0))
     }
 }
 
@@ -54,8 +54,8 @@ fn calculate_authorization_id(
     secret_id: &SecretId,
 ) -> AuthorizationId {
     let mut hasher = Sha256::new();
-    ciborium::into_writer(secret_id, &mut hasher);
-    ciborium::into_writer(attestation_report, &mut hasher);
+    ciborium::into_writer(secret_id, &mut hasher).unwrap();
+    ciborium::into_writer(attestation_report, &mut hasher).unwrap();
     AuthorizationId(<[u8; 32]>::from(hasher.finalize()))
 }
 

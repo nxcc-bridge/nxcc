@@ -413,7 +413,7 @@ async fn execute_policy_with_env_report(
 async fn check_secret_exists(secrets_grpc: &SecretsGrpcService, secret_id: &SecretId) -> bool {
     get_secret_status(secrets_grpc, secret_id)
         .await
-        .map_or(false, |s| s.0)
+        .is_some_and(|s| s.0)
 }
 
 async fn get_secret_status(

@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+
 use alloy_primitives::{Address, U256};
 use serde::{Deserialize, Serialize};
 
@@ -459,4 +461,78 @@ impl From<&VmAddress> for enclave::VmAddress {
             address_type: Some(address_type),
         }
     }
+}
+
+/// Represents a unique identifier for an identity that can be bound to a worker.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct IdentityId(pub String); // Using String for simplicity, can be a more complex type.
+
+/// Describes how to locate a `WorkerBundle`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkerBundlePointer {
+    /// The location of the `WorkerBundle`. May be a data URL for direct embedding
+    /// or other schemes like http, ipfs, etc.
+    pub source: url::Url,
+    /// The expected SHA-512 hash of the `WorkerBundle`'s COSE envelope.
+    /// Useful for mutable source URLs or content integrity checks.
+    pub hash: Option<Vec<u8>>,
+}
+
+/// Describes a worker (or policy) and its inputs.
+/// This is what is pointed to by the on-chain root of trust where policies are concerned.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkerManifest {
+    /// An authenticated pointer to a `WorkerBundle`.
+    pub bundle: WorkerBundlePointer,
+    /// The set of identities that the worker needs for execution.
+    /// These will be bound by the VM into the worker.
+    /// Policy workers are not allowed to request identities.
+    pub identities: HashSet<IdentityId>,
+    /// Arbitrary data passed by the creator of the worker manifest.
+    /// Untrusted from the perspective of the nXCC system.
+    pub userdata: HashMap<String, String>,
+}
+
+/// The inner payload of a `WorkerBundle` that gets signed.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkerBundlePayload {
+    /// The VM in which the worker must execute (e.g., "nxcc/workerd").
+    pub vm: String,
+    /// The executable code (e.g., JS, Python, WASM).
+    pub executable: Vec<u8>,
+    /// Arbitrary metadata added by the publisher. Not interpreted by nXCC.
+    pub metadata: HashMap<String, String>,
+}
+
+/// An executable (WorkerBundlePayload) that is signed by its author/publisher.
+/// This struct holds the COSE Sign1 envelope as raw bytes.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkerBundle(pub Vec<u8>);
+
+impl WorkerBundle {
+    /// Creates a new `WorkerBundle` from its payload.
+    /// In a real implementation, this would CBOR encode and sign the payload.
+    /// For now, it just CBOR encodes the payload.
+    pub fn new_from_payload(payload: &WorkerBundlePayload) -> Self {
+        let mut bytes = Vec::new();
+        ciborium::into_writer(payload, &mut bytes)
+            .expect("Failed to CBOR encode WorkerBundlePayload");
+        Self(bytes)
+    }
+
+    /// Retrieves the `WorkerBundlePayload` from the bundle.
+    /// In a real implementation, this would verify the COSE signature before decoding.
+    /// For now, it just CBOR decodes the payload.
+    pub fn payload(&self) -> WorkerBundlePayload {
+        ciborium::from_reader(&self.0[..])
+            .expect("Failed to CBOR decode WorkerBundlePayload from WorkerBundle")
+    }
+}
+
+/// A structure combining a policy's `WorkerManifest` and its resolved `WorkerBundle`.
+/// This replaces the old `PolicyBundle` for policy execution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FullPolicyPackage {
+    pub manifest: WorkerManifest,
+    pub bundle: WorkerBundle,
 }

@@ -22,8 +22,8 @@
 //! - Authorization decisions should **not** be based solely on the fact that a certificate was validated against this dummy CA.
 
 use rcgen::{
-    BasicConstraints, Certificate as RcgenCertificate, CertificateParams, DistinguishedName,
-    DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair, KeyUsagePurpose,
+    Certificate as RcgenCertificate, CertificateParams, DistinguishedName, DnType,
+    ExtendedKeyUsagePurpose, IsCa, KeyPair, KeyUsagePurpose,
 };
 use thiserror::Error;
 use tonic::transport::{Certificate, ClientTlsConfig, Identity, ServerTlsConfig};

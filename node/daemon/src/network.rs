@@ -13,10 +13,7 @@ use libp2p::{
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux,
 };
-use nxcc_interface::{
-    policy::PolicyBundle,
-    types::{EnvReport, SecretId, SecretRequest, SecretsBox},
-};
+use nxcc_interface::types::{EnvReport, SecretId, SecretRequest, SecretsBox};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, trace, warn};
 

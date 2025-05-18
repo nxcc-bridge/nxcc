@@ -1,10 +1,12 @@
 use nxcc_interface::{
-    policy::PolicyBundle,
     proto::enclave::{
         ExecutePolicyRequest as ProtoExecutePolicyRequest, RunWorkerRequest,
         TerminateWorkerRequest, runner_client::RunnerClient,
     },
-    types::{EnvReport, PolicyExecutionRequest, SecretId},
+    types::{
+        EnvReport, FullPolicyPackage, PolicyExecutionRequest, SecretId, WorkerBundle,
+        WorkerManifest,
+    },
 };
 use tonic::transport::Channel;
 use tracing::{debug, info, warn};
@@ -59,12 +61,16 @@ impl RunnerService {
         Ok(attached)
     }
 
-    /// Runs a policy worker in the pre-configured policy VM.
-    async fn run_policy_worker(&self, policy: PolicyBundle) -> Result<String, AppError> {
+    /// Runs a worker (typically a policy worker) in the pre-configured policy VM.
+    async fn run_worker_in_policy_vm(
+        &self,
+        manifest: &WorkerManifest,
+        bundle: &WorkerBundle,
+    ) -> Result<String, AppError> {
         let req = RunWorkerRequest {
             vm_id: self.enclave_config.policy_vm_id.clone(),
-            worker_code: policy.executable,
-            manifest: serde_json::to_vec(&policy.manifest).unwrap(), // Panic on internal error
+            worker_code: bundle.payload().executable,
+            manifest: serde_json::to_vec(manifest).unwrap(), // Panic on internal error
         };
         let mut client = self.client.clone();
         let resp = client
@@ -73,11 +79,14 @@ impl RunnerService {
             .map_err(|e| AppError::Service(format!("Enclave run_worker failed: {}", e)))?;
         let inner = resp.into_inner();
         if inner.success {
-            debug!("Successfully started policy worker {}", inner.worker_id);
+            debug!(
+                "Successfully started worker {} in policy VM",
+                inner.worker_id
+            );
             Ok(inner.worker_id)
         } else {
             Err(AppError::Service(format!(
-                "Enclave runner failed to start policy worker: {}",
+                "Enclave runner failed to start worker in policy VM: {}",
                 inner.error_message
             )))
         }
@@ -127,7 +136,7 @@ impl RunnerService {
     /// Returns Ok(true) if satisfied, Ok(false) if denied, Err if execution failed.
     pub async fn check_policy_for_env(
         &self,
-        policy: PolicyBundle,
+        policy_package: FullPolicyPackage,
         env_report: &EnvReport,
         secret_id: &SecretId,
     ) -> Result<bool, AppError> {
@@ -135,9 +144,10 @@ impl RunnerService {
             "Executing policy check for secret {:?} against node {}",
             secret_id, env_report.node_id
         );
+        let FullPolicyPackage { manifest, bundle } = policy_package;
 
         // 1. Start Worker
-        let worker_id = self.run_policy_worker(policy).await?;
+        let worker_id = self.run_worker_in_policy_vm(&manifest, &bundle).await?;
         info!(
             "Started policy worker {} for node {}",
             worker_id, env_report.node_id

@@ -10,9 +10,8 @@ use std::{
 use futures::channel::mpsc;
 use libp2p::PeerId; // Import PeerId
 use libp2p::identity::Keypair; // Import Keypair
-use nxcc_interface::{
-    policy::PolicyBundle,
-    types::{EnvReport, PolicyExecutionRequest, SecretId, SecretRequest, SecretsBox},
+use nxcc_interface::types::{
+    EnvReport, PolicyExecutionRequest, SecretId, SecretRequest, SecretsBox,
 };
 use tokio::sync::{Mutex, RwLock, oneshot};
 use tracing::{debug, error, info, warn};
@@ -108,12 +107,14 @@ impl SecretsService {
         // 2. Fetch and validate policies for missing secrets using PolicyManager
         let mut policies = HashMap::new();
         let missing_ids: HashSet<SecretId> = missing_requests.keys().cloned().collect();
+
         for secret_id in &missing_ids {
             match self.policy_manager.get_policy(secret_id).await {
-                Ok(policy) => {
-                    // PolicyManager already checked the manifest internally
+                // Returns FullPolicyPackage
+                Ok(policy_package) => {
+                    // PolicyManager.get_policy now handles manifest validation (no identities)
                     debug!("Policy validated for secret {:?}", secret_id);
-                    policies.insert(secret_id.clone(), policy);
+                    policies.insert(secret_id.clone(), policy_package);
                 }
                 Err(e) => {
                     error!(
@@ -247,10 +248,10 @@ impl SecretsService {
             let mut is_valid_response = true;
             for secret_id in &secrets_box.contained_secret_ids {
                 // Fetch policy needed for the check
-                let policy = self.policy_manager.get_policy(secret_id).await?;
+                let policy_package = self.policy_manager.get_policy(secret_id).await?;
                 match self
                     .runner_service
-                    .check_policy_for_env(policy, &env_report, secret_id)
+                    .check_policy_for_env(policy_package, &env_report, secret_id)
                     .await
                 {
                     Ok(false) => {
@@ -351,7 +352,7 @@ impl SecretsService {
         // 1. Policy check: Verify the requester is allowed to get these secrets
         let mut authorized_ids = Vec::new();
         for secret_id in found_ids {
-            let policy = match self.policy_manager.get_policy(&secret_id).await {
+            let policy_package = match self.policy_manager.get_policy(&secret_id).await {
                 Ok(p) => p,
                 Err(e) => {
                     error!("Failed to get policy for {:?}: {}", secret_id, e);
@@ -360,7 +361,7 @@ impl SecretsService {
             };
             match self
                 .runner_service
-                .check_policy_for_env(policy, &requester_env_report, &secret_id)
+                .check_policy_for_env(policy_package, &requester_env_report, &secret_id)
                 .await
             {
                 Ok(true) => authorized_ids.push(secret_id),
@@ -659,12 +660,12 @@ impl SecretsService {
             let self_env_report = self.get_own_env_report(vec![]).await?;
 
             // 1.5 Get Policy
-            let policy = self.policy_manager.get_policy(secret_id).await?;
+            let policy_package = self.policy_manager.get_policy(secret_id).await?;
 
             // 2. Execute policy for self-authorization
             match self
                 .runner_service
-                .check_policy_for_env(policy, &self_env_report, secret_id)
+                .check_policy_for_env(policy_package, &self_env_report, secret_id)
                 .await
             {
                 Ok(true) => {

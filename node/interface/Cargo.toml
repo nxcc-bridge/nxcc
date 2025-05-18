@@ -9,6 +9,7 @@ ciborium = "0.2.2"
 prost = "0.13.5"
 serde = { version = "1.0", features = ["derive"] }
 sha2 = "0.10.8"
+url = { version = "2.5.4", features = ["serde"] } # Added for WorkerManifest
 tonic = { version = "0.13.1", features = ["transport"] }
 
 [build-dependencies]
