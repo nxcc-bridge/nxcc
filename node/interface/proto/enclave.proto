@@ -21,6 +21,9 @@ service Secrets {
 
   // generate_secrets creates secrets for the first time
   rpc GenerateSecrets(GenerateSecretsRequest) returns (google.protobuf.Empty);
+
+  // authorize_enclave_for_worker_secrets allows the daemon to tell the enclave to authorize itself for providing secrets to a worker.
+  rpc AuthorizeEnclaveForWorkerSecrets(AuthorizeEnclaveForWorkerSecretsRequest) returns (google.protobuf.Empty);
 }
 
 message GetReportRequest {
@@ -65,6 +68,12 @@ message CheckSecretsResponse {
 
 message GenerateSecretsRequest {
   repeated interface.SecretRequest requests = 1;
+}
+
+message AuthorizeEnclaveForWorkerSecretsRequest {
+  repeated interface.SecretIdentifier secret_ids = 1;
+  interface.ConsumerInfo worker_consumer_info = 2;
+  interface.EnvReport daemon_env_report = 3;
 }
 
 message SecretStatus {
@@ -139,10 +148,10 @@ message DetachVmRequest {
 message RunWorkerRequest {
   /// The identifier of the attached VM where the worker should run.
   string vm_id = 1;
-  /// The worker program code.
-  bytes worker_code = 2;
-  /// Manifest containing configuration and potentially VM requirements.
-  bytes manifest = 3;
+  /// Serialized WorkerManifest.
+  bytes worker_manifest_bytes = 2;
+  /// Raw WorkerBundle (COSE envelope).
+  bytes worker_bundle_bytes = 3;
 }
 
 message RunWorkerResponse {

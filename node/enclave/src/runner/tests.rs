@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use nxcc_interface::{
     proto::vm::WorkerStatus,
-    types::{AttestationReport, ConsumerInfo, EnvReport, PolicyExecutionRequest, SecretId},
+    types::{
+        AttestationReport, ConsumerInfo, EnvReport, PolicyExecutionRequest, SecretId, WorkerBundle,
+        WorkerBundlePayload, WorkerBundlePointer, WorkerManifest,
+    },
 };
 use nxcc_vm_base::client::{
     VmClient as _,
@@ -60,6 +63,28 @@ async fn attach_mock_vm(runner_service: &RunnerService, vm_id: &str, client: Moc
 async fn add_worker_mapping(runner_service: &RunnerService, worker_id: &str, vm_id: &str) {
     let mut worker_map_guard = runner_service.worker_map.write().await;
     worker_map_guard.insert(worker_id.to_string(), vm_id.to_string());
+}
+
+// Helper to create a default WorkerManifest for tests
+fn test_worker_manifest() -> WorkerManifest {
+    WorkerManifest {
+        bundle: WorkerBundlePointer {
+            source: "file:dummy.js".parse().unwrap(),
+            hash: None,
+        },
+        identities: vec![],
+        userdata: Default::default(),
+    }
+}
+
+// Helper to create a default WorkerBundle for tests
+fn test_worker_bundle(executable_code: Vec<u8>) -> WorkerBundle {
+    let payload = WorkerBundlePayload {
+        vm: "test-vm".to_string(),
+        executable: executable_code,
+        metadata: Default::default(),
+    };
+    WorkerBundle::new_from_payload(&payload)
 }
 
 #[tokio::test]
@@ -158,14 +183,15 @@ async fn test_detach_vm_not_exists() {
 async fn test_run_worker_success() {
     let (_secrets, runner_service, mock_client) = setup();
     let vm_id = "vm-run";
-    let worker_code = vec![1, 2, 3];
-    let manifest = vec![4, 5];
+    let manifest_obj = test_worker_manifest();
+    let bundle_code = vec![1, 2, 3];
+    let bundle_obj = test_worker_bundle(bundle_code.clone());
     let expected_instance_id = "instance-policy-worker-1"; // Default mock ID format
 
     attach_mock_vm(&runner_service, vm_id, mock_client.clone()).await; // Clone needed if we inspect mock later
 
     let result = runner_service
-        .run_worker(vm_id.to_string(), worker_code.clone(), manifest.clone())
+        .run_worker(vm_id.to_string(), manifest_obj.clone(), bundle_obj.clone())
         .await;
 
     let instance_id = result.unwrap();
@@ -181,18 +207,18 @@ async fn test_run_worker_success() {
     // Verify mock client state (optional but good)
     let (status, code) = mock_client.get_worker(expected_instance_id).unwrap();
     assert_eq!(status, WorkerStatus::Running);
-    assert_eq!(code, worker_code);
+    assert_eq!(code, bundle_code);
 }
 
 #[tokio::test]
 async fn test_run_worker_vm_not_attached() {
     let (_secrets, runner_service, _mock_client) = setup();
     let vm_id = "vm-not-here";
-    let worker_code = vec![1, 2, 3];
-    let manifest = vec![4, 5];
+    let manifest_obj = test_worker_manifest();
+    let bundle_obj = test_worker_bundle(vec![1, 2, 3]);
 
     let result = runner_service
-        .run_worker(vm_id.to_string(), worker_code.clone(), manifest.clone())
+        .run_worker(vm_id.to_string(), manifest_obj.clone(), bundle_obj.clone())
         .await;
 
     assert!(matches!(result, Err(RunnerError::VmNotAttached(id)) if id == vm_id));
@@ -203,15 +229,15 @@ async fn test_run_worker_vm_not_attached() {
 async fn test_run_worker_start_fails_in_vm() {
     let (_secrets, runner_service, mock_client) = setup();
     let vm_id = "vm-fail-start";
-    let worker_code = vec![1, 2, 3];
-    let manifest = vec![4, 5];
+    let manifest_obj = test_worker_manifest();
+    let bundle_obj = test_worker_bundle(vec![1, 2, 3]);
     let error_msg = "VM resource limit exceeded";
 
     attach_mock_vm(&runner_service, vm_id, mock_client.clone()).await;
     mock_client.fail_next_operation(error_msg); // Configure mock to fail start_worker
 
     let result = runner_service
-        .run_worker(vm_id.to_string(), worker_code.clone(), manifest.clone())
+        .run_worker(vm_id.to_string(), manifest_obj.clone(), bundle_obj.clone())
         .await;
 
     assert!(matches!(result, Err(RunnerError::WorkerStartFailed(msg)) if msg == error_msg));

@@ -5,7 +5,10 @@ use std::{collections::HashMap, sync::Arc};
 
 use nxcc_interface::{
     proto::vm::{TrustedConfig, UntrustedConfig},
-    types::{PolicyExecutionReport, PolicyExecutionRequest, VmAddress},
+    types::{
+        ConsumerInfo, PolicyExecutionReport, PolicyExecutionRequest, VmAddress, WorkerBundle,
+        WorkerManifest,
+    },
 };
 #[cfg(test)]
 use nxcc_vm_base::client::mock::MockVmServiceClient;
@@ -220,37 +223,67 @@ impl RunnerService {
     pub async fn run_worker(
         &self,
         vm_id: String,
-        worker_code: Vec<u8>,
-        manifest: Vec<u8>,
+        worker_manifest: WorkerManifest,
+        worker_bundle: WorkerBundle,
     ) -> Result<String, RunnerError> {
         info!(
-            "Requesting to run worker in VM '{}' (code size: {}, manifest size: {})",
+            "Requesting to run worker in VM '{}' (manifest user_data: {:?}, bundle payload size: \
+             {})",
             vm_id,
-            worker_code.len(),
-            manifest.len()
+            worker_manifest.userdata,
+            worker_bundle.payload().executable.len()
         );
 
-        // TODO: Parse manifest to potentially extract UntrustedConfig and VM to run in.
-        // For now, use defaults or pass manifest bytes directly if the VM expects it.
+        let mut worker_secrets_for_vm = HashMap::new();
+        if !worker_manifest.identities.is_empty() {
+            let bundle_payload_hash = worker_bundle.hash_signed_payload();
+            let cose_signature = worker_bundle.get_cose_signature();
+
+            let worker_consumer_info = ConsumerInfo {
+                bundle_hash: bundle_payload_hash,
+                signature: cose_signature,
+            };
+
+            match self.secrets.get_secrets_for_local_worker(
+                worker_manifest.identities.clone(), // Vec<(SecretId, String)>
+                worker_consumer_info,
+            ) {
+                Ok(secrets_map) => {
+                    worker_secrets_for_vm = secrets_map;
+                    info!(
+                        "Retrieved {} secrets for local worker",
+                        worker_secrets_for_vm.len()
+                    );
+                }
+                Err(e) => {
+                    error!("Failed to get secrets for local worker: {}", e);
+                    return Err(RunnerError::Internal(format!(
+                        "Failed to get secrets for worker: {}",
+                        e
+                    )));
+                }
+            }
+        }
+
         let untrusted_config = UntrustedConfig {
-            userdata_json: String::from_utf8_lossy(&manifest).to_string(),
+            userdata_json: serde_json::to_string(&worker_manifest.userdata).unwrap_or_default(),
             ..Default::default()
         };
-        let trusted_config = TrustedConfig::default(); // TODO: example
+        let trusted_config = TrustedConfig {
+            secrets: worker_secrets_for_vm,
+            limits: None,
+        };
 
         let mut vms_guard = self.vms.write().await; // Use write lock as we need a mutable client
         let client = vms_guard
             .get_mut(&vm_id)
             .ok_or_else(|| RunnerError::VmNotAttached(vm_id.clone()))?;
-
-        // The worker_id in the request here is more like a type/template ID.
-        // The VM returns the actual instance ID. Let's use a placeholder or derive from manifest.
         let worker_type_id = "policy-worker".to_string(); // TODO: placeholder
 
         match client
             .start_worker(
                 worker_type_id, // This is the 'type' id for the VM
-                worker_code,
+                worker_bundle.payload().executable,
                 untrusted_config,
                 trusted_config,
             )

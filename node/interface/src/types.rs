@@ -523,6 +523,21 @@ impl WorkerBundle {
         ciborium::from_reader(&self.0[..])
             .expect("Failed to CBOR decode WorkerBundlePayload from WorkerBundle")
     }
+
+    /// Calculates the SHA512 hash of the CBOR-encoded `WorkerBundlePayload`.
+    /// This is what COSE signs, and is used for `ConsumerInfo.bundle_hash`.
+    pub fn hash_signed_payload(&self) -> Vec<u8> {
+        use sha2::{Digest, Sha512};
+        let payload = self.payload(); // Decodes and verifies if COSE lib were used
+        let mut cbor_payload = Vec::new();
+        ciborium::into_writer(&payload, &mut cbor_payload).unwrap();
+        Sha512::digest(cbor_payload).to_vec()
+    }
+
+    /// Placeholder for extracting the COSE signature. Returns the whole bundle for now.
+    pub fn get_cose_signature(&self) -> Vec<u8> {
+        self.0.clone()
+    }
 }
 
 /// A structure combining a policy's `WorkerManifest` and its resolved `WorkerBundle`.

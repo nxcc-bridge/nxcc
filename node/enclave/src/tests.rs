@@ -6,22 +6,17 @@ use std::{
 use alloy_primitives::{Address, U256};
 use nxcc_interface::{
     proto::enclave::{
-        DetachVmRequest,
-        ExecutePolicyRequest as ProtoExecutePolicyRequest,
-        GenerateSecretsRequest,
-        GetSecretsRequest as ProtoGetSecretsRequest,
-        InvokeWorkerRequest,
-        PutSecretsRequest as ProtoPutSecretsRequest,
-        RunWorkerRequest, // SecretRequest removed from here
-        SecretsBundle,
-        TerminateWorkerRequest,
-        runner_server::Runner as _,
-        secrets_server::Secrets as _,
+        AuthorizeEnclaveForWorkerSecretsRequest, DetachVmRequest,
+        ExecutePolicyRequest as ProtoExecutePolicyRequest, GenerateSecretsRequest,
+        GetSecretsRequest as ProtoGetSecretsRequest, InvokeWorkerRequest,
+        PutSecretsRequest as ProtoPutSecretsRequest, RunWorkerRequest, SecretsBundle,
+        TerminateWorkerRequest, runner_server::Runner as _, secrets_server::Secrets as _,
     },
     proto::interface::SecretRequest, // Added correct import
     types::{
         AttestationReport, ConsumerInfo, EnvReport, PolicyExecutionReport, PolicyExecutionRequest,
-        SecretId, SecretsBox,
+        SecretId, SecretsBox, WorkerBundle, WorkerBundlePayload, WorkerBundlePointer,
+        WorkerManifest,
     },
 };
 use nxcc_vm_base::client::mock::{MockExecutionBehavior, MockVmServiceClient};
@@ -295,21 +290,35 @@ async fn attach_mock_vm(
 
 async fn run_policy_worker(
     runner_grpc: &EnclaveRunnerGrpcService,
-    mock_vm_client: &MockVmServiceClient, // Added to configure if needed, though not for basic run
+    mock_vm_client: &MockVmServiceClient,
     vm_id: &str,
 ) -> String {
     let policy_worker_type_id = "policy-worker";
-    let policy_worker_code = b"mock_policy_wasm".to_vec();
-    let policy_manifest = b"{}".to_vec();
-    let expected_policy_worker_instance_id = format!("instance-{}-1", policy_worker_type_id);
+    let policy_executable_code = b"mock_policy_wasm".to_vec();
 
-    // Ensure mock VM is configured to succeed start_worker (default behavior of MockVmServiceClient)
-    // If specific behavior is needed for start_worker, configure mock_vm_client here.
+    let policy_manifest_obj = WorkerManifest {
+        bundle: WorkerBundlePointer {
+            source: "file:mock.js".parse().unwrap(),
+            hash: None,
+        },
+        identities: vec![], // Policies typically don't request secrets themselves
+        userdata: Default::default(),
+    };
+    let policy_bundle_obj = WorkerBundle::new_from_payload(&WorkerBundlePayload {
+        vm: "mock-vm".to_string(),
+        executable: policy_executable_code.clone(),
+        metadata: Default::default(),
+    });
+
+    let policy_manifest_bytes = serde_json::to_vec(&policy_manifest_obj).unwrap();
+    let policy_bundle_bytes = policy_bundle_obj.0.clone();
+
+    let expected_policy_worker_instance_id = format!("instance-{}-1", policy_worker_type_id);
 
     let run_worker_req = Request::new(RunWorkerRequest {
         vm_id: vm_id.to_string(),
-        worker_code: policy_worker_code.clone(),
-        manifest: policy_manifest.clone(),
+        worker_manifest_bytes: policy_manifest_bytes,
+        worker_bundle_bytes: policy_bundle_bytes,
     });
 
     let run_worker_resp = runner_grpc
@@ -349,15 +358,10 @@ async fn execute_policy_with_env_report(
     };
 
     let vm_response: Vec<bool> = if should_succeed {
-        vec![true; std::cmp::max(1, secret_ids.len())] // Policy worker might expect at least one result even for empty secret_ids
+        vec![true; std::cmp::max(1, secret_ids.len())]
     } else {
         vec![false; std::cmp::max(1, secret_ids.len())]
     };
-    // If secret_ids is empty, the policy might be a general check.
-    // The mock VM should return a result array whose length matches what the policy worker outputs.
-    // For simplicity, if secret_ids is empty and should_succeed, we assume a single 'true' result.
-    // If secret_ids is empty and !should_succeed, a single 'false'.
-    // If secret_ids is not empty, length of vm_response matches secret_ids.len().
     let num_contexts_for_vm = if secret_ids.is_empty() {
         1
     } else {
@@ -389,15 +393,11 @@ async fn execute_policy_with_env_report(
     let expected_satisfied_count = if should_succeed && !secret_ids.is_empty() {
         secret_ids.len()
     } else if should_succeed && secret_ids.is_empty() {
-        // Policy for no specific secret_ids, but general approval for the client_env_report
-        1 // Assuming the policy worker returns one satisfied context in this case
+        1
     } else {
         0
     };
 
-    // The number of satisfied contexts returned by ExecutePolicy gRPC should match the number of *input* contexts that were satisfied.
-    // Our helper currently sends one PolicyExecutionRequest (which becomes one context for the worker).
-    // If that one context is satisfied, satisfied_contexts_proto.len() will be 1.
     let expected_satisfied_contexts_len = if should_succeed { 1 } else { 0 };
 
     assert_eq!(
@@ -682,7 +682,7 @@ async fn test_get_secrets_unauthorized_node() {
         }],
     });
     let put_resp = secrets_grpc.put_secrets(put_req).await.unwrap();
-    assert!(put_resp.into_inner().success, "Initial PutSecrets failed"); // This was the original panic point
+    assert!(put_resp.into_inner().success, "Initial PutSecrets failed");
     assert!(check_secret_exists(&secrets_grpc, &secret_id).await);
     info!("Test Setup: Secret put successfully");
 
@@ -798,8 +798,8 @@ async fn test_runner_ops_non_existent_entities() {
     // Test RunWorker on non-existent VM
     let run_req_bad_vm = Request::new(RunWorkerRequest {
         vm_id: non_existent_vm_id.to_string(),
-        worker_code: vec![],
-        manifest: vec![],
+        worker_manifest_bytes: vec![],
+        worker_bundle_bytes: vec![],
     });
     assert_eq!(
         runner_grpc
@@ -808,7 +808,7 @@ async fn test_runner_ops_non_existent_entities() {
             .err()
             .unwrap()
             .code(),
-        Code::FailedPrecondition
+        Code::InvalidArgument
     );
 
     // Test DetachVm on non-existent VM (should be OK)
@@ -987,7 +987,7 @@ async fn test_generate_secrets_workflow() {
     });
     let get_resp = secrets_grpc.get_secrets(get_req).await.unwrap();
     let secrets_box_get = SecretsBox::from(get_resp.into_inner().secrets_box.unwrap());
-    assert_eq!(secrets_box_get.contained_secret_ids.len(), 1); // This was the failing assertion
+    assert_eq!(secrets_box_get.contained_secret_ids.len(), 1);
     assert_eq!(secrets_box_get.contained_secret_ids[0], secret_id_gen);
 
     let decrypted_secrets = decrypt_secrets_box(&getter_kx, &secrets_box_get).unwrap();
@@ -998,4 +998,99 @@ async fn test_generate_secrets_workflow() {
     assert_eq!(decrypted_secrets[0].2, 0);
     assert!(decrypted_secrets[0].3 > 0);
     info!("Test OK: GetSecrets retrieved generated secret successfully");
+}
+
+#[tokio::test]
+#[tracing_test::traced_test]
+async fn test_local_worker_secret_authorization_flow() {
+    let (secrets_service, runner_service, mock_vm_client, secrets_grpc, runner_grpc) =
+        setup_services();
+    let vm_id = "mock-vm-local-worker";
+    attach_mock_vm(&runner_service, vm_id, mock_vm_client.clone()).await;
+
+    let secret_id_for_worker = test_secret_id(5001);
+    let secret_name_in_worker = "MY_WORKER_SECRET".to_string();
+    let secret_data_for_worker = b"this is for the local worker".to_vec();
+
+    // 1. Put the secret into the enclave (e.g., via normal P2P or generation)
+    // For simplicity, let's use GenerateSecrets after self-authorizing generation.
+    authorize_self_generation(&secrets_service, &secret_id_for_worker).await;
+    let gen_req = Request::new(GenerateSecretsRequest {
+        requests: vec![SecretRequest {
+            secret_id: Some(secret_id_for_worker.clone().into()),
+            consumer: Some(test_consumer_info().into()), // Consumer for generation
+        }],
+    });
+    secrets_grpc
+        .generate_secrets(gen_req)
+        .await
+        .expect("GenerateSecrets failed");
+    // Manually update the secret data to the expected value for the test
+    secrets_service
+        .update_secret_data_for_test(&secret_id_for_worker, secret_data_for_worker.clone());
+    assert!(check_secret_exists(&secrets_grpc, &secret_id_for_worker).await);
+    info!("Test Setup: Secret for worker generated and stored.");
+
+    // 2. Prepare WorkerManifest and WorkerBundle for the local worker
+    let worker_manifest_obj = WorkerManifest {
+        bundle: WorkerBundlePointer {
+            source: "file:local_worker.js".parse().unwrap(),
+            hash: None,
+        },
+        identities: vec![(secret_id_for_worker.clone(), secret_name_in_worker.clone())],
+        userdata: Default::default(),
+    };
+    let worker_bundle_obj = WorkerBundle::new_from_payload(&WorkerBundlePayload {
+        vm: "local-vm".to_string(),
+        executable: b"local worker code".to_vec(),
+        metadata: Default::default(),
+    });
+
+    // 3. Daemon (simulated by test) calls Enclave to authorize enclave for worker secrets
+    let daemon_env_report = test_env_report_for_client(
+        "daemon-self",
+        secrets_service.kx_public_key_for_test().as_bytes(),
+        vec![],
+    );
+    let worker_consumer_info = ConsumerInfo {
+        bundle_hash: worker_bundle_obj.hash_signed_payload(),
+        signature: worker_bundle_obj.get_cose_signature(),
+    };
+    let auth_req = Request::new(AuthorizeEnclaveForWorkerSecretsRequest {
+        secret_ids: vec![secret_id_for_worker.clone().into()],
+        worker_consumer_info: Some(worker_consumer_info.clone().into()),
+        daemon_env_report: Some(daemon_env_report.into()),
+    });
+    secrets_grpc
+        .authorize_enclave_for_worker_secrets(auth_req)
+        .await
+        .expect("AuthorizeEnclaveForWorkerSecrets failed");
+    info!("Test Setup: Enclave authorized itself for local worker secrets.");
+
+    // 4. Run the worker via EnclaveRunnerGrpcService
+    // This will internally call `get_secrets_for_local_worker`
+    let run_req = Request::new(RunWorkerRequest {
+        vm_id: vm_id.to_string(),
+        worker_manifest_bytes: serde_json::to_vec(&worker_manifest_obj).unwrap(),
+        worker_bundle_bytes: worker_bundle_obj.0.clone(),
+    });
+    let run_resp = runner_grpc
+        .run_worker(run_req)
+        .await
+        .expect("RunWorker failed for local worker");
+    assert!(
+        run_resp.into_inner().success,
+        "Local worker failed to start"
+    );
+
+    // 5. Verify the mock VM received the secret in TrustedConfig
+    let worker_instance_id = format!("instance-{}", "policy-worker-1"); // Default mock worker ID format
+    let (_status, _code, _untrusted, trusted_config_received) = mock_vm_client
+        .get_worker_config_details(&worker_instance_id)
+        .expect("Worker config not found in mock");
+    assert_eq!(
+        trusted_config_received.secrets.get(&secret_name_in_worker),
+        Some(&secret_data_for_worker)
+    );
+    info!("Test OK: Local worker started and VM received the secret correctly.");
 }

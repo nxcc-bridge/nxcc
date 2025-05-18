@@ -1,8 +1,8 @@
 use hyper_util::rt::TokioIo;
 use nxcc_interface::{
     proto::enclave::{
-        AttachVmRequest, CheckSecretsRequest, DetachVmRequest,
-        ExecutePolicyRequest as ProtoExecutePolicyRequest,
+        AttachVmRequest, AuthorizeEnclaveForWorkerSecretsRequest, CheckSecretsRequest,
+        DetachVmRequest, ExecutePolicyRequest as ProtoExecutePolicyRequest,
         ExecutePolicyResponse as ProtoExecutePolicyResponse, GenerateSecretsRequest,
         GetReportRequest, GetSecretsRequest, PutSecretsRequest, PutSecretsResponse,
         RunWorkerRequest, RunWorkerResponse, SecretsBundle as ProtoSecretsBundle,
@@ -164,6 +164,26 @@ impl EnclaveClient {
         Ok(())
     }
 
+    pub async fn authorize_enclave_for_worker_secrets(
+        &self,
+        secret_ids: Vec<SecretId>,
+        worker_consumer_info: ConsumerInfo,
+        daemon_env_report: EnvReport,
+    ) -> Result<(), String> {
+        let proto_secret_ids = secret_ids.into_iter().map(Into::into).collect();
+        let req = AuthorizeEnclaveForWorkerSecretsRequest {
+            secret_ids: proto_secret_ids,
+            worker_consumer_info: Some(worker_consumer_info.into()),
+            daemon_env_report: Some(daemon_env_report.into()),
+        };
+        let mut client = self.secrets();
+        client
+            .authorize_enclave_for_worker_secrets(req)
+            .await
+            .map_err(|e| format!("Enclave authorize_enclave_for_worker_secrets failed: {}", e))?;
+        Ok(())
+    }
+
     // Runner interface calls
 
     pub async fn attach_vm(&self, vm_id: String, vm_uds_path: String) -> Result<bool, String> {
@@ -195,13 +215,13 @@ impl EnclaveClient {
     pub async fn run_worker(
         &self,
         vm_id: String,
-        worker_code: Vec<u8>,
-        manifest: Vec<u8>,
+        worker_manifest_bytes: Vec<u8>,
+        worker_bundle_bytes: Vec<u8>,
     ) -> Result<String, String> {
         let req = RunWorkerRequest {
             vm_id,
-            worker_code,
-            manifest,
+            worker_manifest_bytes,
+            worker_bundle_bytes,
         };
         let mut client = self.runner();
         let resp = client.run_worker(req).await.map_err(|e| e.to_string())?;

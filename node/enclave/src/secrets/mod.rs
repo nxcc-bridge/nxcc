@@ -89,9 +89,9 @@ fn verify_attestation(report: &AttestationReport) -> Result<Vec<u8>, String> {
 /// The core state and logic for managing secrets within the enclave.
 pub struct Secrets {
     /// Ephemeral keypair for Diffie-Hellman, generated once per enclave instance.
-    ephemeral_kx_keypair: Lazy<KeyExchangeKeyPair>,
+    pub(self) ephemeral_kx_keypair: Lazy<KeyExchangeKeyPair>,
     /// In-memory storage for decrypted secrets.
-    secrets_storage: RwLock<HashMap<SecretId, StoredSecret>>,
+    pub(self) secrets_storage: RwLock<HashMap<SecretId, StoredSecret>>,
     /// Stores granted authorizations based on runner policy execution reports.
     /// Key: AuthorizationId (hash of request details), Value: Expiry timestamp (or timestamp of grant).
     authorizations: RwLock<HashMap<AuthorizationId, u64>>,
@@ -355,6 +355,110 @@ impl Secrets {
         Ok(())
     }
 
+    /// Authorizes the enclave itself to provide specified secrets to a given worker.
+    /// This is called by the daemon when it wants to pre-authorize secret access for a worker
+    /// that will be run locally by this enclave.
+    /// The daemon's EnvReport is checked to ensure it's genuinely this enclave's daemon.
+    pub fn authorize_enclave_for_worker_secrets(
+        &self,
+        secret_ids: Vec<SecretId>,
+        worker_consumer_info: ConsumerInfo,
+        daemon_env_report: EnvReport,
+    ) -> Result<(), String> {
+        info!(
+            "authorize_enclave_for_worker_secrets called for {} secrets, worker bundle hash: {:?}",
+            secret_ids.len(),
+            worker_consumer_info.bundle_hash
+        );
+
+        // 1. Generate enclave's own current attestation report.
+        let enclave_self_attestation = self.get_report(vec![])?;
+
+        // 2. Verify that the daemon_env_report's attestation matches the enclave's self-attestation.
+        // This confirms the request is from the trusted daemon co-located with this enclave.
+        if daemon_env_report.attestation.measurement != enclave_self_attestation.measurement {
+            return Err(format!(
+                "Daemon attestation measurement mismatch. Daemon: {:?}, Enclave: {:?}",
+                daemon_env_report.attestation.measurement, enclave_self_attestation.measurement
+            ));
+        }
+        if daemon_env_report.attestation.ephemeral_public_key
+            != enclave_self_attestation.ephemeral_public_key
+        {
+            return Err(format!(
+                "Daemon attestation ephemeral public key mismatch. Daemon: {:?}, Enclave: {:?}",
+                hex::encode(&daemon_env_report.attestation.ephemeral_public_key),
+                hex::encode(&enclave_self_attestation.ephemeral_public_key)
+            ));
+        }
+
+        debug!("Daemon's EnvReport successfully verified against enclave's self-attestation.");
+
+        // 3. Store authorizations.
+        let current_time = Utc::now().timestamp() as u64;
+        let expiry_time = current_time + 3600; // Authorize for 1 hour, for example.
+
+        let mut auth_map = self.authorizations.write().unwrap();
+        for secret_id in secret_ids {
+            // The authorization is keyed by the enclave's own attestation.
+            let auth_id = calculate_authorization_id(
+                &enclave_self_attestation,
+                &secret_id,
+                &worker_consumer_info,
+            );
+            info!(
+                "Storing self-authorization grant {} for secret {:?} / worker bundle_hash {:?} \
+                 with expiry {}",
+                auth_id, secret_id, worker_consumer_info.bundle_hash, expiry_time
+            );
+            auth_map.insert(auth_id, expiry_time);
+        }
+        Ok(())
+    }
+
+    /// Retrieves secrets for a locally run worker, checking self-authorization.
+    /// Returns a map of secret names (for VM env) to secret data.
+    pub fn get_secrets_for_local_worker(
+        &self,
+        secret_ids_with_names: Vec<(SecretId, String)>,
+        worker_consumer_info: ConsumerInfo,
+    ) -> Result<HashMap<String, Vec<u8>>, String> {
+        let enclave_self_attestation = self.get_report(vec![])?;
+        let mut worker_secrets_map = HashMap::new();
+        let secrets_map_guard = self.secrets_storage.read().unwrap();
+        let current_time = Utc::now().timestamp() as u64;
+
+        for (secret_id, name_for_vm) in secret_ids_with_names {
+            if self.check_authorization(
+                &enclave_self_attestation,
+                &secret_id,
+                &worker_consumer_info,
+            ) {
+                if let Some(stored_secret) = secrets_map_guard.get(&secret_id) {
+                    if stored_secret.expiry == 0 || stored_secret.expiry > current_time {
+                        worker_secrets_map.insert(name_for_vm, stored_secret.data.clone());
+                    } else {
+                        warn!(
+                            "Local worker authorized for secret {:?} but it's expired.",
+                            secret_id
+                        );
+                    }
+                } else {
+                    warn!(
+                        "Local worker authorized for secret {:?} but it's not found.",
+                        secret_id
+                    );
+                }
+            } else {
+                warn!(
+                    "Local worker not authorized for secret {:?}, bundle_hash {:?}",
+                    secret_id, worker_consumer_info.bundle_hash
+                );
+            }
+        }
+        Ok(worker_secrets_map)
+    }
+
     /// Retrieves secrets and packages them into an encrypted SecretsBox for the requester.
     /// Assumes the runner service has already executed policies and stored approvals via `store_authorization`.
     /// Verifies the requester's attestation before proceeding.
@@ -582,5 +686,27 @@ impl Secrets {
                 false
             }
         }
+    }
+}
+
+#[cfg(test)]
+impl Secrets {
+    #[cfg(test)]
+    pub(crate) fn update_secret_data_for_test(
+        &self,
+        secret_id: &SecretId,
+        new_data: Vec<u8>,
+    ) -> Result<(), String> {
+        let mut storage = self.secrets_storage.write().unwrap();
+        if let Some(secret) = storage.get_mut(secret_id) {
+            secret.data = new_data;
+            Ok(())
+        } else {
+            Err(format!("Secret {:?} not found for test update", secret_id))
+        }
+    }
+
+    pub(crate) fn kx_public_key_for_test(&self) -> &PublicKey {
+        self.ephemeral_kx_keypair.public_key()
     }
 }

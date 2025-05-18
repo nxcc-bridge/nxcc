@@ -67,10 +67,12 @@ impl RunnerService {
         manifest: &WorkerManifest,
         bundle: &WorkerBundle,
     ) -> Result<String, AppError> {
+        let manifest_bytes = serde_json::to_vec(manifest).unwrap();
+        let bundle_bytes = bundle.0.clone();
         let req = RunWorkerRequest {
             vm_id: self.enclave_config.policy_vm_id.clone(),
-            worker_code: bundle.payload().executable,
-            manifest: serde_json::to_vec(manifest).unwrap(), // Panic on internal error
+            worker_manifest_bytes: manifest_bytes,
+            worker_bundle_bytes: bundle_bytes,
         };
         let mut client = self.client.clone();
         let resp = client

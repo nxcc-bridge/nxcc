@@ -3,11 +3,12 @@ use std::sync::Arc;
 use nxcc_interface::{
     proto::{
         enclave::{
-            AttachVmRequest, AttachVmResponse, CheckSecretsRequest, CheckSecretsResponse,
-            DetachVmRequest, ExecutePolicyRequest, ExecutePolicyResponse, GenerateSecretsRequest,
-            GetReportRequest, GetSecretsRequest, GetSecretsResponse, InvokeWorkerRequest,
-            InvokeWorkerResponse, PutSecretsRequest, PutSecretsResponse, RunWorkerRequest,
-            RunWorkerResponse, SecretStatus, TerminateWorkerRequest,
+            AttachVmRequest, AttachVmResponse, AuthorizeEnclaveForWorkerSecretsRequest,
+            CheckSecretsRequest, CheckSecretsResponse, DetachVmRequest, ExecutePolicyRequest,
+            ExecutePolicyResponse, GenerateSecretsRequest, GetReportRequest, GetSecretsRequest,
+            GetSecretsResponse, InvokeWorkerRequest, InvokeWorkerResponse, PutSecretsRequest,
+            PutSecretsResponse, RunWorkerRequest, RunWorkerResponse, SecretStatus,
+            TerminateWorkerRequest,
             runner_server::{Runner, RunnerServer},
             secrets_server::{Secrets as SecretsServerTrait, SecretsServer},
         },
@@ -15,7 +16,7 @@ use nxcc_interface::{
     },
     types::{
         ConsumerInfo, EnvReport, PolicyExecutionRequest, SecretId, SecretRequest, SecretsBox,
-        VmAddress,
+        VmAddress, WorkerBundle, WorkerManifest,
     },
 };
 use nxcc_vm_base::client::ClientError;
@@ -189,6 +190,41 @@ impl SecretsServerTrait for SecretsGrpcService {
             }
         }
     }
+
+    async fn authorize_enclave_for_worker_secrets(
+        &self,
+        request: Request<AuthorizeEnclaveForWorkerSecretsRequest>,
+    ) -> Result<Response<()>, Status> {
+        let req = request.into_inner();
+        debug!(
+            "gRPC AuthorizeEnclaveForWorkerSecrets request for {} secret_ids",
+            req.secret_ids.len()
+        );
+
+        let secret_ids: Vec<SecretId> = req.secret_ids.into_iter().map(SecretId::from).collect();
+        let worker_consumer_info = req
+            .worker_consumer_info
+            .map(ConsumerInfo::from)
+            .ok_or_else(|| Status::invalid_argument("Missing worker_consumer_info"))?;
+        let daemon_env_report = req
+            .daemon_env_report
+            .map(EnvReport::from)
+            .ok_or_else(|| Status::invalid_argument("Missing daemon_env_report"))?;
+
+        match self.secrets.authorize_enclave_for_worker_secrets(
+            secret_ids,
+            worker_consumer_info,
+            daemon_env_report,
+        ) {
+            Ok(()) => Ok(Response::new(())),
+            Err(e) => {
+                error!("AuthorizeEnclaveForWorkerSecrets failed: {}", e);
+                Err(Status::internal(format!(
+                    "Failed to authorize for worker secrets: {e}"
+                )))
+            }
+        }
+    }
 }
 
 // --- Runner Service Implementation ---
@@ -264,12 +300,19 @@ impl Runner for EnclaveRunnerGrpcService {
         debug!(
             "gRPC RunWorker request for vm_id '{}', code size {}, manifest size {}",
             req.vm_id,
-            req.worker_code.len(),
-            req.manifest.len()
+            req.worker_manifest_bytes.len(),
+            req.worker_bundle_bytes.len()
         );
+
+        let worker_manifest: WorkerManifest = serde_json::from_slice(&req.worker_manifest_bytes)
+            .map_err(|e| {
+                Status::invalid_argument(format!("Failed to deserialize WorkerManifest: {}", e))
+            })?;
+        let worker_bundle = WorkerBundle(req.worker_bundle_bytes);
+
         match self
             .runner
-            .run_worker(req.vm_id, req.worker_code, req.manifest)
+            .run_worker(req.vm_id, worker_manifest, worker_bundle)
             .await
         {
             Ok(worker_id) => Ok(Response::new(RunWorkerResponse {
