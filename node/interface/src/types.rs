@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use alloy_primitives::{Address, U256};
 use serde::{Deserialize, Serialize};
@@ -463,10 +463,6 @@ impl From<&VmAddress> for enclave::VmAddress {
     }
 }
 
-/// Represents a unique identifier for an identity that can be bound to a worker.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub struct IdentityId(pub String); // Using String for simplicity, can be a more complex type.
-
 /// Describes how to locate a `WorkerBundle`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorkerBundlePointer {
@@ -487,7 +483,7 @@ pub struct WorkerManifest {
     /// The set of identities that the worker needs for execution.
     /// These will be bound by the VM into the worker.
     /// Policy workers are not allowed to request identities.
-    pub identities: HashSet<IdentityId>,
+    pub identities: Vec<(SecretId, String)>,
     /// Arbitrary data passed by the creator of the worker manifest.
     /// Untrusted from the perspective of the nXCC system.
     pub userdata: HashMap<String, String>,

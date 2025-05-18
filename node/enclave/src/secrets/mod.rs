@@ -362,8 +362,6 @@ impl Secrets {
         &self,
         requests: Vec<(SecretId, ConsumerInfo)>,
         requester_env_report: EnvReport,
-        // policy_reports are currently unused per instructions, checking local auth store instead
-        _policy_reports: Vec<PolicyExecutionReport>,
     ) -> Result<SecretsBox, String> {
         info!(
             "GetSecrets request from node {} for {} secret-consumer pairs",

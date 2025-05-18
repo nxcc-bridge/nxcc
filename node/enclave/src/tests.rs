@@ -192,7 +192,6 @@ async fn test_enclave_workflow() {
             secret_id: Some(secret_id.clone().into()),
             consumer: Some(test_consumer_info().into()),
         }],
-        policy_reports: vec![],
         requester_env_report: Some(getter_env_report.clone().into()), // Getter uses its EnvReport
     });
     let get_secrets_resp_fail = secrets_grpc
@@ -226,7 +225,6 @@ async fn test_enclave_workflow() {
             secret_id: Some(secret_id.clone().into()),
             consumer: Some(test_consumer_info().into()),
         }],
-        policy_reports: vec![],
         requester_env_report: Some(getter_env_report.clone().into()), // Getter uses its EnvReport
     });
     let get_secrets_resp_ok = secrets_grpc.get_secrets(get_secrets_req_ok).await.unwrap();
@@ -249,7 +247,6 @@ async fn test_enclave_workflow() {
             secret_id: Some(secret_id.clone().into()),
             consumer: Some(test_consumer_info().into()),
         }],
-        policy_reports: vec![],
         requester_env_report: Some(getter_env_report.clone().into()), // Getter uses its EnvReport
     });
     let get_secrets_resp_ok_2 = secrets_grpc
@@ -720,7 +717,6 @@ async fn test_get_secrets_unauthorized_node() {
             secret_id: Some(secret_id.clone().into()),
             consumer: Some(test_consumer_info().into()),
         }],
-        policy_reports: vec![],
         requester_env_report: Some(unauthorized_getter_env_report.clone().into()),
     });
     let get_resp_unauth = secrets_grpc.get_secrets(get_req_unauth).await.unwrap();
@@ -737,7 +733,6 @@ async fn test_get_secrets_unauthorized_node() {
             secret_id: Some(secret_id.clone().into()),
             consumer: Some(test_consumer_info().into()),
         }],
-        policy_reports: vec![],
         requester_env_report: Some(authorized_getter_env_report.clone().into()),
     });
     let get_resp_auth = secrets_grpc.get_secrets(get_req_auth).await.unwrap();
@@ -771,7 +766,6 @@ async fn test_get_secrets_invalid_requester_report() {
             secret_id: Some(secret_id.clone().into()),
             consumer: Some(test_consumer_info().into()),
         }],
-        policy_reports: vec![],
         requester_env_report: Some(bad_env_report_proto),
     });
     let result = secrets_grpc.get_secrets(get_secrets_req).await;
@@ -989,7 +983,6 @@ async fn test_generate_secrets_workflow() {
             secret_id: Some(secret_id_gen.clone().into()),
             consumer: Some(test_consumer_info().into()),
         }],
-        policy_reports: vec![],
         requester_env_report: Some(getter_env_report.clone().into()),
     });
     let get_resp = secrets_grpc.get_secrets(get_req).await.unwrap();

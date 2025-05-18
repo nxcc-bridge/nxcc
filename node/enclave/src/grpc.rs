@@ -118,12 +118,9 @@ impl SecretsServerTrait for SecretsGrpcService {
             .map(EnvReport::from)
             .ok_or_else(|| Status::invalid_argument("Missing requester_env_report"))?;
 
-        // Policy reports are currently unused, local auth store is checked
-        let policy_reports = Vec::new(); // Placeholder
-
         match self
             .secrets
-            .get_secrets(internal_requests, requester_env_report, policy_reports)
+            .get_secrets(internal_requests, requester_env_report)
         {
             Ok(secrets_box) => Ok(Response::new(GetSecretsResponse {
                 secrets_box: Some(secrets_box.into()),

@@ -107,7 +107,6 @@ impl EnclaveClient {
         let req = GetSecretsRequest {
             requests: proto_requests,
             requester_env_report: Some(env_report.into()),
-            policy_reports: vec![],
         };
         let mut client = self.secrets();
         let resp = client.get_secrets(req).await.map_err(|e| e.to_string())?;

@@ -7,8 +7,8 @@ use std::{
 };
 
 use nxcc_interface::types::{
-    FullPolicyPackage, IdentityId, SecretId, WorkerBundle, WorkerBundlePayload,
-    WorkerBundlePointer, WorkerManifest,
+    FullPolicyPackage, SecretId, WorkerBundle, WorkerBundlePayload, WorkerBundlePointer,
+    WorkerManifest,
 };
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, trace, warn};

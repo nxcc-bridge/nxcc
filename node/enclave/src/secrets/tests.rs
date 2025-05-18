@@ -682,7 +682,6 @@ fn test_get_secrets_authorization_check() {
             (secret_id2.clone(), consumer_for_auth_req), // Use same consumer for simplicity
         ],
         requester_env_report.clone(), // Requester presents their EnvReport
-        vec![],
     );
     assert!(result.is_ok(), "get_secrets failed: {:?}", result.err());
     let secrets_box = result.unwrap();
