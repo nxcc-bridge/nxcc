@@ -3,12 +3,11 @@ use std::sync::Arc;
 use nxcc_interface::{
     proto::{
         enclave::{
-            AttachVmRequest, AttachVmResponse, AuthorizeEnclaveForWorkerSecretsRequest,
-            CheckSecretsRequest, CheckSecretsResponse, DetachVmRequest, ExecutePolicyRequest,
-            ExecutePolicyResponse, GenerateSecretsRequest, GetReportRequest, GetSecretsRequest,
-            GetSecretsResponse, InvokeWorkerRequest, InvokeWorkerResponse, PutSecretsRequest,
-            PutSecretsResponse, RunWorkerRequest, RunWorkerResponse, SecretStatus,
-            TerminateWorkerRequest,
+            AttachVmRequest, AttachVmResponse, CheckSecretsRequest, CheckSecretsResponse,
+            DetachVmRequest, ExecutePolicyRequest, ExecutePolicyResponse, GenerateSecretsRequest,
+            GetReportRequest, GetSecretsRequest, GetSecretsResponse, InvokeWorkerRequest,
+            InvokeWorkerResponse, PutSecretsRequest, PutSecretsResponse, RunWorkerRequest,
+            RunWorkerResponse, SecretStatus, TerminateWorkerRequest,
             runner_server::{Runner, RunnerServer},
             secrets_server::{Secrets as SecretsServerTrait, SecretsServer},
         },
@@ -186,41 +185,6 @@ impl SecretsServerTrait for SecretsGrpcService {
                 Err(Status::already_exists(format!(
                     "Failed to generate secrets: {}",
                     e
-                )))
-            }
-        }
-    }
-
-    async fn authorize_enclave_for_worker_secrets(
-        &self,
-        request: Request<AuthorizeEnclaveForWorkerSecretsRequest>,
-    ) -> Result<Response<()>, Status> {
-        let req = request.into_inner();
-        debug!(
-            "gRPC AuthorizeEnclaveForWorkerSecrets request for {} secret_ids",
-            req.secret_ids.len()
-        );
-
-        let secret_ids: Vec<SecretId> = req.secret_ids.into_iter().map(SecretId::from).collect();
-        let worker_consumer_info = req
-            .worker_consumer_info
-            .map(ConsumerInfo::from)
-            .ok_or_else(|| Status::invalid_argument("Missing worker_consumer_info"))?;
-        let daemon_env_report = req
-            .daemon_env_report
-            .map(EnvReport::from)
-            .ok_or_else(|| Status::invalid_argument("Missing daemon_env_report"))?;
-
-        match self.secrets.authorize_enclave_for_worker_secrets(
-            secret_ids,
-            worker_consumer_info,
-            daemon_env_report,
-        ) {
-            Ok(()) => Ok(Response::new(())),
-            Err(e) => {
-                error!("AuthorizeEnclaveForWorkerSecrets failed: {}", e);
-                Err(Status::internal(format!(
-                    "Failed to authorize for worker secrets: {e}"
                 )))
             }
         }

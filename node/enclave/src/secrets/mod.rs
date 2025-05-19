@@ -355,67 +355,6 @@ impl Secrets {
         Ok(())
     }
 
-    /// Authorizes the enclave itself to provide specified secrets to a given worker.
-    /// This is called by the daemon when it wants to pre-authorize secret access for a worker
-    /// that will be run locally by this enclave.
-    /// The daemon's EnvReport is checked to ensure it's genuinely this enclave's daemon.
-    pub fn authorize_enclave_for_worker_secrets(
-        &self,
-        secret_ids: Vec<SecretId>,
-        worker_consumer_info: ConsumerInfo,
-        daemon_env_report: EnvReport,
-    ) -> Result<(), String> {
-        info!(
-            "authorize_enclave_for_worker_secrets called for {} secrets, worker bundle hash: {:?}",
-            secret_ids.len(),
-            worker_consumer_info.bundle_hash
-        );
-
-        // 1. Generate enclave's own current attestation report.
-        let enclave_self_attestation = self.get_report(vec![])?;
-
-        // 2. Verify that the daemon_env_report's attestation matches the enclave's self-attestation.
-        // This confirms the request is from the trusted daemon co-located with this enclave.
-        if daemon_env_report.attestation.measurement != enclave_self_attestation.measurement {
-            return Err(format!(
-                "Daemon attestation measurement mismatch. Daemon: {:?}, Enclave: {:?}",
-                daemon_env_report.attestation.measurement, enclave_self_attestation.measurement
-            ));
-        }
-        if daemon_env_report.attestation.ephemeral_public_key
-            != enclave_self_attestation.ephemeral_public_key
-        {
-            return Err(format!(
-                "Daemon attestation ephemeral public key mismatch. Daemon: {:?}, Enclave: {:?}",
-                hex::encode(&daemon_env_report.attestation.ephemeral_public_key),
-                hex::encode(&enclave_self_attestation.ephemeral_public_key)
-            ));
-        }
-
-        debug!("Daemon's EnvReport successfully verified against enclave's self-attestation.");
-
-        // 3. Store authorizations.
-        let current_time = Utc::now().timestamp() as u64;
-        let expiry_time = current_time + 3600; // Authorize for 1 hour, for example.
-
-        let mut auth_map = self.authorizations.write().unwrap();
-        for secret_id in secret_ids {
-            // The authorization is keyed by the enclave's own attestation.
-            let auth_id = calculate_authorization_id(
-                &enclave_self_attestation,
-                &secret_id,
-                &worker_consumer_info,
-            );
-            info!(
-                "Storing self-authorization grant {} for secret {:?} / worker bundle_hash {:?} \
-                 with expiry {}",
-                auth_id, secret_id, worker_consumer_info.bundle_hash, expiry_time
-            );
-            auth_map.insert(auth_id, expiry_time);
-        }
-        Ok(())
-    }
-
     /// Retrieves secrets for a locally run worker, checking self-authorization.
     /// Returns a map of secret names (for VM env) to secret data.
     pub fn get_secrets_for_local_worker(

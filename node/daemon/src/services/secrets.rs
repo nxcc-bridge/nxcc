@@ -856,56 +856,6 @@ impl SecretsService {
             node_id: "@self".into(), // This node_id is for daemon's internal use/logging; enclave uses attestation.
         })
     }
-
-    /// Generates local authorization in the enclave for a worker to receive secrets.
-    /// This method is intended for internal use when a worker is being launched locally.
-    pub async fn generate_local_worker_authorization(
-        &self,
-        worker_manifest: WorkerManifest,
-        worker_bundle: WorkerBundle,
-    ) -> Result<(), AppError> {
-        info!(
-            "Generating local worker authorization for manifest user_data: {:?}",
-            worker_manifest.userdata
-        );
-
-        let secret_ids_with_names: Vec<(SecretId, String)> = worker_manifest.identities;
-        if secret_ids_with_names.is_empty() {
-            debug!("No secrets requested by worker manifest, skipping authorization.");
-            return Ok(());
-        }
-
-        let secret_ids: Vec<SecretId> = secret_ids_with_names
-            .into_iter()
-            .map(|(id, _)| id)
-            .collect();
-
-        let bundle_payload_hash = worker_bundle.hash_signed_payload();
-        let dsse_signature = worker_bundle.get_dsse_signature();
-
-        let worker_consumer_info = ConsumerInfo {
-            bundle_hash: bundle_payload_hash,
-            signature: dsse_signature,
-        };
-
-        // Get daemon's own EnvReport to prove to the enclave that this request is from its own daemon.
-        let daemon_env_report = self.get_own_env_report(vec![]).await?;
-
-        // Call the enclave to store the self-authorization.
-        self.enclave_client
-            .authorize_enclave_for_worker_secrets(
-                secret_ids,
-                worker_consumer_info,
-                daemon_env_report,
-            )
-            .await
-            .map_err(|e| {
-                AppError::Service(format!(
-                    "Failed to authorize enclave for worker secrets: {}",
-                    e
-                ))
-            })
-    }
 }
 
 fn current_unix_time() -> u64 {

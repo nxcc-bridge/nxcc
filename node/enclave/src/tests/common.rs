@@ -164,10 +164,11 @@ pub async fn execute_policy_with_env_report(
     client_env_report: EnvReport,
     secret_ids: Vec<SecretId>,
     should_succeed: bool,
+    consumer_info: ConsumerInfo,
 ) {
     let policy_req_internal = PolicyExecutionRequest {
         secret_ids: secret_ids.clone(),
-        consumer: test_consumer_info(),
+        consumer: consumer_info,
         env_report: client_env_report.clone(),
     };
 

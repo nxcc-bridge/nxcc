@@ -54,6 +54,7 @@ async fn test_get_secrets_unauthorized_node() {
         putter_env_report.clone(),
         vec![secret_id.clone()],
         true,
+        test_consumer_info(),
     )
     .await;
     let put_req = Request::new(ProtoPutSecretsRequest {
@@ -82,6 +83,7 @@ async fn test_get_secrets_unauthorized_node() {
         authorized_getter_env_report.clone(),
         vec![secret_id.clone()],
         true,
+        test_consumer_info(),
     )
     .await;
 

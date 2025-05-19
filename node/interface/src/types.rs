@@ -59,8 +59,8 @@ impl From<interface::SecretIdentifier> for SecretId {
     fn from(p: interface::SecretIdentifier) -> Self {
         Self {
             chain_id: p.chain_id,
-            identity_address: p.identity_address.parse().unwrap_or(Address::ZERO), // Handle parse error gracefully
-            identity_id: p.identity_id.parse().unwrap_or(U256::ZERO), // Handle parse error
+            identity_address: p.identity_address.parse().unwrap_or(Address::ZERO), // Handle parse error gracefully (identity contract cannot be deployed to the zero address)
+            identity_id: p.identity_id.parse().unwrap_or(U256::ZERO), // Handle parse error (the zero identity is unassignable)
         }
     }
 }

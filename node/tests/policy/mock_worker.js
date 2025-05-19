@@ -2,23 +2,28 @@ export default {
   async fetch(request, env, ctx) {
     try {
       const rawText = await request.text();
-      console.log("Raw request body:", rawText);
-      const data = JSON.parse(rawText);
-      console.log("Parsed JSON object:", data);
+      // console.log("Raw request body:", rawText); // Keep for debugging if needed
+      const contextsArray = JSON.parse(rawText); // This is Vec<PolicyExecutionRequest>
+      // console.log("Parsed JSON object (contextsArray):", contextsArray);
 
-      return new Response(JSON.stringify([true], null, 2), { // TODO: return the number of trues as in the input
+      // For each context in the input array, decide if it's approved.
+      // This mock policy approves all contexts.
+      const resultsArray = contextsArray.map(context => true); 
+
+      return new Response(JSON.stringify(resultsArray), {
         status: 200,
         headers: { "content-type": "application/json; charset=utf-8" },
       });
     } catch (err) {
-      console.error("JSON parse error:", err);
+      console.error("Policy worker error:", err); // Log error with context
       return new Response(
         JSON.stringify({
-          error: "Invalid JSON in request body",
+          error: "Policy worker execution failed",
           message: err.message,
+          stack: err.stack, // Include stack for better debugging
         }),
         {
-          status: 400,
+          status: 500, // Internal server error from policy worker
           headers: { "content-type": "application/json; charset=utf-8" },
         },
       );

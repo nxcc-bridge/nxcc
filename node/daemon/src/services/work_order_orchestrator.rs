@@ -94,15 +94,86 @@ impl WorkOrderOrchestrator {
             return Err(AppError::Service(msg));
         }
 
-        // 7. Self-Authorization for secrets
-        info!("Authorizing secrets for work order {}", wo_payload.id);
-        self.secrets_service
-            .generate_local_worker_authorization(
-                worker_manifest.clone(),
-                actual_worker_bundle.clone(),
-            )
-            .await?;
-        debug!("Secrets authorized for work order {}", wo_payload.id);
+        // 7. Self-Authorization for secrets via policy execution
+        info!(
+            "Executing policies for self-authorization for work order {}",
+            wo_payload.id
+        );
+        let daemon_env_report_for_self_auth =
+            self.secrets_service.get_own_env_report(vec![]).await?;
+        let worker_consumer_info_for_self_auth = ConsumerInfo {
+            bundle_hash: actual_worker_bundle.hash_signed_payload(),
+            signature: actual_worker_bundle.get_dsse_signature(),
+        };
+
+        for (secret_id, _name) in &worker_manifest.identities {
+            let policy_package = self.policy_manager.get_policy(secret_id).await?;
+
+            let policy_manifest_bytes =
+                serde_json::to_vec(&policy_package.manifest).map_err(|e| {
+                    AppError::Internal(format!("Failed to serialize policy manifest: {}", e))
+                })?;
+            let policy_bundle_bytes = policy_package.bundle.0.clone();
+            let policy_worker_instance_id = self
+                .enclave_client
+                .run_worker(
+                    self.config.enclave.default_vm_id.clone(),
+                    policy_manifest_bytes,
+                    policy_bundle_bytes,
+                )
+                .await
+                .map_err(|e| {
+                    AppError::Service(format!(
+                        "Failed to run policy worker for self-auth {}: {}",
+                        secret_id.identity_id, e
+                    ))
+                })?;
+
+            let policy_request = nxcc_interface::types::PolicyExecutionRequest {
+                secret_ids: vec![secret_id.clone()],
+                consumer: worker_consumer_info_for_self_auth.clone(),
+                env_report: daemon_env_report_for_self_auth.clone(),
+            };
+
+            let satisfied_contexts = self
+                .enclave_client
+                .execute_policy(policy_worker_instance_id.clone(), vec![policy_request])
+                .await
+                .map_err(|e| {
+                    AppError::Service(format!(
+                        "Failed to execute policy for self-auth {}: {}",
+                        secret_id.identity_id, e
+                    ))
+                })?;
+
+            if let Err(e) = self
+                .enclave_client
+                .terminate_worker(policy_worker_instance_id.clone())
+                .await
+            {
+                warn!(
+                    "Failed to terminate policy worker {} for self-auth: {}",
+                    policy_worker_instance_id, e
+                );
+            }
+
+            if satisfied_contexts.is_empty() {
+                let msg = format!(
+                    "Self-authorization policy denied for secret {:?} for work order {}",
+                    secret_id, wo_payload.id
+                );
+                error!("{}", msg);
+                return Err(AppError::Service(msg));
+            }
+            debug!(
+                "Self-authorization policy approved for secret {:?} for work order {}",
+                secret_id, wo_payload.id
+            );
+        }
+        debug!(
+            "All secrets self-authorized via policy execution for work order {}",
+            wo_payload.id
+        );
 
         // 8. Ensure secrets are present in the enclave
         let needed_secret_ids_with_names = worker_manifest.identities.clone();

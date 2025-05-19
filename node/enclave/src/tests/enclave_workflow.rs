@@ -67,6 +67,7 @@ async fn test_enclave_workflow() {
         putter_env_report.clone(), // Putter presents its EnvReport
         vec![secret_id.clone()],
         false, // Expect policy to fail
+        test_consumer_info(),
     )
     .await;
 
@@ -97,6 +98,7 @@ async fn test_enclave_workflow() {
         putter_env_report.clone(), // Putter presents its EnvReport again
         vec![secret_id.clone()],
         true, // Expect policy to succeed
+        test_consumer_info(),
     )
     .await;
 
@@ -163,6 +165,7 @@ async fn test_enclave_workflow() {
         getter_env_report.clone(), // Getter presents its EnvReport again
         vec![secret_id.clone()],
         true, // Expect policy to succeed for getter
+        test_consumer_info(),
     )
     .await;
 

@@ -53,6 +53,7 @@ async fn test_put_secrets_mismatched_binding_hash() {
         putter_env_report_bad_hash.clone(),
         vec![secret_id.clone()],
         true,
+        test_consumer_info(),
     )
     .await;
 
@@ -106,6 +107,7 @@ async fn test_put_secrets_invalid_secrets_box_structure() {
         putter_env_report_for_bad_box.clone(),
         vec![secret_id.clone()],
         true,
+        test_consumer_info(),
     )
     .await;
 
@@ -161,6 +163,7 @@ async fn test_put_secrets_decryption_failure() {
         putter_env_report_for_wrong_key_box.clone(),
         vec![secret_id.clone()],
         true,
+        test_consumer_info(),
     )
     .await;
 

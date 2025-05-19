@@ -99,6 +99,7 @@ async fn test_generate_secrets_workflow() {
         putter_env_report.clone(),
         vec![secret_id_gen.clone()],
         true,
+        test_consumer_info(),
     )
     .await;
     let put_req = Request::new(ProtoPutSecretsRequest {
@@ -130,6 +131,7 @@ async fn test_generate_secrets_workflow() {
         getter_env_report.clone(),
         vec![secret_id_gen.clone()],
         true,
+        test_consumer_info(),
     )
     .await;
 

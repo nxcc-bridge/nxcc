@@ -1,11 +1,9 @@
 use nxcc_interface::{
-    proto::enclave::{
-        AuthorizeEnclaveForWorkerSecretsRequest, RunWorkerRequest, runner_server::Runner as _,
-        secrets_server::Secrets as _,
-    },
+    proto::enclave::{RunWorkerRequest, runner_server::Runner as _, secrets_server::Secrets as _},
     types::{
-        ConsumerInfo, DSSE_WORKER_BUNDLE_PAYLOAD_TYPE, DsseEnvelope, DsseSignatureEntry,
-        WorkerBundle, WorkerBundlePayload, WorkerBundlePointer, WorkerManifest,
+        ConsumerInfo, DSSE_WORKER_BUNDLE_PAYLOAD_TYPE, DsseEnvelope, DsseSignatureEntry, EnvReport,
+        PolicyExecutionRequest, WorkerBundle, WorkerBundlePayload, WorkerBundlePointer,
+        WorkerManifest,
     },
 };
 use tonic::Request;
@@ -69,25 +67,46 @@ async fn test_local_worker_secret_authorization_flow() {
     };
     let worker_bundle_obj = WorkerBundle(serde_json::to_vec(&local_worker_dsse_envelope).unwrap());
 
-    // 3. Daemon (simulated by test) calls Enclave to authorize enclave for worker secrets
-    let daemon_env_report = test_env_report_for_client(
-        "daemon-self",
-        secrets_service.kx_public_key_for_test().as_bytes(),
-        vec![],
-    );
+    // 3. Daemon (simulated by test) orchestrates policy execution for self-authorization
+    // 3a. Get Enclave's own EnvReport
+    let enclave_attestation_report_proto = secrets_grpc
+        .get_report(Request::new(
+            nxcc_interface::proto::enclave::GetReportRequest { user_data: vec![] },
+        ))
+        .await
+        .expect("Failed to get enclave report")
+        .into_inner();
+    let enclave_env_report = EnvReport {
+        attestation: EnvReport::from(nxcc_interface::proto::interface::EnvReport {
+            attestation: Some(enclave_attestation_report_proto),
+            operator_signature: vec![], // Not strictly needed for this part of test
+            node_id: "enclave-self".to_string(),
+        })
+        .attestation,
+        operator_signature: vec![],
+        node_id: "daemon-self".into(),
+    };
+
+    // 3b. Prepare for policy execution
     let worker_consumer_info = ConsumerInfo {
         bundle_hash: worker_bundle_obj.hash_signed_payload(),
         signature: worker_bundle_obj.get_dsse_signature(),
     };
-    let auth_req = Request::new(AuthorizeEnclaveForWorkerSecretsRequest {
-        secret_ids: vec![secret_id_for_worker.clone().into()],
-        worker_consumer_info: Some(worker_consumer_info.clone().into()),
-        daemon_env_report: Some(daemon_env_report.into()),
-    });
-    secrets_grpc
-        .authorize_enclave_for_worker_secrets(auth_req)
-        .await
-        .expect("AuthorizeEnclaveForWorkerSecrets failed");
+
+    // 3c. Execute policy for the secret (using a mock policy worker that approves)
+    let policy_worker_id_for_self_auth =
+        run_policy_worker(&runner_grpc, &mock_vm_client, vm_id).await;
+
+    execute_policy_with_env_report(
+        &runner_grpc,
+        &mock_vm_client,
+        &policy_worker_id_for_self_auth,
+        enclave_env_report, // Enclave's own report
+        vec![secret_id_for_worker.clone()],
+        true, // Expect policy to succeed for self-auth
+        worker_consumer_info.clone(),
+    )
+    .await;
     info!("Test Setup: Enclave authorized itself for local worker secrets.");
 
     // 4. Run the worker via EnclaveRunnerGrpcService
@@ -97,17 +116,15 @@ async fn test_local_worker_secret_authorization_flow() {
         worker_manifest_bytes: serde_json::to_vec(&worker_manifest_obj).unwrap(),
         worker_bundle_bytes: worker_bundle_obj.0.clone(),
     });
-    let run_resp = runner_grpc
+    let run_resp_inner = runner_grpc
         .run_worker(run_req)
         .await
-        .expect("RunWorker failed for local worker");
-    assert!(
-        run_resp.into_inner().success,
-        "Local worker failed to start"
-    );
+        .expect("RunWorker failed for local worker")
+        .into_inner();
+    assert!(run_resp_inner.success, "Local worker failed to start");
 
     // 5. Verify the mock VM received the secret in TrustedConfig
-    let worker_instance_id = format!("instance-{}", "policy-worker-1"); // Default mock worker ID format
+    let worker_instance_id = run_resp_inner.worker_id;
     let (_status, _code, _untrusted, trusted_config_received) = mock_vm_client
         .get_worker_config_details(&worker_instance_id)
         .expect("Worker config not found in mock");
