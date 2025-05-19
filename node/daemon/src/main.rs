@@ -119,7 +119,8 @@ async fn main() -> anyhow::Result<()> {
             crate::services::work_order_orchestrator::WorkOrderOrchestrator::new(
                 enclave_client.clone(),
                 secrets_service.clone(),
-                policy_manager.clone(), // Pass the already created PolicyManager
+                runner_service.clone(),   // Pass the RunnerService
+                policy_manager.clone(),   // Pass the already created PolicyManager
                 Arc::new(config.clone()), // Pass the main config
             );
 

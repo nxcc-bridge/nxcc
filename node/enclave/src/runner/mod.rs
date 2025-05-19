@@ -40,8 +40,8 @@ pub enum RunnerError {
     TlsConfig(#[from] nxcc_vm_base::tls::TlsError),
     #[error("Failed to start worker in VM: {0}")]
     WorkerStartFailed(String),
-    #[error("VM address type not supported by client")]
-    UnsupportedVmAddress,
+    #[error("Unsupported VM address type: {0}")]
+    UnsupportedVmAddress(String),
 }
 
 // Define an enum to hold different VM client implementations
@@ -169,13 +169,23 @@ impl RunnerService {
             #[cfg(feature = "uds")]
             VmAddress::Uds(uds) => VmServiceClient::connect_uds(uds.path, client_tls_config).await,
             #[cfg(not(feature = "uds"))]
-            VmAddress::Uds(_) => return Err(RunnerError::UnsupportedVmAddress),
+            VmAddress::Uds(uds) => {
+                return Err(RunnerError::UnsupportedVmAddress(format!(
+                    "UDS address type not supported in this build: {}",
+                    uds.path
+                )));
+            }
             #[cfg(feature = "vsock")]
             VmAddress::Vsock(vsock) => {
                 VmServiceClient::connect_vsock(vsock.cid, vsock.port, client_tls_config).await
             }
             #[cfg(not(feature = "vsock"))]
-            VmAddress::Vsock(_) => return Err(RunnerError::UnsupportedVmAddress),
+            VmAddress::Vsock(vsock) => {
+                return Err(RunnerError::UnsupportedVmAddress(format!(
+                    "VSOCK address type not supported in this build: CID={}, Port={}",
+                    vsock.cid, vsock.port
+                )));
+            }
         };
 
         match client_result {

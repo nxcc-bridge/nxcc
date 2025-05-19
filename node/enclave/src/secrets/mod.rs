@@ -322,7 +322,10 @@ impl Secrets {
                 // For now, just skip. Consider returning a partial success/failure later.
                 continue;
             }
-
+            debug!(
+                "Self-authorized to generate secret {:?} for consumer bundle_hash {:?}",
+                secret_id, consumer_info.bundle_hash
+            );
             // 2. Check if secret already exists
             if secrets_map.contains_key(&secret_id) {
                 error!("Secret {:?} already exists. Cannot generate.", secret_id);

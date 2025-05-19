@@ -82,7 +82,7 @@ impl RunnerService {
         let inner = resp.into_inner();
         if inner.success {
             debug!(
-                "Successfully started worker {} in default VM",
+                "Successfully started worker {} in default VM for policy execution",
                 inner.worker_id
             );
             Ok(inner.worker_id)

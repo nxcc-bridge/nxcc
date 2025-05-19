@@ -206,7 +206,8 @@ impl EnclaveClient {
         let mut client = self.runner();
         let resp = client.run_worker(req).await.map_err(|e| e.to_string())?;
         let inner = resp.into_inner();
-        if inner.success {
+        if inner.success || !inner.worker_id.is_empty() {
+            // Consider worker_id presence as success too
             Ok(inner.worker_id)
         } else {
             Err(format!(

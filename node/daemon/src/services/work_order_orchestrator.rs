@@ -2,8 +2,8 @@ use std::{collections::HashMap, sync::Arc};
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use nxcc_interface::types::{
-    ConsumerInfo, DsseEnvelope, SecretId, SecretRequest, WorkOrderPayload, WorkerBundle,
-    WorkerEventKind, WorkerManifest,
+    ConsumerInfo, DSSE_WORK_ORDER_PAYLOAD_TYPE, DsseEnvelope, SecretId, SecretRequest,
+    WorkOrderPayload, WorkerBundle, WorkerEventKind, WorkerManifest,
 };
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
@@ -22,6 +22,7 @@ struct ActiveWorkOrder {
 pub struct WorkOrderOrchestrator {
     enclave_client: EnclaveClient,
     secrets_service: Arc<SecretsService>,
+    runner_service: Arc<super::runner::RunnerService>, // Added runner_service
     policy_manager: Arc<PolicyManager>,
     config: Arc<Config>,
     active_work_orders: RwLock<HashMap<String, ActiveWorkOrder>>,
@@ -31,12 +32,14 @@ impl WorkOrderOrchestrator {
     pub fn new(
         enclave_client: EnclaveClient,
         secrets_service: Arc<SecretsService>,
+        runner_service: Arc<super::runner::RunnerService>,
         policy_manager: Arc<PolicyManager>,
         config: Arc<Config>,
     ) -> Arc<Self> {
         Arc::new(Self {
             enclave_client,
             secrets_service,
+            runner_service,
             policy_manager,
             config,
             active_work_orders: RwLock::new(HashMap::new()),
@@ -44,7 +47,7 @@ impl WorkOrderOrchestrator {
     }
 
     pub async fn submit_work_order(
-        self: Arc<Self>, // Changed to Arc<Self> to allow spawning tasks if needed later
+        self: Arc<Self>,
         work_order_dsse_bytes: Vec<u8>,
     ) -> Result<(String, String), AppError> {
         // 1. Deserialize DsseEnvelope
@@ -55,6 +58,14 @@ impl WorkOrderOrchestrator {
 
         // TODO: DSSE signature validation would happen here, likely by calling out to a policy.
         // For now, we assume it's valid if it parses.
+        if dsse_envelope.payload_type != DSSE_WORK_ORDER_PAYLOAD_TYPE {
+            return Err(AppError::Service(format!(
+                "Invalid WorkOrder DSSE payloadType: expected '{}', got '{}'",
+                DSSE_WORK_ORDER_PAYLOAD_TYPE, dsse_envelope.payload_type
+            )));
+        }
+
+        debug!("WorkOrder DSSE payload type validated.");
 
         // 2. Decode base64 payload
         let payload_bytes = BASE64_STANDARD
@@ -107,57 +118,28 @@ impl WorkOrderOrchestrator {
         };
 
         for (secret_id, _name) in &worker_manifest.identities {
+            info!(
+                "Performing self-authorization for secret {:?} for work order {}",
+                secret_id, wo_payload.id
+            );
             let policy_package = self.policy_manager.get_policy(secret_id).await?;
 
-            let policy_manifest_bytes =
-                serde_json::to_vec(&policy_package.manifest).map_err(|e| {
-                    AppError::Internal(format!("Failed to serialize policy manifest: {}", e))
-                })?;
-            let policy_bundle_bytes = policy_package.bundle.0.clone();
-            let policy_worker_instance_id = self
-                .enclave_client
-                .run_worker(
-                    self.config.enclave.default_vm_id.clone(),
-                    policy_manifest_bytes,
-                    policy_bundle_bytes,
+            let authorized = self
+                .runner_service
+                .check_policy_for_env(
+                    policy_package,
+                    &daemon_env_report_for_self_auth,
+                    secret_id,
+                    &worker_consumer_info_for_self_auth,
                 )
                 .await
                 .map_err(|e| {
                     AppError::Service(format!(
-                        "Failed to run policy worker for self-auth {}: {}",
+                        "Policy execution for self-auth of secret {:?} failed: {}",
                         secret_id.identity_id, e
                     ))
                 })?;
-
-            let policy_request = nxcc_interface::types::PolicyExecutionRequest {
-                secret_ids: vec![secret_id.clone()],
-                consumer: worker_consumer_info_for_self_auth.clone(),
-                env_report: daemon_env_report_for_self_auth.clone(),
-            };
-
-            let satisfied_contexts = self
-                .enclave_client
-                .execute_policy(policy_worker_instance_id.clone(), vec![policy_request])
-                .await
-                .map_err(|e| {
-                    AppError::Service(format!(
-                        "Failed to execute policy for self-auth {}: {}",
-                        secret_id.identity_id, e
-                    ))
-                })?;
-
-            if let Err(e) = self
-                .enclave_client
-                .terminate_worker(policy_worker_instance_id.clone())
-                .await
-            {
-                warn!(
-                    "Failed to terminate policy worker {} for self-auth: {}",
-                    policy_worker_instance_id, e
-                );
-            }
-
-            if satisfied_contexts.is_empty() {
+            if !authorized {
                 let msg = format!(
                     "Self-authorization policy denied for secret {:?} for work order {}",
                     secret_id, wo_payload.id

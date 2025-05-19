@@ -528,6 +528,9 @@ pub struct WorkerBundle(pub Vec<u8>);
 pub const DSSE_WORKER_BUNDLE_PAYLOAD_TYPE: &str =
     "application/vnd.nxcc.workerbundlepayload.v1+json";
 
+/// The IANA media type for the WorkOrderPayload when wrapped in DSSE.
+pub const DSSE_WORK_ORDER_PAYLOAD_TYPE: &str = "application/vnd.nxcc.workorderpayload.v1+json";
+
 impl WorkerBundle {
     /// Parses the DSSE envelope from the raw bytes of the WorkerBundle.
     fn dsse_envelope(&self) -> Result<DsseEnvelope, serde_json::Error> {
@@ -628,7 +631,7 @@ pub struct WorkerEvent {
 
 /// The kind of an event that can trigger a worker.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum WorkerEventKind {
     /// Runs whenever the worker is freshly started.

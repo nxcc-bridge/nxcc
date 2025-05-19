@@ -222,7 +222,7 @@ fn map_runner_error(err: RunnerError) -> Status {
         RunnerError::WorkerStartFailed(s) => {
             Status::internal(format!("Failed to start worker: {s}"))
         }
-        RunnerError::UnsupportedVmAddress => {
+        RunnerError::UnsupportedVmAddress(_) => {
             Status::unimplemented("VM address type not supported by this enclave build")
         }
     }

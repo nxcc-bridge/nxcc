@@ -22,16 +22,16 @@ WORKERD_VM_BIN="$REPO_ROOT/target/$MODE/nxcc-workerd-vm"
 
 # Check if binaries exist
 if [ ! -f "$DAEMON_BIN" ]; then
-    echo "Daemon binary not found at $DAEMON_BIN. Build first."
-    exit 1
+	echo "Daemon binary not found at $DAEMON_BIN. Build first."
+	exit 1
 fi
 if [ ! -f "$ENCLAVE_BIN" ]; then
-    echo "Enclave binary not found at $ENCLAVE_BIN. Build first."
-    exit 1
+	echo "Enclave binary not found at $ENCLAVE_BIN. Build first."
+	exit 1
 fi
 if [ ! -f "$WORKERD_VM_BIN" ]; then
-    echo "Workerd VM binary not found at $WORKERD_VM_BIN. Build first."
-    exit 1
+	echo "Workerd VM binary not found at $WORKERD_VM_BIN. Build first."
+	exit 1
 fi
 
 # Node parameters
@@ -41,22 +41,22 @@ BOOTSTRAP_PEERS="" # No bootstrap peers for dev node
 
 # --- Cleanup Function ---
 cleanup() {
-    echo "Cleaning up..."
-    # Kill node processes
-    cleanup_node "$NODE_NAME"
-    # Remove the test directory
-    if [ -d "$TEST_DIR" ]; then
-        echo "Removing test directory: $TEST_DIR"
-        rm -rf "$TEST_DIR"
-    fi
-    echo "Cleanup finished."
+	echo "Cleaning up..."
+	# Kill node processes
+	cleanup_node "$NODE_NAME"
+	# Remove the test directory
+	if [ -d "$TEST_DIR" ]; then
+		echo "Removing test directory: $TEST_DIR"
+		rm -rf "$TEST_DIR"
+	fi
+	echo "Cleanup finished."
 }
 trap cleanup EXIT INT TERM
 
 # --- Setup Node ---
 echo "=== Setting up $NODE_NAME node ==="
 setup_node "$NODE_NAME" "$TEST_DIR" "$NODE_PORT" "$BOOTSTRAP_PEERS" \
-    "$DAEMON_BIN" "$ENCLAVE_BIN" "$WORKERD_VM_BIN"
+	"$DAEMON_BIN" "$ENCLAVE_BIN" "$WORKERD_VM_BIN"
 
 # Attach VM to Enclave via Daemon
 eval "DAEMON_SOCK=\$${NODE_NAME}_DAEMON_SOCK"
@@ -78,5 +78,5 @@ echo "Press Ctrl+C to stop the node"
 
 # Wait indefinitely (until Ctrl+C)
 while true; do
-    sleep 1
+	sleep 1
 done
