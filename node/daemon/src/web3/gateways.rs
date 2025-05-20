@@ -14,7 +14,7 @@ use crate::error::AppError;
 sol!(
     #[sol(rpc)] // Add rpc attribute for contract calls
     Identity,
-    "../../contracts/evm/out/Identity.sol/Identity.json"
+    "src/web3/Identity.json"
 );
 
 #[derive(Debug, Clone)]

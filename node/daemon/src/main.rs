@@ -65,7 +65,8 @@ async fn main() -> anyhow::Result<()> {
             .unwrap_or_else(|e| {
                 panic!(
                     "Failed to create EnclaveClient: {}. Ensure the enclave is running on {}.",
-                    config.enclave.enclave_uds_path, e
+                    e,
+                    config.enclave.enclave_uds_path,
                 )
             });
 
