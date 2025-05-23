@@ -1,6 +1,7 @@
 syntax = "proto3";
 
 package interface;
+import "google/protobuf/empty.proto";
 
 // Common types shared across daemon/enclave.
 
@@ -52,4 +53,45 @@ message PolicyExecutionReport {
   PolicyExecutionRequest request = 1;
   bool decision = 2;
   uint64 timestamp = 3;
+}
+
+// Configuration for a Web3 event trigger.
+message Web3EventConfig {
+  uint64 chain_id = 1;
+  // List of contract addresses to filter for.
+  // An empty list implies a wildcard (any address).
+  repeated string address = 2;
+  // List of topic filters. Up to 4. Order matters.
+  // If fewer than 4 are provided, subsequent topic positions are wildcards.
+  repeated ProtoTopicFilter topics = 3;
+}
+
+message ProtoTopicFilter {
+  // Values for a single topic position. (e.g., topics[0]).
+  // An empty list of values means this topic must have no value (FilterSet::Values([])).
+  repeated string values = 1; // B256 hex strings "0x..."
+}
+
+// Represents a Web3 log event.
+message Web3Log {
+  bytes address = 1; // Contract address (20 bytes)
+  repeated bytes topics = 2; // List of topics (each 32 bytes)
+  bytes data = 3; // Log data
+  bytes block_hash = 4; // Hash of the block this log was in (32 bytes)
+  uint64 block_number = 5; // Number of the block this log was in
+  bytes transaction_hash = 6; // Hash of the transaction this log was in (32 bytes)
+  uint64 transaction_index = 7; // Index of the transaction in the block
+  uint64 log_index = 8; // Index of the log in the block
+  bool removed = 9; // True if this log was reverted due to a chain reorganization
+}
+
+// A wrapper for different types of event payloads that can be delivered to a worker.
+message EventPayload {
+  oneof payload {
+    Web3Log web3_log = 1;
+    // Future event types can be added here, e.g.:
+    // TimerEvent timer_event = 3;
+    // HttpEvent http_event = 4;
+    google.protobuf.Empty launch_event = 2;
+  }
 }

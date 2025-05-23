@@ -1,5 +1,6 @@
 #![allow(warnings)]
 
+use tokio::time::{Duration, interval};
 mod config;
 mod error;
 mod grpc;
@@ -12,7 +13,8 @@ mod web3;
 use std::sync::Arc;
 
 use grpc::enclave_client;
-use tracing::{Level, info};
+use nxcc_interface::proto::enclave as enclave_proto;
+use tracing::{Level, error, info};
 use tracing_subscriber::{EnvFilter, fmt::Subscriber};
 
 use crate::{
@@ -23,6 +25,9 @@ use crate::{
     services::{runner::RunnerService, secrets::SecretsService},
     web3::gateways::GatewayManager,
 };
+
+const DAEMON_EVENT_QUEUE_CAPACITY: usize = 1024; // Example capacity
+const EVENT_BATCH_SIZE: usize = 100;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -54,6 +59,10 @@ async fn main() -> anyhow::Result<()> {
     let (secrets_tx, secrets_rx) = futures::channel::mpsc::channel(64);
     let (notifier_tx, notifier_rx) = futures::channel::mpsc::channel(64);
 
+    // Central event queue for daemon to send events to enclave
+    let (daemon_event_tx, mut daemon_event_rx) =
+        tokio::sync::mpsc::channel::<enclave_proto::EventDelivery>(DAEMON_EVENT_QUEUE_CAPACITY);
+
     // Connect to the enclave
     info!(
         "connecting to enclave over UDS {}",
@@ -65,8 +74,7 @@ async fn main() -> anyhow::Result<()> {
             .unwrap_or_else(|e| {
                 panic!(
                     "Failed to create EnclaveClient: {}. Ensure the enclave is running on {}.",
-                    e,
-                    config.enclave.enclave_uds_path,
+                    e, config.enclave.enclave_uds_path,
                 )
             });
 
@@ -75,7 +83,7 @@ async fn main() -> anyhow::Result<()> {
         enclave_client.runner(),
         config.enclave.clone(),
     ));
-    let gateway_manager = GatewayManager::new();
+    let gateway_manager = Arc::new(GatewayManager::new());
     let policy_manager = Arc::new(PolicyManager::new(gateway_manager.clone(), &config).await?);
 
     // Attach the default VM to the enclave's runner service
@@ -113,24 +121,26 @@ async fn main() -> anyhow::Result<()> {
     {
         let grpc_config = config.grpc.clone();
         let secrets_service_clone = secrets_service.clone();
-        // Pass enclave client to gRPC server for the final get_secrets call
         let enclave_client_clone = enclave_client.clone();
-        // Create WorkOrderOrchestrator here and pass it
         let work_order_orchestrator =
             crate::services::work_order_orchestrator::WorkOrderOrchestrator::new(
                 enclave_client.clone(),
                 secrets_service.clone(),
-                runner_service.clone(),   // Pass the RunnerService
-                policy_manager.clone(),   // Pass the already created PolicyManager
-                Arc::new(config.clone()), // Pass the main config
+                runner_service.clone(),
+                policy_manager.clone(),
+                gateway_manager.clone(),
+                Arc::new(config.clone()),
+                daemon_event_tx.clone(),
+                shutdown_rx.resubscribe(),
             );
 
+        let enclave_client_for_grpc_server = enclave_client.clone();
         tokio::spawn(async move {
-            if let Err(e) = crate::grpc::start_grpc_server(
+            if let Err(e) = grpc::start_grpc_server(
                 &grpc_config,
                 secrets_service_clone,
                 work_order_orchestrator,
-                enclave_client_clone,
+                enclave_client_for_grpc_server,
                 shutdown_rx,
             )
             .await
@@ -139,6 +149,50 @@ async fn main() -> anyhow::Result<()> {
             }
         });
     }
+
+    // Task to batch and send events from daemon_event_rx to enclave
+    let enclave_client_for_event_delivery = enclave_client.clone();
+    let mut shutdown_rx_for_event_delivery = shutdown_tx.subscribe();
+    tokio::spawn(async move {
+        let mut batch = Vec::with_capacity(EVENT_BATCH_SIZE);
+        let mut ticker = interval(Duration::from_millis(100)); // Send batch every 100ms or if full
+
+        loop {
+            tokio::select! {
+                biased;
+                _ = shutdown_rx_for_event_delivery.recv() => {
+                    info!("Event delivery task shutting down.");
+                    // Try to send any remaining events in the batch
+                    if !batch.is_empty() {
+                        if let Err(e) = enclave_client_for_event_delivery.deliver_batch_events(std::mem::take(&mut batch)).await {
+                            error!("Failed to send final batch of events to enclave: {}", e);
+                        }
+                    }
+                    break;
+                }
+                event_opt = daemon_event_rx.recv() => {
+                    if let Some(event) = event_opt {
+                        batch.push(event);
+                    } else { // Channel closed
+                        break;
+                    }
+                }
+                _ = ticker.tick(), if !batch.is_empty() => { /* Timer ticked and batch is not empty, send below */ }
+            }
+
+            if batch.len() >= EVENT_BATCH_SIZE || (!batch.is_empty() && daemon_event_rx.is_empty())
+            {
+                // Send if batch full or channel empty
+                if let Err(e) = enclave_client_for_event_delivery
+                    .deliver_batch_events(std::mem::take(&mut batch))
+                    .await
+                {
+                    error!("Failed to send batch of events to enclave: {}", e);
+                    // TODO: Add retry logic or dead-letter queue for batch
+                }
+            }
+        }
+    });
 
     tokio::signal::ctrl_c().await?;
     tracing::info!("Received Ctrl-C, shutting down...");

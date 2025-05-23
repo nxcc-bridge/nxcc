@@ -4,18 +4,18 @@ use nxcc_interface::{
     proto::{
         enclave::{
             AttachVmRequest, AttachVmResponse, CheckSecretsRequest, CheckSecretsResponse,
-            DetachVmRequest, ExecutePolicyRequest, ExecutePolicyResponse, GenerateSecretsRequest,
-            GetReportRequest, GetSecretsRequest, GetSecretsResponse, InvokeWorkerRequest,
-            InvokeWorkerResponse, PutSecretsRequest, PutSecretsResponse, RunWorkerRequest,
-            RunWorkerResponse, SecretStatus, TerminateWorkerRequest,
+            DeliverBatchEventsRequest, DeliverBatchEventsResponse, DetachVmRequest,
+            ExecutePolicyRequest, ExecutePolicyResponse, GenerateSecretsRequest, GetReportRequest,
+            GetSecretsRequest, GetSecretsResponse, PutSecretsRequest, PutSecretsResponse,
+            RunWorkerRequest, RunWorkerResponse, SecretStatus, TerminateWorkerRequest,
             runner_server::{Runner, RunnerServer},
             secrets_server::{Secrets as SecretsServerTrait, SecretsServer},
         },
         interface,
     },
     types::{
-        ConsumerInfo, EnvReport, PolicyExecutionRequest, SecretId, SecretRequest, SecretsBox,
-        VmAddress, WorkerBundle, WorkerManifest,
+        ConsumerInfo, EnvReport, EventPayload, PolicyExecutionRequest, SecretId, SecretRequest,
+        SecretsBox, VmAddress, WorkerBundle, WorkerManifest,
     },
 };
 use nxcc_vm_base::client::ClientError;
@@ -225,6 +225,7 @@ fn map_runner_error(err: RunnerError) -> Status {
         RunnerError::UnsupportedVmAddress(_) => {
             Status::unimplemented("VM address type not supported by this enclave build")
         }
+        RunnerError::EventSendError(s) => Status::internal(format!("Event send error: {s}")),
     }
 }
 
@@ -272,11 +273,13 @@ impl Runner for EnclaveRunnerGrpcService {
             .map_err(|e| {
                 Status::invalid_argument(format!("Failed to deserialize WorkerManifest: {}", e))
             })?;
+        let launch_payload = req.launch_event_payload; // This is Option<Vec<u8>>
+
         let worker_bundle = WorkerBundle(req.worker_bundle_bytes);
 
         match self
             .runner
-            .run_worker(req.vm_id, worker_manifest, worker_bundle)
+            .run_worker(req.vm_id, worker_manifest, worker_bundle, launch_payload)
             .await
         {
             Ok(worker_id) => Ok(Response::new(RunWorkerResponse {
@@ -312,34 +315,6 @@ impl Runner for EnclaveRunnerGrpcService {
         }
     }
 
-    async fn invoke_worker(
-        &self,
-        request: Request<InvokeWorkerRequest>,
-    ) -> Result<Response<InvokeWorkerResponse>, Status> {
-        let req = request.into_inner();
-        debug!(
-            "gRPC InvokeWorker request for worker '{}', payload size {}",
-            req.worker_id,
-            req.payload.len()
-        );
-        match self.runner.invoke_worker(req.worker_id, req.payload).await {
-            Ok(result) => Ok(Response::new(InvokeWorkerResponse {
-                result,
-                success: true,
-                error_message: String::new(),
-            })),
-            // Handle specific case where VM reports failure during invocation
-            Err(RunnerError::VmConnection(ClientError::Grpc(status))) => {
-                Ok(Response::new(InvokeWorkerResponse {
-                    result: Vec::new(),
-                    success: false,
-                    error_message: status.message().to_string(),
-                }))
-            }
-            Err(e) => Err(map_runner_error(e)),
-        }
-    }
-
     async fn execute_policy(
         &self,
         request: Request<ExecutePolicyRequest>,
@@ -371,6 +346,35 @@ impl Runner for EnclaveRunnerGrpcService {
                     satisfied_contexts: satisfied_proto_contexts,
                 }))
             }
+            Err(e) => Err(map_runner_error(e)),
+        }
+    }
+
+    async fn deliver_batch_events(
+        &self,
+        request: Request<DeliverBatchEventsRequest>,
+    ) -> Result<Response<DeliverBatchEventsResponse>, Status> {
+        let req_inner = request.into_inner();
+        debug!(
+            "gRPC DeliverBatchEvents request with {} events",
+            req_inner.events.len()
+        );
+
+        let mut internal_events = Vec::new();
+        for proto_event_delivery in req_inner.events {
+            let worker_id = proto_event_delivery.worker_id;
+            let event_payload_proto = proto_event_delivery
+                .event_payload
+                .ok_or_else(|| Status::invalid_argument("EventDelivery missing event_payload"))?;
+            let rust_event_payload = EventPayload::from(event_payload_proto);
+            internal_events.push((worker_id, rust_event_payload));
+        }
+
+        match self.runner.deliver_batch_events(internal_events).await {
+            Ok(()) => Ok(Response::new(DeliverBatchEventsResponse {
+                success: true,
+                message: "Batch delivered".to_string(),
+            })),
             Err(e) => Err(map_runner_error(e)),
         }
     }

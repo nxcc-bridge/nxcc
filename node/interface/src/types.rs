@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{Address, B256, U256};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use serde::{Deserialize, Serialize};
 
@@ -631,9 +631,195 @@ pub struct WorkerEvent {
 
 /// The kind of an event that can trigger a worker.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case", tag = "kind")]
 #[non_exhaustive]
 pub enum WorkerEventKind {
     /// Runs whenever the worker is freshly started.
     Launch,
+    /// Describes a Web3 event subscription.
+    Web3Event(Web3Event),
 }
+
+/// Configuration for a Web3 event listener, mirroring Alloy's Filter structure.
+/// This is the Rust representation of the JSON `Web3Event` type in the work order.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Web3Event {
+    pub chain: u64,
+    /// Contract addresses to filter for.
+    /// - `None` or empty `Vec` typically means wildcard (any address), depending on RPC interpretation.
+    ///   Our interpretation: empty Vec means wildcard.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub address: Vec<Address>,
+    /// Topic filters. A `Vec<Vec<B256>>`.
+    /// Outer Vec corresponds to topic0, topic1, etc. Max 4.
+    /// Inner Vec contains alternative values for that topic.
+    /// - `topics: []` (empty outer Vec) -> wildcard for all topic positions.
+    /// - `topics: [vec![]]` -> topic0 must be empty (FilterSet::Values([])), rest wildcard.
+    /// - `topics: [vec!["0x...".parse().unwrap()]]` -> topic0 specific, rest wildcard.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub topics: Vec<Vec<B256>>,
+}
+
+impl From<interface::Web3EventConfig> for Web3Event {
+    fn from(p: interface::Web3EventConfig) -> Self {
+        Self {
+            chain: p.chain_id,
+            address: p
+                .address
+                .into_iter()
+                .map(|s| s.parse().unwrap_or_default())
+                .collect(),
+            topics: p
+                .topics
+                .into_iter()
+                .map(|topic_filter| {
+                    topic_filter
+                        .values
+                        .into_iter()
+                        .map(|s| s.parse().unwrap_or_default())
+                        .collect()
+                })
+                .collect(),
+        }
+    }
+}
+
+impl From<Web3Event> for interface::Web3EventConfig {
+    fn from(value: Web3Event) -> Self {
+        interface::Web3EventConfig {
+            chain_id: value.chain,
+            address: value.address.iter().map(|a| format!("{a:#x}")).collect(),
+            topics: value
+                .topics
+                .iter()
+                .map(|topic_values| interface::ProtoTopicFilter {
+                    values: topic_values.iter().map(|t| format!("{t:#x}")).collect(),
+                })
+                .collect(),
+        }
+    }
+}
+
+// --- Event Delivery Types ---
+
+/// Represents a Web3 log event, mirroring `alloy_rpc_types::Log`.
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Web3Log {
+    pub address: Address,
+    pub topics: Vec<B256>,
+    pub data: Vec<u8>, // alloy_primitives::Bytes is just a wrapper around Vec<u8>
+    pub block_hash: Option<B256>,
+    pub block_number: Option<u64>,
+    pub transaction_hash: Option<B256>,
+    pub transaction_index: Option<u64>, // usize in alloy, u64 is fine for proto
+    pub log_index: Option<u64>,         // usize in alloy, u64 is fine for proto
+    pub removed: bool,
+}
+
+impl From<alloy_rpc_types::Log> for Web3Log {
+    fn from(log: alloy_rpc_types::Log) -> Self {
+        Self {
+            address: log.inner.address,
+            topics: log.inner.topics().to_vec(), // Access topics through TopicList
+            data: log.inner.data.data.to_vec(),  // Convert alloy_primitives::Bytes to Vec<u8>
+            block_hash: log.block_hash,
+            block_number: log.block_number,
+            transaction_hash: log.transaction_hash,
+            transaction_index: log.transaction_index,
+            log_index: log.log_index,
+            removed: log.removed,
+        }
+    }
+}
+
+impl From<Web3Log> for interface::Web3Log {
+    fn from(log: Web3Log) -> Self {
+        Self {
+            address: log.address.to_vec(),
+            topics: log.topics.iter().map(|t| t.to_vec()).collect(),
+            data: log.data,
+            block_hash: log.block_hash.map_or_else(Vec::new, |h| h.to_vec()),
+            block_number: log.block_number.unwrap_or(0),
+            transaction_hash: log.transaction_hash.map_or_else(Vec::new, |h| h.to_vec()),
+            transaction_index: log.transaction_index.unwrap_or(0),
+            log_index: log.log_index.unwrap_or(0),
+            removed: log.removed,
+        }
+    }
+}
+
+impl From<interface::Web3Log> for Web3Log {
+    fn from(p_log: interface::Web3Log) -> Self {
+        Self {
+            address: Address::from_slice(&p_log.address),
+            topics: p_log
+                .topics
+                .into_iter()
+                .map(|b| B256::from_slice(&b))
+                .collect(),
+            data: p_log.data,
+            block_hash: if p_log.block_hash.is_empty() {
+                None
+            } else {
+                Some(B256::from_slice(&p_log.block_hash))
+            },
+            block_number: if p_log.block_number == 0 && p_log.block_hash.is_empty() {
+                None
+            } else {
+                Some(p_log.block_number)
+            }, // Heuristic for optional
+            transaction_hash: if p_log.transaction_hash.is_empty() {
+                None
+            } else {
+                Some(B256::from_slice(&p_log.transaction_hash))
+            },
+            transaction_index: if p_log.transaction_index == 0 && p_log.transaction_hash.is_empty()
+            {
+                None
+            } else {
+                Some(p_log.transaction_index)
+            },
+            log_index: if p_log.log_index == 0 && p_log.transaction_hash.is_empty() {
+                None
+            } else {
+                Some(p_log.log_index)
+            }, // Heuristic for optional
+            removed: p_log.removed,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum EventPayload {
+    Web3Log(Web3Log),
+    Launch,
+    // Future event types
+}
+
+impl From<interface::EventPayload> for EventPayload {
+    fn from(p_payload: interface::EventPayload) -> Self {
+        match p_payload.payload {
+            Some(interface::event_payload::Payload::Web3Log(log)) => {
+                EventPayload::Web3Log(Web3Log::from(log))
+            }
+            Some(interface::event_payload::Payload::LaunchEvent(_)) => {
+                EventPayload::Launch
+            }
+            None => panic!("EventPayload proto is empty"), // Or handle as error
+        }
+    }
+}
+
+impl From<EventPayload> for interface::EventPayload {
+    fn from(payload: EventPayload) -> Self {
+        match payload {
+            EventPayload::Web3Log(log) => Self {
+                payload: Some(interface::event_payload::Payload::Web3Log(log.into())),
+            },
+            EventPayload::Launch => Self {
+                payload: Some(interface::event_payload::Payload::LaunchEvent(())),
+            }
+        }
+    }
+}
+

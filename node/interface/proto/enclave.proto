@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package enclave;
 
+
 import "google/protobuf/empty.proto";
 import "interface.proto";
 
@@ -82,13 +83,15 @@ service Runner {
 
   /// Starts a new worker instance within a specified, attached VM.
   rpc RunWorker (RunWorkerRequest) returns (RunWorkerResponse);
+
+  /// Executes a policy worker against a batch of contexts.
+  rpc ExecutePolicy (ExecutePolicyRequest) returns (ExecutePolicyResponse);
+
   /// Terminates a specific running worker instance.
   rpc TerminateWorker (TerminateWorkerRequest) returns (google.protobuf.Empty);
 
-  /// Invokes a specific worker instance with a generic payload (non-policy execution).
-  rpc InvokeWorker (InvokeWorkerRequest) returns (InvokeWorkerResponse);
-  /// Executes a policy worker against a batch of contexts.
-  rpc ExecutePolicy (ExecutePolicyRequest) returns (ExecutePolicyResponse);
+  /// Delivers a batch of asynchronous events to specified workers.
+  rpc DeliverBatchEvents (DeliverBatchEventsRequest) returns (DeliverBatchEventsResponse);
 }
 
 // --- AttachVm Messages ---
@@ -143,6 +146,8 @@ message RunWorkerRequest {
   bytes worker_manifest_bytes = 2;
   /// Raw WorkerBundle (DSSE envelope as JSON bytes).
   bytes worker_bundle_bytes = 3;
+  /// Optional payload for the Launch event, delivered synchronously after worker start.
+  optional bytes launch_event_payload = 4;
 }
 
 message RunWorkerResponse {
@@ -154,29 +159,28 @@ message RunWorkerResponse {
   string error_message = 3;
 }
 
+// --- DeliverBatchEvents Messages ---
+message EventDelivery {
+  string worker_id = 1; // Target enclave worker ID
+  interface.EventPayload event_payload = 2;
+}
+
+message DeliverBatchEventsRequest {
+  repeated EventDelivery events = 1;
+}
+
+message DeliverBatchEventsResponse {
+  // Optionally, return status for each event or an overall status.
+  // For now, simple success/failure for the batch.
+  bool success = 1;
+  string message = 2;
+}
+
 // --- TerminateWorker Messages ---
 
 message TerminateWorkerRequest {
   /// The unique identifier of the worker instance to terminate.
   string worker_id = 1;
-}
-
-// --- InvokeWorker Messages ---
-
-message InvokeWorkerRequest {
-  /// The unique identifier of the worker instance to invoke.
-  string worker_id = 1;
-  /// The payload/data to send to the worker instance.
-  bytes payload = 2;
-}
-
-message InvokeWorkerResponse {
-  /// The result or output returned by the worker instance.
-  bytes result = 1;
-  /// Indicates if the invocation was successful.
-  bool success = 2;
-  /// Optional error message if invocation failed.
-  string error_message = 3;
 }
 
 // --- ExecutePolicy Messages ---

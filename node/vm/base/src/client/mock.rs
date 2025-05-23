@@ -32,6 +32,7 @@ pub struct MockVmServiceClient {
     attestation_behavior: Arc<Mutex<MockAttestationBehavior>>,
     execution_behavior: Arc<Mutex<HashMap<String, MockExecutionBehavior>>>,
     default_execution_behavior: Arc<Mutex<MockExecutionBehavior>>,
+    invocations: Arc<Mutex<HashMap<String, Vec<Vec<u8>>>>>, // worker_id -> Vec<payload>
 }
 
 /// Configure mock attestation behavior
@@ -86,6 +87,7 @@ impl MockVmServiceClient {
             attestation_behavior: Arc::new(Mutex::new(MockAttestationBehavior::Standard)),
             execution_behavior: Arc::new(Mutex::new(HashMap::new())),
             default_execution_behavior: Arc::new(Mutex::new(MockExecutionBehavior::Echo)),
+            invocations: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -126,6 +128,21 @@ impl MockVmServiceClient {
 
         let mut default_behavior = self.default_execution_behavior.lock().unwrap();
         *default_behavior = MockExecutionBehavior::Echo;
+    }
+
+    /// Get all recorded invocations for a worker
+    pub fn get_invocations(&self, worker_id: &str) -> Vec<Vec<u8>> {
+        let invocations_map = self.invocations.lock().unwrap();
+        invocations_map.get(worker_id).cloned().unwrap_or_default()
+    }
+
+    /// Clear recorded invocations for a worker
+    pub fn clear_invocations(&self, worker_id: &str) {
+        let mut invocations_map = self.invocations.lock().unwrap();
+        invocations_map.remove(worker_id);
+    }
+    pub fn clear_all_invocations(&self) {
+        self.invocations.lock().unwrap().clear();
     }
 
     /// Get the current worker state by ID
@@ -328,6 +345,15 @@ impl VmClient for MockVmServiceClient {
                 "Invoked with payload of {} bytes\n",
                 payload.len()
             ));
+
+            // Record the invocation
+            {
+                let mut invocations_map = self.invocations.lock().unwrap();
+                invocations_map
+                    .entry(id.clone())
+                    .or_default()
+                    .push(payload.clone());
+            }
 
             // Get the execution behavior for this worker
             let behaviors = self.execution_behavior.lock().unwrap();

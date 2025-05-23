@@ -9,7 +9,7 @@ mod secrets;
 mod tests;
 
 use config::EnclaveConfig;
-use tracing::{error, info, Level};
+use tracing::{Level, error, info};
 use tracing_subscriber::{EnvFilter, fmt::Subscriber};
 
 #[tokio::main]

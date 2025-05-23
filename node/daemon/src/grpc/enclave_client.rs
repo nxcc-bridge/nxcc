@@ -1,13 +1,13 @@
 use hyper_util::rt::TokioIo;
 use nxcc_interface::{
     proto::enclave::{
-        AttachVmRequest, CheckSecretsRequest, DetachVmRequest,
+        AttachVmRequest, CheckSecretsRequest,
+        DeliverBatchEventsRequest as ProtoDeliverBatchEventsRequest, DetachVmRequest,
         ExecutePolicyRequest as ProtoExecutePolicyRequest,
         ExecutePolicyResponse as ProtoExecutePolicyResponse, GenerateSecretsRequest,
-        GetReportRequest, GetSecretsRequest, InvokeWorkerRequest, PutSecretsRequest,
-        PutSecretsResponse, RunWorkerRequest, RunWorkerResponse,
-        SecretsBundle as ProtoSecretsBundle, TerminateWorkerRequest, VmAddress as ProtoVmAddress,
-        runner_client::RunnerClient, secrets_client::SecretsClient,
+        GetReportRequest, GetSecretsRequest, PutSecretsRequest, PutSecretsResponse,
+        RunWorkerRequest, SecretsBundle as ProtoSecretsBundle, TerminateWorkerRequest,
+        VmAddress as ProtoVmAddress, runner_client::RunnerClient, secrets_client::SecretsClient,
     },
     types::{AttestationReport, ConsumerInfo, EnvReport, SecretId, SecretsBox},
 };
@@ -197,11 +197,13 @@ impl EnclaveClient {
         vm_id: String,
         worker_manifest_bytes: Vec<u8>,
         worker_bundle_bytes: Vec<u8>,
+        launch_event_payload: Option<Vec<u8>>,
     ) -> Result<String, String> {
         let req = RunWorkerRequest {
             vm_id,
             worker_manifest_bytes,
             worker_bundle_bytes,
+            launch_event_payload,
         };
         let mut client = self.runner();
         let resp = client.run_worker(req).await.map_err(|e| e.to_string())?;
@@ -215,13 +217,6 @@ impl EnclaveClient {
                 inner.error_message
             ))
         }
-    }
-
-    pub async fn invoke_worker(&self, worker_id: String, payload: Vec<u8>) -> Result<(), String> {
-        let req = InvokeWorkerRequest { worker_id, payload };
-        let mut client = self.runner();
-        client.invoke_worker(req).await.map_err(|e| e.to_string())?;
-        Ok(())
     }
 
     pub async fn terminate_worker(&self, worker_id: String) -> Result<(), String> {
@@ -256,5 +251,26 @@ impl EnclaveClient {
             .map(nxcc_interface::types::PolicyExecutionRequest::from)
             .collect();
         Ok(satisfied)
+    }
+
+    pub async fn deliver_batch_events(
+        &self,
+        events: Vec<nxcc_interface::proto::enclave::EventDelivery>,
+    ) -> Result<bool, String> {
+        let req = ProtoDeliverBatchEventsRequest { events };
+        let mut client = self.runner();
+        let resp = client
+            .deliver_batch_events(req)
+            .await
+            .map_err(|e| e.to_string())?;
+        let inner = resp.into_inner();
+        if inner.success {
+            Ok(true)
+        } else {
+            Err(format!(
+                "Enclave runner failed to deliver batch events: {}",
+                inner.message
+            ))
+        }
     }
 }

@@ -24,17 +24,19 @@ tower = "0.5.2"
 hyper-util = "0.1.11"
 ciborium = "0.2.2"
 alloy-primitives = "1.0.0"
-alloy-provider = { version = "0.14.0", default-features = false, features = ["reqwest", "reqwest-rustls-tls"] }
+alloy-provider = { version = "1.0.6", default-features = false, features = ["reqwest", "reqwest-rustls-tls", "pubsub", "ws"] }
 alloy-sol-types = { version = "1.0.0", features = ["json"] }
-alloy-transport-http = { version = "0.14.0", features = ["reqwest", "reqwest-rustls-tls"], default-features = false }
+alloy-transport-http = { version = "1.0.6", features = ["reqwest", "reqwest-rustls-tls"], default-features = false }
 url = "2.5.4"
-alloy-contract = "0.14.0"
+alloy-rpc-types = "1.0.6"
+alloy-contract = "1.0.6"
 reqwest = { version = "0.12.15", default-features = false, features = ["json", "rustls-tls"] }
 serde_json = "1.0.140"
 tempfile = "3.19.1"
 base64 = "0.22.1"
 sha2 = "0.10.9"
 percent-encoding = "2.3.1"
+futures-util = "0.3.31"
 
 [dev-dependencies]
 tracing-test = "0.2.5"

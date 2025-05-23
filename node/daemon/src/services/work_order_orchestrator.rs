@@ -2,15 +2,28 @@ use std::{collections::HashMap, sync::Arc};
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use nxcc_interface::types::{
-    ConsumerInfo, DSSE_WORK_ORDER_PAYLOAD_TYPE, DsseEnvelope, SecretId, SecretRequest,
-    WorkOrderPayload, WorkerBundle, WorkerEventKind, WorkerManifest,
+    ConsumerInfo,
+    DSSE_WORK_ORDER_PAYLOAD_TYPE,
+    DsseEnvelope,
+    SecretId,
+    SecretRequest,
+    Web3Log, // Added Web3Log for potential Launch event structure
+    WorkOrderPayload,
+    WorkerBundle, WorkerEvent,
+    WorkerEventKind,
+    WorkerManifest,
 };
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, broadcast};
 use tracing::{debug, error, info, warn};
 
 use crate::{
-    config::Config, error::AppError, grpc::enclave_client::EnclaveClient, policy::PolicyManager,
+    config::Config,
+    error::AppError,
+    grpc::enclave_client::EnclaveClient,
+    policy::PolicyManager,
+    // Assuming daemon_event_tx is passed in main.rs or similar
     services::secrets::SecretsService,
+    web3::{gateways::GatewayManager, listener::start_web3_event_listener},
 };
 
 struct ActiveWorkOrder {
@@ -24,8 +37,11 @@ pub struct WorkOrderOrchestrator {
     secrets_service: Arc<SecretsService>,
     runner_service: Arc<super::runner::RunnerService>, // Added runner_service
     policy_manager: Arc<PolicyManager>,
+    gateway_manager: Arc<GatewayManager>,
     config: Arc<Config>,
     active_work_orders: RwLock<HashMap<String, ActiveWorkOrder>>,
+    daemon_event_tx: tokio::sync::mpsc::Sender<nxcc_interface::proto::enclave::EventDelivery>,
+    daemon_shutdown_rx: broadcast::Receiver<()>,
 }
 
 impl WorkOrderOrchestrator {
@@ -34,15 +50,21 @@ impl WorkOrderOrchestrator {
         secrets_service: Arc<SecretsService>,
         runner_service: Arc<super::runner::RunnerService>,
         policy_manager: Arc<PolicyManager>,
+        gateway_manager: Arc<GatewayManager>,
         config: Arc<Config>,
+        daemon_event_tx: tokio::sync::mpsc::Sender<nxcc_interface::proto::enclave::EventDelivery>,
+        daemon_shutdown_rx: broadcast::Receiver<()>,
     ) -> Arc<Self> {
         Arc::new(Self {
             enclave_client,
             secrets_service,
             runner_service,
             policy_manager,
+            gateway_manager,
             config,
             active_work_orders: RwLock::new(HashMap::new()),
+            daemon_event_tx,
+            daemon_shutdown_rx,
         })
     }
 
@@ -246,7 +268,7 @@ impl WorkOrderOrchestrator {
         let manifest_bytes = serde_json::to_vec(&worker_manifest).map_err(|e| {
             AppError::Internal(format!("Failed to serialize worker manifest: {}", e))
         })?;
-        let bundle_bytes = actual_worker_bundle.0.clone();
+        let bundle_bytes = actual_worker_bundle.0.clone(); // DSSE envelope bytes
 
         let enclave_worker_id = self
             .enclave_client
@@ -254,6 +276,7 @@ impl WorkOrderOrchestrator {
                 self.config.enclave.default_vm_id.clone(),
                 manifest_bytes,
                 bundle_bytes,
+                None, // Launch event is now sent asynchronously via DeliverBatchEvents
             )
             .await
             .map_err(|e| {
@@ -277,25 +300,92 @@ impl WorkOrderOrchestrator {
             ao.enclave_worker_id = Some(enclave_worker_id.clone());
         }
 
-        // 11. Handle Launch Event
-        for event in &wo_payload.events {
-            if let WorkerEventKind::Launch = event.kind {
-                info!(
-                    "Executing Launch event for work order {}, worker {}",
-                    wo_payload.id, enclave_worker_id
-                );
-                // Using an empty payload for launch, adjust if specific payload needed.
-                self.enclave_client
-                    .invoke_worker(enclave_worker_id.clone(), Vec::new()) // Empty payload for launch
-                    .await
-                    .map_err(|e| {
-                        AppError::Service(format!(
-                            "Launch event failed for work order {}: {}",
+        // 11. Handle Launch Event first, then other event subscriptions
+        let enclave_worker_id_clone_for_listeners = enclave_worker_id.clone();
+        let wo_id_clone_for_listeners = wo_payload.id.clone();
+
+        let mut launch_event_defined = false;
+        let mut launch_event_queued_successfully = false;
+        let mut web3_event_configs = Vec::new();
+
+        for event_config in &wo_payload.events {
+            match &event_config.kind {
+                WorkerEventKind::Launch => {
+                    launch_event_defined = true;
+                    info!("Queueing Launch event for worker {}", enclave_worker_id);
+                    let launch_event_payload_proto = nxcc_interface::proto::interface::EventPayload {
+                        payload: Some(nxcc_interface::proto::interface::event_payload::Payload::LaunchEvent(
+                                         ()
+                        )),
+                    };
+                    let event_delivery = nxcc_interface::proto::enclave::EventDelivery {
+                        worker_id: enclave_worker_id.clone(),
+                        event_payload: Some(launch_event_payload_proto),
+                    };
+                    // Send to the daemon's central event queue
+                    if let Err(e) = self.daemon_event_tx.send(event_delivery).await {
+                        error!(
+                            "Failed to send Launch event to daemon queue for work_order {}: {}",
                             wo_payload.id, e
-                        ))
-                    })?;
-                debug!("Launch event processed for work order {}", wo_payload.id);
+                        );
+                        // launch_event_queued_successfully remains false
+                    } else {
+                        launch_event_queued_successfully = true;
+                    }
+                }
+                WorkerEventKind::Web3Event(web3_config) => {
+                    web3_event_configs.push(web3_config.clone());
+                }
+                e => {
+                    warn!("Received unknown worker event: {e:?}");
+                }
             }
+        }
+
+        // Determine if Web3 listeners should be set up.
+        // If a Launch event was defined, it must have been successfully queued.
+        // If no Launch event was defined, proceed directly.
+        let should_setup_web3_listeners = if launch_event_defined {
+            launch_event_queued_successfully
+        } else {
+            true // No launch event, so proceed with Web3 listeners
+        };
+
+        if should_setup_web3_listeners {
+            for web3_config in web3_event_configs {
+                info!(
+                    "Work order {} requests Web3 event listener for chain {}: Address: {:?}, \
+                     Topics: {:?}",
+                    wo_id_clone_for_listeners,
+                    web3_config.chain,
+                    web3_config.address.iter().map(|a| format!("{a:#x}")).collect::<Vec<_>>(),
+                    web3_config.topics
+                );
+
+                let wo_id_listener = wo_id_clone_for_listeners.clone();
+                let enclave_worker_id_listener = enclave_worker_id_clone_for_listeners.clone();
+                let gateway_manager_clone = self.gateway_manager.clone();
+                let shutdown_rx_clone = self.daemon_shutdown_rx.resubscribe();
+                let daemon_event_tx_clone = self.daemon_event_tx.clone();
+
+                tokio::spawn(async move {
+                    start_web3_event_listener(
+                        wo_id_listener,
+                        enclave_worker_id_listener,
+                        web3_config,
+                        gateway_manager_clone,
+                        shutdown_rx_clone,
+                        daemon_event_tx_clone,
+                    )
+                    .await;
+                });
+            }
+        } else {
+            // This implies a Launch event was defined but failed to be queued.
+            warn!(
+                "Skipping Web3 event listener setup for work order {} due to Launch event failure.",
+                wo_payload.id
+            );
         }
 
         Ok((
@@ -304,3 +394,4 @@ impl WorkOrderOrchestrator {
         ))
     }
 }
+

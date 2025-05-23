@@ -19,13 +19,16 @@ use crate::{config::Config, error::AppError, web3::gateways::GatewayManager};
 
 #[derive(Clone)]
 pub struct PolicyManager {
-    gateway_manager: GatewayManager,
+    gateway_manager: Arc<GatewayManager>,
     memory_cache: Arc<RwLock<HashMap<SecretId, FullPolicyPackage>>>,
     disk_cache_path: Option<PathBuf>,
 }
 
 impl PolicyManager {
-    pub async fn new(gateway_manager: GatewayManager, config: &Config) -> Result<Self, AppError> {
+    pub async fn new(
+        gateway_manager: Arc<GatewayManager>,
+        config: &Config,
+    ) -> Result<Self, AppError> {
         let disk_cache_path = match &config.policy_cache_dir {
             Some(path) => Some(path.clone()),
             None => {
@@ -457,7 +460,9 @@ mod tests {
     async fn test_fetch_worker_bundle_from_data_url() {
         let gateway = GatewayManager::new();
         let config = Config::default();
-        let pm = PolicyManager::new(gateway, &config).await.unwrap();
+        let pm = PolicyManager::new(Arc::new(gateway), &config)
+            .await
+            .unwrap();
 
         let payload_struct = WorkerBundlePayload {
             vm: "test-vm".to_string(),

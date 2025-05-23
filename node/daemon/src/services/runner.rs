@@ -66,13 +66,16 @@ impl RunnerService {
         &self,
         manifest: &WorkerManifest,
         bundle: &WorkerBundle,
+        launch_payload: Option<Vec<u8>>,
     ) -> Result<String, AppError> {
         let manifest_bytes = serde_json::to_vec(manifest).unwrap();
         let bundle_bytes = bundle.0.clone();
+        // todo!("add work order to run worker request for runner enclave to verify");
         let req = RunWorkerRequest {
-            vm_id: self.enclave_config.default_vm_id.clone(),
+            vm_id: self.enclave_config.default_vm_id.clone(), // TODO: extract this from manifest. check if VM is attached. if so, run. o/w error
             worker_manifest_bytes: manifest_bytes,
             worker_bundle_bytes: bundle_bytes,
+            launch_event_payload: launch_payload,
         };
         let mut client = self.client.clone();
         let resp = client
@@ -150,7 +153,13 @@ impl RunnerService {
         let FullPolicyPackage { manifest, bundle } = policy_package;
 
         // 1. Start Worker
-        let worker_id = self.run_worker_in_default_vm(&manifest, &bundle).await?;
+        // For policy workers, there's typically no specific "launch" event payload from the work order.
+        // If policy workers needed a launch event, it would be defined in their manifest or a fixed protocol.
+        // For now, passing None for launch_payload for policy workers.
+        let worker_id = self
+            .run_worker_in_default_vm(&manifest, &bundle, None)
+            .await?;
+
         info!(
             "Started policy worker {} for node {}",
             worker_id, env_report.node_id

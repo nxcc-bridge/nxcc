@@ -6,8 +6,8 @@ use std::{collections::HashMap, sync::Arc};
 use nxcc_interface::{
     proto::vm::{TrustedConfig, UntrustedConfig},
     types::{
-        ConsumerInfo, PolicyExecutionReport, PolicyExecutionRequest, VmAddress, WorkerBundle,
-        WorkerManifest,
+        ConsumerInfo, EventPayload, PolicyExecutionReport, PolicyExecutionRequest, VmAddress,
+        Web3Log, WorkerBundle, WorkerManifest,
     },
 };
 #[cfg(test)]
@@ -17,7 +17,7 @@ use nxcc_vm_base::{
     tls::MtlsCertificates,
 };
 use thiserror::Error;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, mpsc};
 use tracing::{debug, error, info, warn};
 
 use crate::secrets::Secrets;
@@ -42,6 +42,8 @@ pub enum RunnerError {
     WorkerStartFailed(String),
     #[error("Unsupported VM address type: {0}")]
     UnsupportedVmAddress(String),
+    #[error("Event delivery channel send error: {0}")]
+    EventSendError(String),
 }
 
 // Define an enum to hold different VM client implementations
@@ -134,19 +136,75 @@ impl From<MockVmServiceClient> for VmClient {
 /// Manages attached VM clients and worker mappings.
 pub struct RunnerService {
     /// Stores active VM clients, keyed by the vm_id assigned during attach.
-    vms: RwLock<HashMap<String, VmClient>>,
+    vms: Arc<RwLock<HashMap<String, VmClient>>>,
     /// Maps running worker_id (returned by VM) back to the vm_id it runs on.
-    worker_map: RwLock<HashMap<String, String>>,
+    worker_map: Arc<RwLock<HashMap<String, String>>>,
     /// Shared secrets service for storing authorizations.
     secrets: Arc<Secrets>,
+    /// Sender for the internal event queue.
+    event_tx: mpsc::Sender<(String, Vec<u8>)>, // (worker_id, serialized_event_payload)
 }
 
 impl RunnerService {
     pub fn new(secrets: Arc<Secrets>) -> Self {
+        let (event_tx, mut event_rx) = mpsc::channel::<(String, Vec<u8>)>(1024); // TODO: Make capacity configurable
+
+        let vms_clone = Arc::new(RwLock::new(HashMap::<String, VmClient>::new()));
+        let worker_map_clone = Arc::new(RwLock::new(HashMap::<String, String>::new()));
+
+        let vms_for_task = vms_clone.clone();
+        let worker_map_for_task = worker_map_clone.clone();
+
+        tokio::spawn(async move {
+            info!("Enclave event processing task started.");
+            while let Some((worker_id, vm_payload)) = event_rx.recv().await {
+                debug!(
+                    "Processing event for worker_id: {}, payload_size: {}",
+                    worker_id,
+                    vm_payload.len()
+                );
+                let vm_id_option = worker_map_for_task.read().await.get(&worker_id).cloned();
+
+                if let Some(vm_id) = vm_id_option {
+                    let mut vms_guard = vms_for_task.write().await;
+                    if let Some(client) = vms_guard.get_mut(&vm_id) {
+                        match client.invoke_worker(worker_id.clone(), vm_payload).await {
+                            Ok(response) => {
+                                debug!(
+                                    "Worker {} invocation successful, response_size: {}",
+                                    worker_id,
+                                    response.len()
+                                );
+                                // TODO: Handle worker response if necessary
+                            }
+                            Err(e) => {
+                                error!(
+                                    "Failed to invoke worker {} in VM {}: {}",
+                                    worker_id, vm_id, e
+                                );
+                            }
+                        }
+                    } else {
+                        error!(
+                            "VM {} not found for worker {} during event processing.",
+                            vm_id, worker_id
+                        );
+                    }
+                } else {
+                    error!(
+                        "Worker {} not found in map during event processing.",
+                        worker_id
+                    );
+                }
+            }
+            info!("Enclave event processing task stopped.");
+        });
+
         Self {
-            vms: RwLock::new(HashMap::new()),
-            worker_map: RwLock::new(HashMap::new()),
+            vms: vms_clone,
+            worker_map: worker_map_clone,
             secrets,
+            event_tx,
         }
     }
 
@@ -235,6 +293,7 @@ impl RunnerService {
         vm_id: String,
         worker_manifest: WorkerManifest,
         worker_bundle: WorkerBundle,
+        launch_event_payload: Option<Vec<u8>>,
     ) -> Result<String, RunnerError> {
         info!(
             "Requesting to run worker in VM '{}' (manifest user_data: {:?}, bundle payload size: \
@@ -301,13 +360,63 @@ impl RunnerService {
         {
             Ok(instance_id) => {
                 info!(
-                    "Successfully started worker instance '{}' in VM '{}'",
+                    "Successfully started worker instance '{}' in VM '{}', proceeding to launch event if any.",
                     instance_id, vm_id
                 );
-                // Store mapping from instance_id -> vm_id
-                let mut worker_map_guard = self.worker_map.write().await;
-                worker_map_guard.insert(instance_id.clone(), vm_id);
-                Ok(instance_id)
+
+                // If there's a launch payload, deliver it now.
+                if let Some(launch_payload) = launch_event_payload {
+                    info!("Delivering launch event to worker '{}'", instance_id);
+                    // The client is already mutable from the vms_guard
+                    match client
+                        .invoke_worker(instance_id.clone(), launch_payload)
+                        .await
+                    {
+                        Ok(_) => {
+                            debug!(
+                                "Launch event successfully delivered to worker '{}'",
+                                instance_id
+                            );
+                            // All VM operations successful, now update worker_map
+                            let mut worker_map_guard = self.worker_map.write().await;
+                            worker_map_guard.insert(instance_id.clone(), vm_id.clone());
+                            drop(worker_map_guard); // Explicitly drop guard
+                            Ok(instance_id)
+                        }
+                        Err(e) => {
+                            error!(
+                                "Failed to deliver launch event to worker '{}': {}. Attempting to stop worker.",
+                                instance_id, e
+                            );
+                            // Attempt to clean up the worker in the VM since start_worker succeeded
+                            // but the subsequent launch event invocation failed.
+                            if let Err(stop_err) = client.stop_worker(instance_id.clone()).await {
+                                error!(
+                                    "Failed to stop worker '{}' in VM {} after launch event failure: {}",
+                                    instance_id, vm_id, stop_err
+                                );
+                                // Worker might be orphaned in the VM. worker_map is not updated.
+                            } else {
+                                info!(
+                                    "Successfully stopped worker '{}' in VM {} after launch event failure.",
+                                    instance_id, vm_id
+                                );
+                            }
+                            // Do not add to worker_map as the launch failed.
+                            Err(RunnerError::WorkerStartFailed(format!(
+                                "Launch event delivery failed: {}",
+                                e
+                            )))
+                        }
+                    }
+                } else {
+                    // No launch payload, start_worker was successful. Update worker_map.
+                    info!("No launch event payload for worker '{}'. Worker started.", instance_id);
+                    let mut worker_map_guard = self.worker_map.write().await;
+                    worker_map_guard.insert(instance_id.clone(), vm_id.clone());
+                    drop(worker_map_guard); // Explicitly drop guard
+                    Ok(instance_id)
+                }
             }
             Err(e) => {
                 error!("Failed to start worker in VM '{}': {}", vm_id, e);
@@ -497,5 +606,47 @@ impl RunnerService {
             results.len()
         );
         Ok(satisfied_contexts)
+    }
+
+    /// Delivers a batch of asynchronous events to appropriate workers.
+    pub async fn deliver_batch_events(
+        &self,
+        events: Vec<(String, EventPayload)>, // (worker_id, event_payload)
+    ) -> Result<(), RunnerError> {
+        info!("Received batch of {} events for delivery.", events.len());
+        for (worker_id, event_payload) in events {
+            // 1. Verification (stub)
+            debug!("Stub verification for event to worker_id: {}", worker_id);
+
+            // 2. Serialize payload for VM
+            // Assuming worker expects JSON for now.
+            let vm_payload_bytes = match event_payload {
+                EventPayload::Web3Log(web3_log) => serde_json::to_vec(&web3_log).map_err(|e| {
+                    RunnerError::Internal(format!("Failed to serialize Web3Log: {}", e))
+                })?,
+                EventPayload::Launch => {
+                    // For a parameterless Launch event, an empty JSON object can signify the event.
+                    // The worker code would need to be designed to understand this.
+                    // Alternatively, a more specific payload structure could be defined if Launch
+                    // events were to carry data.
+                    b"{}".to_vec()
+                }
+                // Add other event types here
+            };
+
+            // 3. Send to internal queue
+            if let Err(e) = self
+                .event_tx
+                .send((worker_id.clone(), vm_payload_bytes))
+                .await
+            {
+                error!(
+                    "Failed to send event to internal queue for worker {}: {}",
+                    worker_id, e
+                );
+                return Err(RunnerError::EventSendError(e.to_string()));
+            }
+        }
+        Ok(())
     }
 }
