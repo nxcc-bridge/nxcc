@@ -1,7 +1,7 @@
 use nxcc_interface::proto::enclave::{
-    runner_server::Runner as _, secrets_server::Secrets as _, DeliverBatchEventsRequest,
-    DetachVmRequest, EventDelivery, ExecutePolicyRequest as ProtoExecutePolicyRequest,
-    RunWorkerRequest, TerminateWorkerRequest,
+    DeliverBatchEventsRequest, DetachVmRequest, EventDelivery,
+    ExecutePolicyRequest as ProtoExecutePolicyRequest, RunWorkerRequest, TerminateWorkerRequest,
+    runner_server::Runner as _, secrets_server::Secrets as _,
 };
 use tonic::{Code, Request};
 use tracing::info;
@@ -47,10 +47,12 @@ async fn test_runner_ops_non_existent_entities() {
     let term_req_bad_worker = Request::new(TerminateWorkerRequest {
         worker_id: non_existent_worker_id.to_string(),
     });
-    assert!(runner_grpc
-        .terminate_worker(term_req_bad_worker)
-        .await
-        .is_ok());
+    assert!(
+        runner_grpc
+            .terminate_worker(term_req_bad_worker)
+            .await
+            .is_ok()
+    );
 
     // Test ExecutePolicy on non-existent worker
     let exec_req_bad_worker = Request::new(ProtoExecutePolicyRequest {
@@ -68,7 +70,7 @@ async fn test_runner_ops_non_existent_entities() {
     );
 
     // Test DeliverBatchEvents with non-existent worker
-    use nxcc_interface::proto::interface::{event_payload, Web3Log as ProtoWeb3Log};
+    use nxcc_interface::proto::interface::{Web3Log as ProtoWeb3Log, event_payload};
     let proto_web3_log = ProtoWeb3Log {
         address: vec![1; 20],
         topics: vec![],

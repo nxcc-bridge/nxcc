@@ -65,6 +65,7 @@ setup_node() {
 	NODE_ENCLAVE_SOCK="$SOCK_DIR/e.sock"
 	NODE_VM_SOCK="$SOCK_DIR/v.sock"
 	NODE_VM_LOG="$NODE_DIR/vm.log" # Added for VM log capture
+	NODE_DAEMON_LOG="$NODE_DIR/daemon.log"
 	NODE_IDENTITY="$NODE_DIR/identity.key"
 	NODE_POLICY_CACHE="$NODE_DIR/policy_cache"
 
@@ -83,13 +84,12 @@ setup_node() {
 	echo "Starting $NODE_NAME VM (nxcc-workerd-vm)..."
 	"$WORKERD_VM_BIN" --server-mode uds --server-uds-path "$NODE_VM_SOCK" >"$NODE_VM_LOG" 2>&1 &
 	NODE_VM_PID=$!
-	sleep 3 # Give VM more time to start (increased from 1)
 
 	# Start Enclave
 	echo "Starting $NODE_NAME Enclave..."
 	RUST_LOG=nxcc_platform_enclave=debug "$ENCLAVE_BIN" --grpc-mode uds --grpc-uds-path "$NODE_ENCLAVE_SOCK" --verbose 2>&1 &
 	NODE_ENCLAVE_PID=$!
-	sleep 3 # Give enclave more time to start (increased from 1)
+	sleep 1
 
 	# Start Daemon
 	echo "Starting $NODE_NAME Daemon..."
@@ -107,9 +107,9 @@ setup_node() {
 		DAEMON_CMD="$DAEMON_CMD --bootstrap-peers $BOOTSTRAP_PEERS"
 	fi
 
-	eval "$DAEMON_CMD" 2>&1 &
+	eval "$DAEMON_CMD" >"$NODE_DAEMON_LOG" 2>&1 &
 	NODE_DAEMON_PID=$!
-	sleep 5 # Give daemon more time to start (increased from 2)
+	sleep 1
 
 	# Return values by setting variables in the parent scope
 	# These variables will be available after calling the function
@@ -119,6 +119,7 @@ setup_node() {
 	eval "${NODE_NAME}_ENCLAVE_SOCK=\"$NODE_ENCLAVE_SOCK\""
 	eval "${NODE_NAME}_VM_SOCK=\"$NODE_VM_SOCK\""
 	eval "${NODE_NAME}_VM_LOG=\"$NODE_VM_LOG\""
+	eval "${NODE_NAME}_DAEMON_LOG=\"$NODE_DAEMON_LOG\""
 	eval "${NODE_NAME}_IDENTITY=\"$NODE_IDENTITY\""
 	eval "${NODE_NAME}_POLICY_CACHE=\"$NODE_POLICY_CACHE\""
 	eval "${NODE_NAME}_PEER_ID=\"$NODE_PEER_ID\""
@@ -126,9 +127,6 @@ setup_node() {
 	eval "${NODE_NAME}_VM_PID=$NODE_VM_PID"
 	eval "${NODE_NAME}_ENCLAVE_PID=$NODE_ENCLAVE_PID"
 	eval "${NODE_NAME}_DAEMON_PID=$NODE_DAEMON_PID"
-
-	# Additional sleep to ensure everything is fully initialized
-	sleep 2
 
 	return 0
 }

@@ -204,7 +204,8 @@ impl PolicyManager {
         let bundle_url_str = bundle_pointer.source.as_str();
         info!(
             "Fetching worker bundle for policy {:?} from URL: {}",
-            secret_id_for_log, bundle_url_str
+            secret_id_for_log,
+            &bundle_url_str[0..20]
         );
 
         let dsse_envelope_bytes = if bundle_pointer.source.scheme() == "file" {

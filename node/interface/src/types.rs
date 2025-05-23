@@ -626,6 +626,7 @@ pub struct WorkOrderPayload {
 /// An event that can trigger a worker.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorkerEvent {
+    #[serde(flatten)]
     pub kind: WorkerEventKind,
 }
 
@@ -707,7 +708,7 @@ impl From<Web3Event> for interface::Web3EventConfig {
 pub struct Web3Log {
     pub address: Address,
     pub topics: Vec<B256>,
-    pub data: Vec<u8>, // alloy_primitives::Bytes is just a wrapper around Vec<u8>
+    pub data: alloy_primitives::Bytes,
     pub block_hash: Option<B256>,
     pub block_number: Option<u64>,
     pub transaction_hash: Option<B256>,
@@ -721,7 +722,7 @@ impl From<alloy_rpc_types::Log> for Web3Log {
         Self {
             address: log.inner.address,
             topics: log.inner.topics().to_vec(), // Access topics through TopicList
-            data: log.inner.data.data.to_vec(),  // Convert alloy_primitives::Bytes to Vec<u8>
+            data: log.inner.data.data,
             block_hash: log.block_hash,
             block_number: log.block_number,
             transaction_hash: log.transaction_hash,
@@ -737,7 +738,7 @@ impl From<Web3Log> for interface::Web3Log {
         Self {
             address: log.address.to_vec(),
             topics: log.topics.iter().map(|t| t.to_vec()).collect(),
-            data: log.data,
+            data: log.data.to_vec(),
             block_hash: log.block_hash.map_or_else(Vec::new, |h| h.to_vec()),
             block_number: log.block_number.unwrap_or(0),
             transaction_hash: log.transaction_hash.map_or_else(Vec::new, |h| h.to_vec()),
@@ -757,7 +758,7 @@ impl From<interface::Web3Log> for Web3Log {
                 .into_iter()
                 .map(|b| B256::from_slice(&b))
                 .collect(),
-            data: p_log.data,
+            data: p_log.data.into(),
             block_hash: if p_log.block_hash.is_empty() {
                 None
             } else {
@@ -790,6 +791,7 @@ impl From<interface::Web3Log> for Web3Log {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
 pub enum EventPayload {
     Web3Log(Web3Log),
     Launch,
@@ -802,9 +804,7 @@ impl From<interface::EventPayload> for EventPayload {
             Some(interface::event_payload::Payload::Web3Log(log)) => {
                 EventPayload::Web3Log(Web3Log::from(log))
             }
-            Some(interface::event_payload::Payload::LaunchEvent(_)) => {
-                EventPayload::Launch
-            }
+            Some(interface::event_payload::Payload::LaunchEvent(_)) => EventPayload::Launch,
             None => panic!("EventPayload proto is empty"), // Or handle as error
         }
     }
@@ -818,8 +818,7 @@ impl From<EventPayload> for interface::EventPayload {
             },
             EventPayload::Launch => Self {
                 payload: Some(interface::event_payload::Payload::LaunchEvent(())),
-            }
+            },
         }
     }
 }
-

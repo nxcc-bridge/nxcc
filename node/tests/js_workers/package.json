@@ -1,0 +1,20 @@
+{
+  "name": "nxcc-test-js-workers",
+  "version": "1.0.0",
+  "description": "JS workers for nXCC integration tests",
+  "main": "index.js",
+  "scripts": {
+    "build": "esbuild event_handler_worker.js --bundle --outfile=dist/event_handler_worker.js --format=esm --platform=browser --log-level=warning && esbuild ../policy/test_worker_integration.js --bundle --outfile=dist/test_worker_integration.js --format=esm --platform=browser --log-level=warning",
+    "build:event": "esbuild event_handler_worker.js --bundle --outfile=dist/event_handler_worker.js --format=esm --platform=browser --log-level=warning",
+    "build:policy": "esbuild ../policy/test_worker_integration.js --bundle --outfile=dist/test_worker_integration.js --format=esm --platform=browser --log-level=warning"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "esbuild": "^0.20.0"
+  },
+  "dependencies": {
+    "ethers": "^6.11.1"
+  }
+}

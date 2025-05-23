@@ -37,89 +37,112 @@ pub fn build_config(
     let mut message = message::Builder::new_default();
     let mut config_builder = message.init_root::<config::Builder>();
 
-    // --- Define the Worker ---
+    // --- Define Services (Worker + Internet) ---
     {
-        let mut worker_def_list = config_builder.reborrow().init_services(1);
-        let mut service_builder = worker_def_list.reborrow().get(0);
-        service_builder.set_name(service_name);
+        let mut service_list = config_builder.reborrow().init_services(2);
 
-        let mut worker_builder = service_builder.init_worker();
+        // First service: the worker
+        {
+            let mut service_builder = service_list.reborrow().get(0);
+            service_builder.set_name(service_name);
 
-        // Set compatibility date (Hardcoded for now, could be configurable/detected)
-        worker_builder.set_compatibility_date("2025-04-18");
+            let mut worker_builder = service_builder.init_worker();
 
-        // Add modules based on code type
-        let mut modules_list = worker_builder.reborrow().init_modules(1);
-        let mut module_builder = modules_list.reborrow().get(0);
+            // Set compatibility date (Hardcoded for now, could be configurable/detected)
+            worker_builder.set_compatibility_date("2025-04-18");
 
-        let code_str = std::str::from_utf8(worker_code).map_err(|e| {
-            WorkerdVmError::InvalidConfig(format!("Worker code is not valid UTF-8: {}", e))
-        })?;
+            // Configure global outbound to use internet service for fetch() calls
+            let mut global_outbound = worker_builder.reborrow().init_global_outbound();
+            global_outbound.set_name("internet");
 
-        match code_type {
-            CodeType::EsModule => {
-                module_builder.set_name("worker.js"); // Default name
-                module_builder.set_es_module(code_str);
+            // Add modules based on code type
+            let mut modules_list = worker_builder.reborrow().init_modules(1);
+            let mut module_builder = modules_list.reborrow().get(0);
+
+            let code_str = std::str::from_utf8(worker_code).map_err(|e| {
+                WorkerdVmError::InvalidConfig(format!("Worker code is not valid UTF-8: {}", e))
+            })?;
+
+            match code_type {
+                CodeType::EsModule => {
+                    module_builder.set_name("worker.js"); // Default name
+                    module_builder.set_es_module(code_str);
+                }
+                CodeType::Python => {
+                    module_builder.set_name("worker.py"); // Default name
+                    module_builder.set_python_module(code_str);
+                    // Enable Python compatibility flags
+                    let mut flags = worker_builder.reborrow().init_compatibility_flags(2);
+                    flags.set(0, "python_workers");
+                    // Use a recent/relevant python flag version if known, otherwise omit or use a default
+                    flags.set(1, "python_workers_20250116"); // Example flag
+                }
             }
-            CodeType::Python => {
-                module_builder.set_name("worker.py"); // Default name
-                module_builder.set_python_module(code_str);
-                // Enable Python compatibility flags
-                let mut flags = worker_builder.reborrow().init_compatibility_flags(2);
-                flags.set(0, "python_workers");
-                // Use a recent/relevant python flag version if known, otherwise omit or use a default
-                flags.set(1, "python_workers_20250116"); // Example flag
+
+            // Add bindings
+            let mut bindings = Vec::new();
+
+            // 1. JSON User Config Binding
+            if !untrusted_config.userdata_json.is_empty() {
+                bindings.push((
+                    "USER_CONFIG".to_string(),
+                    BindingType::Json(untrusted_config.userdata_json.clone()),
+                ));
             }
-        }
+            // TODO: Handle advanced_vm_config if needed, maybe as separate JSON bindings?
 
-        // Add bindings
-        let mut bindings = Vec::new();
+            // 2. Secret Key Bindings (raw binary format) using provided names
+            for (name, key_bytes) in trusted_config.secrets.iter() {
+                // For secret keys, we use the raw data directly and limit the usages
+                // to deriveKey and deriveBits for increased security
+                bindings.push((name.clone(), BindingType::Secret(key_bytes.clone())));
+            }
 
-        // 1. JSON User Config Binding
-        if !untrusted_config.userdata_json.is_empty() {
-            bindings.push((
-                "USER_CONFIG".to_string(),
-                BindingType::Json(untrusted_config.userdata_json.clone()),
-            ));
-        }
-        // TODO: Handle advanced_vm_config if needed, maybe as separate JSON bindings?
+            // Add bindings to the worker config
+            if !bindings.is_empty() {
+                let mut binding_list_builder = worker_builder.init_bindings(bindings.len() as u32);
+                for (i, (name, binding_type)) in bindings.iter().enumerate() {
+                    let mut binding_builder = binding_list_builder.reborrow().get(i as u32);
+                    binding_builder.set_name(name);
+                    match binding_type {
+                        BindingType::Json(json_str) => {
+                            binding_builder.set_json(json_str);
+                        }
+                        BindingType::Secret(raw_key) => {
+                            let mut crypto_key_builder = binding_builder.init_crypto_key();
+                            crypto_key_builder.set_raw(raw_key.as_slice());
+                            crypto_key_builder.set_extractable(false); // Explicitly not extractable for security
 
-        // 2. Secret Key Bindings (raw binary format) using provided names
-        for (name, key_bytes) in trusted_config.secrets.iter() {
-            // For secret keys, we use the raw data directly and limit the usages
-            // to deriveKey and deriveBits for increased security
-            let usages = [
-                worker::binding::crypto_key::Usage::DeriveKey,
-                worker::binding::crypto_key::Usage::DeriveBits,
-            ];
+                            let mut usage_list = crypto_key_builder.reborrow().init_usages(2); // Only deriveKey and deriveBits
+                            usage_list.set(0, worker::binding::crypto_key::Usage::DeriveKey);
+                            usage_list.set(1, worker::binding::crypto_key::Usage::DeriveBits);
 
-            bindings.push((name.clone(), BindingType::Secret(key_bytes.clone())));
-        }
-
-        // Add bindings to the worker config
-        if !bindings.is_empty() {
-            let mut binding_list_builder = worker_builder.init_bindings(bindings.len() as u32);
-            for (i, (name, binding_type)) in bindings.iter().enumerate() {
-                let mut binding_builder = binding_list_builder.reborrow().get(i as u32);
-                binding_builder.set_name(name);
-                match binding_type {
-                    BindingType::Json(json_str) => {
-                        binding_builder.set_json(json_str);
-                    }
-                    BindingType::Secret(raw_key) => {
-                        let mut crypto_key_builder = binding_builder.init_crypto_key();
-                        crypto_key_builder.set_raw(raw_key.as_slice());
-                        crypto_key_builder.set_extractable(false); // Explicitly not extractable for security
-
-                        let mut usage_list = crypto_key_builder.reborrow().init_usages(2); // Only deriveKey and deriveBits
-                        usage_list.set(0, worker::binding::crypto_key::Usage::DeriveKey);
-                        usage_list.set(1, worker::binding::crypto_key::Usage::DeriveBits);
-
-                        // Set a generic algorithm that's compatible with key derivation
-                        crypto_key_builder.init_algorithm().set_name("HKDF");
+                            // Set a generic algorithm that's compatible with key derivation
+                            crypto_key_builder.init_algorithm().set_name("HKDF");
+                        }
                     }
                 }
             }
+        }
+
+        // Second service: internet access
+        {
+            let mut internet_service_builder = service_list.reborrow().get(1);
+            internet_service_builder.set_name("internet");
+
+            let mut network_builder = internet_service_builder.init_network();
+
+            // Allow public internet access only (prevents SSRF attacks)
+            let mut allow_list = network_builder
+                .reborrow()
+                .init_allow(if cfg!(debug_assertions) { 2 } else { 1 });
+            allow_list.set(0, "public");
+            #[cfg(debug_assertions)]
+            allow_list.set(1, "local");
+
+            // Configure TLS to trust browser certificate authorities
+            let mut tls_options = network_builder.reborrow().init_tls_options();
+            tls_options.set_trust_browser_cas(true);
         }
     }
 
@@ -254,7 +277,9 @@ mod tests {
             capnp::serialize::read_message(&mut config_bytes.as_slice(), Default::default())?;
         let config_reader: config::Reader = message_reader.get_root()?;
 
-        assert_eq!(config_reader.get_services()?.len(), 1);
+        // Should now have 2 services: worker + internet
+        assert_eq!(config_reader.get_services()?.len(), 2);
+
         let service = config_reader.get_services()?.get(0);
         assert_eq!(service.get_name()?, "main_svc");
         assert!(service.has_worker());
@@ -263,6 +288,10 @@ mod tests {
             panic!("contained wrong service type");
         };
         assert_eq!(worker.get_compatibility_date()?, "2025-04-18");
+
+        // Check that global outbound is configured for internet access
+        assert_eq!(worker.get_global_outbound()?.get_name()?, "internet");
+
         assert!(worker.has_modules());
 
         let worker::Modules(Ok(modules)) = worker.which()? else {
@@ -306,6 +335,19 @@ mod tests {
             worker::binding::crypto_key::Usage::DeriveBits
         );
 
+        // Check internet service configuration
+        let internet_service = config_reader.get_services()?.get(1);
+        assert_eq!(internet_service.get_name()?, "internet");
+        assert!(internet_service.has_network());
+
+        let service::Network(Ok(network)) = internet_service.which()? else {
+            panic!("internet service should be a network service");
+        };
+        assert_eq!(network.get_allow()?.len(), 1);
+        assert_eq!(network.get_allow()?.get(0)?, "public");
+        assert!(network.has_tls_options());
+        assert!(network.get_tls_options()?.get_trust_browser_cas());
+
         // Check socket configuration
         assert_eq!(config_reader.get_sockets()?.len(), 1);
         let socket = config_reader.get_sockets()?.get(0);
@@ -339,12 +381,19 @@ mod tests {
         let message_reader =
             capnp::serialize::read_message(&mut config_bytes.as_slice(), Default::default())?;
         let config_reader: config::Reader = message_reader.get_root()?;
+
+        // Should have 2 services: worker + internet
+        assert_eq!(config_reader.get_services()?.len(), 2);
+
         let service = config_reader.get_services()?.get(0);
         assert!(service.has_worker());
 
         let service::Worker(Ok(worker)) = service.which()? else {
             panic!("contained wrong service type");
         };
+
+        // Check that global outbound is configured for internet access
+        assert_eq!(worker.get_global_outbound()?.get_name()?, "internet");
 
         let worker::Modules(Ok(modules)) = worker.which()? else {
             panic!("contained no modules");
@@ -364,6 +413,10 @@ mod tests {
         let worker::binding::CryptoKey(Ok(crypto_key)) = binding1.which()? else {
             panic!("missing crypto key binding");
         };
+
+        // Verify internet service exists
+        let internet_service = config_reader.get_services()?.get(1);
+        assert_eq!(internet_service.get_name()?, "internet");
 
         Ok(())
     }

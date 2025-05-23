@@ -9,7 +9,8 @@ use nxcc_interface::types::{
     SecretRequest,
     Web3Log, // Added Web3Log for potential Launch event structure
     WorkOrderPayload,
-    WorkerBundle, WorkerEvent,
+    WorkerBundle,
+    WorkerEvent,
     WorkerEventKind,
     WorkerManifest,
 };
@@ -358,7 +359,11 @@ impl WorkOrderOrchestrator {
                      Topics: {:?}",
                     wo_id_clone_for_listeners,
                     web3_config.chain,
-                    web3_config.address.iter().map(|a| format!("{a:#x}")).collect::<Vec<_>>(),
+                    web3_config
+                        .address
+                        .iter()
+                        .map(|a| format!("{a:#x}"))
+                        .collect::<Vec<_>>(),
                     web3_config.topics
                 );
 
@@ -394,4 +399,3 @@ impl WorkOrderOrchestrator {
         ))
     }
 }
-

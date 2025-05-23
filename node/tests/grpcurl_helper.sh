@@ -25,9 +25,6 @@ grpcurl_attach_vm() {
 	_vm_sock="$3"
 	echo "Attempting to attach VM '$_vm_id' ($_vm_sock) to Daemon ($_daemon_sock)..."
 
-	# Sleep before making the gRPC call to ensure the socket is ready
-	sleep 2
-
 	grpcurl \
 		-proto "$DAEMON_PROTO" \
 		-import-path "$PROTO_DIR" \
@@ -45,29 +42,22 @@ grpcurl_attach_vm() {
 	fi
 	echo "AttachVm call completed for $_daemon_sock."
 
-	# Sleep after the call to allow time for processing
-	sleep 2
-
 	return 0
 }
 
 # Function to call Daemon's SubmitWorkOrder
-# Args: $1=Daemon UDS Path, $2=DSSE Envelope Bytes (as string, will be base64 encoded by grpcurl if -d @file is used, or passed raw if -d '{}')
+# Args: $1=Daemon UDS Path, $2=Path to file containing the JSON payload for grpcurl (e.g., {"work_order_dsse_bytes": "BASE64_ENCODED_DSSE_JSON_BYTES"})
 grpcurl_submit_work_order() {
 	_daemon_sock="$1"
-	_dsse_envelope_bytes_b64="$2" # Expecting base64 encoded DSSE envelope bytes
+	_payload_file="$2"
 
-	echo "Calling SubmitWorkOrder on $_daemon_sock..."
-	# Sleep before making the gRPC call
-	sleep 2
+	echo "Calling SubmitWorkOrder on $_daemon_sock with payload from $_payload_file..."
 
-	grpcurl \
+	cat $_payload_file | grpcurl \
 		-proto "$DAEMON_PROTO" \
 		-import-path "$PROTO_DIR" \
 		-plaintext -unix \
-		-d '{
-          "work_order_dsse_bytes": "'"${_dsse_envelope_bytes_b64}"'"
-        }' \
+		-d "@" \
 		"unix://$_daemon_sock" \
 		daemon.WorkOrder/SubmitWorkOrder
 	_grp_exit_code=$?
@@ -76,8 +66,8 @@ grpcurl_submit_work_order() {
 		return 1
 	fi
 	echo "SubmitWorkOrder call completed for $_daemon_sock."
-	sleep 2
 	return 0
+	set +x
 }
 
 # Function to call Daemon's GetSecrets
@@ -88,9 +78,6 @@ grpcurl_get_secrets() {
 	_identity_addr="$3"
 	_identity_id_num="$4"
 	_node_id="$5" # Node ID of the *requester* (e.g., Alice's daemon asking for itself)
-
-	# Sleep before making the gRPC call
-	sleep 2
 
 	echo "Calling GetSecrets on $_daemon_sock for $_identity_addr/$_identity_id_num (Node: $_node_id)..."
 	grpcurl \
@@ -120,9 +107,6 @@ grpcurl_get_secrets() {
 		return 1
 	fi
 	echo "GetSecrets call completed for $_daemon_sock."
-
-	# Sleep after the call to allow time for processing
-	sleep 2
 
 	return 0
 }
@@ -194,7 +178,7 @@ poll_until_secret_found() {
 			if echo "$_output" | grep '"found": *true' >/dev/null; then
 				echo "Secret $_identity_addr/$_identity_id_num found on $_enclave_sock."
 				# Sleep a bit after finding the secret to ensure stability
-				sleep 2
+				sleep 1
 				return 0 # Success
 			else
 				printf "." # Progress indicator

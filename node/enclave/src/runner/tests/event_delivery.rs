@@ -25,7 +25,7 @@ async fn test_deliver_single_web3_event_success() {
     let web3_log = Web3Log {
         address: Address::repeat_byte(0x01),
         topics: vec![B256::repeat_byte(0x02)],
-        data: vec![0x03, 0x04],
+        data: vec![0x03, 0x04].into(),
         block_hash: Some(B256::repeat_byte(0x05)),
         block_number: Some(123),
         transaction_hash: Some(B256::repeat_byte(0x06)),
@@ -81,7 +81,7 @@ async fn test_deliver_batch_events_multiple() {
 
     let web3_log1 = Web3Log {
         address: Address::repeat_byte(0x11),
-        data: vec![1],
+        data: vec![1].into(),
         ..Default::default()
     };
     let event_payload1 = EventPayload::Web3Log(web3_log1.clone());
@@ -89,7 +89,7 @@ async fn test_deliver_batch_events_multiple() {
 
     let web3_log2 = Web3Log {
         address: Address::repeat_byte(0x22),
-        data: vec![2],
+        data: vec![2].into(),
         ..Default::default()
     };
     let event_payload2 = EventPayload::Web3Log(web3_log2.clone());
@@ -182,7 +182,11 @@ async fn test_deliver_launch_event_success() {
     sleep(Duration::from_millis(200)).await;
 
     let invocations = mock_client.get_invocations(&launched_worker_id);
-    assert_eq!(invocations.len(), 1, "Mock VM should have received one invocation for Launch");
+    assert_eq!(
+        invocations.len(),
+        1,
+        "Mock VM should have received one invocation for Launch"
+    );
     assert_eq!(
         invocations[0], serialized_payload,
         "Launch event invocation payload mismatch"

@@ -360,7 +360,8 @@ impl RunnerService {
         {
             Ok(instance_id) => {
                 info!(
-                    "Successfully started worker instance '{}' in VM '{}', proceeding to launch event if any.",
+                    "Successfully started worker instance '{}' in VM '{}', proceeding to launch \
+                     event if any.",
                     instance_id, vm_id
                 );
 
@@ -385,20 +386,23 @@ impl RunnerService {
                         }
                         Err(e) => {
                             error!(
-                                "Failed to deliver launch event to worker '{}': {}. Attempting to stop worker.",
+                                "Failed to deliver launch event to worker '{}': {}. Attempting to \
+                                 stop worker.",
                                 instance_id, e
                             );
                             // Attempt to clean up the worker in the VM since start_worker succeeded
                             // but the subsequent launch event invocation failed.
                             if let Err(stop_err) = client.stop_worker(instance_id.clone()).await {
                                 error!(
-                                    "Failed to stop worker '{}' in VM {} after launch event failure: {}",
+                                    "Failed to stop worker '{}' in VM {} after launch event \
+                                     failure: {}",
                                     instance_id, vm_id, stop_err
                                 );
                                 // Worker might be orphaned in the VM. worker_map is not updated.
                             } else {
                                 info!(
-                                    "Successfully stopped worker '{}' in VM {} after launch event failure.",
+                                    "Successfully stopped worker '{}' in VM {} after launch event \
+                                     failure.",
                                     instance_id, vm_id
                                 );
                             }
@@ -411,7 +415,10 @@ impl RunnerService {
                     }
                 } else {
                     // No launch payload, start_worker was successful. Update worker_map.
-                    info!("No launch event payload for worker '{}'. Worker started.", instance_id);
+                    info!(
+                        "No launch event payload for worker '{}'. Worker started.",
+                        instance_id
+                    );
                     let mut worker_map_guard = self.worker_map.write().await;
                     worker_map_guard.insert(instance_id.clone(), vm_id.clone());
                     drop(worker_map_guard); // Explicitly drop guard
@@ -620,19 +627,9 @@ impl RunnerService {
 
             // 2. Serialize payload for VM
             // Assuming worker expects JSON for now.
-            let vm_payload_bytes = match event_payload {
-                EventPayload::Web3Log(web3_log) => serde_json::to_vec(&web3_log).map_err(|e| {
-                    RunnerError::Internal(format!("Failed to serialize Web3Log: {}", e))
-                })?,
-                EventPayload::Launch => {
-                    // For a parameterless Launch event, an empty JSON object can signify the event.
-                    // The worker code would need to be designed to understand this.
-                    // Alternatively, a more specific payload structure could be defined if Launch
-                    // events were to carry data.
-                    b"{}".to_vec()
-                }
-                // Add other event types here
-            };
+            let vm_payload_bytes = serde_json::to_vec(&event_payload).map_err(|e| {
+                RunnerError::Internal(format!("Failed to serialize event payload: {}", e))
+            })?;
 
             // 3. Send to internal queue
             if let Err(e) = self

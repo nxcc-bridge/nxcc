@@ -50,7 +50,10 @@ impl GatewayManager {
         let url = rpc_url
             .parse::<Url>()
             .map_err(|e| AppError::Service(format!("Invalid RPC URL {}: {}", rpc_url, e)))?;
-        let provider = ProviderBuilder::new().on_http(url);
+        let provider = ProviderBuilder::new()
+            .on_ws(alloy_provider::WsConnect::new(url))
+            .await
+            .map_err(|e| AppError::Service(format!("Failed to connect provider to {rpc_url}")))?;
 
         providers.insert(chain_id, provider.clone().erased());
         Ok(provider.erased())
@@ -61,9 +64,10 @@ impl GatewayManager {
         // For now, we'll use hardcoded values for common chains
         match chain_id {
             0 => Ok("mock://gateway.example.com".to_string()),
-            1 => Ok("https://eth.llamarpc.com".to_string()),
-            5 => Ok("https://rpc.ankr.com/eth_goerli".to_string()),
-            11155111 => Ok("https://rpc.sepolia.org".to_string()),
+            1 => Ok("wss://eth.llamarpc.com".to_string()),
+            5 => Ok("wss://rpc.ankr.com/eth_goerli".to_string()),
+            1337 | 31337 => Ok("ws://127.0.0.1:8545".to_string()),
+            11155111 => Ok("wss://rpc.sepolia.org".to_string()),
             // Add more chains as needed
             _ => Err(AppError::Service(format!(
                 "No RPC URL configured for chain ID {}",

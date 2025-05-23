@@ -6,9 +6,7 @@ use alloy_rpc_types::{Filter, FilterSet, Log, Topic};
 use futures_util::StreamExt;
 use nxcc_interface::{
     proto::enclave as enclave_proto,
-    types::{
-        EventPayload, Web3Event as Web3EventConfig, Web3Log as RustWeb3Log,
-    },
+    types::{EventPayload, Web3Event as Web3EventConfig, Web3Log as RustWeb3Log},
 };
 use tokio::sync::broadcast;
 use tracing::{debug, error, info, warn};
