@@ -17,18 +17,8 @@ message BroadcastResponse {
   bool success = 1;
 }
 
-// Secrets service
-service Secrets {
-  rpc GetSecrets (GetSecretsRequest) returns (GetSecretsResponse);
+service Debug {
   rpc AttachVm (AttachVmRequest) returns (AttachVmResponse);
-}
-
-message GetSecretsRequest {
-  repeated interface.SecretRequest secret_requests = 1;
-}
-
-message GetSecretsResponse {
-  interface.SecretsBox secrets_box = 1;
 }
 
 message AttachVmRequest {

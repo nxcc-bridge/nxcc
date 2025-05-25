@@ -1,11 +1,11 @@
+pub mod debug;
 pub mod enclave_client;
-pub mod secrets;
 pub mod work_orders;
 
 use std::sync::Arc;
 
 use nxcc_interface::proto::daemon::{
-    secrets_server::SecretsServer, work_order_server::WorkOrderServer,
+    debug_server::DebugServer, work_order_server::WorkOrderServer,
 };
 use tonic::transport::Server;
 use tracing::info;
@@ -13,9 +13,7 @@ use tracing::info;
 use crate::{
     config::GrpcConfig,
     error::AppError,
-    grpc::{
-        enclave_client::EnclaveClient, secrets::SecretsDebugGrpc, work_orders::WorkOrderGrpcService,
-    },
+    grpc::{debug::DebugGrpc, enclave_client::EnclaveClient, work_orders::WorkOrderGrpcService},
     services::{secrets::SecretsService, work_order_orchestrator::WorkOrderOrchestrator},
 };
 
@@ -40,10 +38,7 @@ pub async fn start_grpc_server(
             let incoming = listener.incoming();
 
             Server::builder()
-                .add_service(SecretsServer::new(SecretsDebugGrpc::new(
-                    secrets_service,
-                    enclave_client.clone(),
-                )))
+                .add_service(DebugServer::new(DebugGrpc::new(enclave_client.clone())))
                 .add_service(WorkOrderServer::new(WorkOrderGrpcService::new(
                     work_order_orchestrator,
                 )))
@@ -92,10 +87,7 @@ pub async fn start_grpc_server(
                 let uds_listener = UnixListener::bind(uds_path)
                     .map_err(|e| AppError::Service(format!("Failed to bind UDS: {}", e)))?;
                 let incoming = UnixListenerStream::new(uds_listener);
-                let svc = SecretsServer::new(SecretsDebugGrpc::new(
-                    secrets_service,
-                    enclave_client.clone(),
-                ));
+                let svc = DebugServer::new(DebugGrpc::new(enclave_client.clone()));
                 let wo_svc =
                     WorkOrderServer::new(WorkOrderGrpcService::new(work_order_orchestrator));
 

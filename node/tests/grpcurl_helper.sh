@@ -34,7 +34,7 @@ grpcurl_attach_vm() {
       "uds_path": "'"${_vm_sock}"'"
     }' \
 		"unix://$_daemon_sock" \
-		daemon.Secrets/AttachVm
+		daemon.Debug/AttachVm
 	_grp_exit_code=$?
 	if [ $_grp_exit_code -ne 0 ]; then
 		echo "ERROR: grpcurl AttachVm failed with exit code $_grp_exit_code for $_daemon_sock"
