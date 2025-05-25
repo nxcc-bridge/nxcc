@@ -4,7 +4,10 @@ use std::{
 };
 
 use nxcc_interface::{
-    proto::vm::{TrustedConfig, UntrustedConfig, WorkerStatus},
+    proto::vm::{
+        Header as ProtoHeader, HttpRequest as ProtoHttpRequest, HttpResponse as ProtoHttpResponse,
+        TrustedConfig, UntrustedConfig, WorkerStatus,
+    },
     types::AttestationReport,
 };
 use tonic::Status;
@@ -33,6 +36,7 @@ pub struct MockVmServiceClient {
     execution_behavior: Arc<Mutex<HashMap<String, MockExecutionBehavior>>>,
     default_execution_behavior: Arc<Mutex<MockExecutionBehavior>>,
     invocations: Arc<Mutex<HashMap<String, Vec<Vec<u8>>>>>, // worker_id -> Vec<payload>
+    http_invocations: Arc<Mutex<HashMap<String, Vec<ProtoHttpRequest>>>>, // worker_id -> Vec<HttpRequest>
 }
 
 /// Configure mock attestation behavior
@@ -57,6 +61,8 @@ pub enum MockExecutionBehavior {
     Transform(Arc<dyn Fn(Vec<u8>) -> Vec<u8> + Send + Sync>),
     /// Return an error with the specified message
     Error(String),
+    /// Simulate an HTTP response
+    HttpResponse(ProtoHttpResponse),
 }
 
 impl Default for MockAttestationBehavior {
@@ -88,6 +94,7 @@ impl MockVmServiceClient {
             execution_behavior: Arc::new(Mutex::new(HashMap::new())),
             default_execution_behavior: Arc::new(Mutex::new(MockExecutionBehavior::Echo)),
             invocations: Arc::new(Mutex::new(HashMap::new())),
+            http_invocations: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -143,6 +150,18 @@ impl MockVmServiceClient {
     }
     pub fn clear_all_invocations(&self) {
         self.invocations.lock().unwrap().clear();
+    }
+
+    /// Get all recorded HTTP invocations for a worker
+    pub fn get_http_invocations(&self, worker_id: &str) -> Vec<ProtoHttpRequest> {
+        let invocations_map = self.http_invocations.lock().unwrap();
+        invocations_map.get(worker_id).cloned().unwrap_or_default()
+    }
+
+    /// Clear recorded HTTP invocations for a worker
+    pub fn clear_http_invocations(&self, worker_id: &str) {
+        let mut invocations_map = self.http_invocations.lock().unwrap();
+        invocations_map.remove(worker_id);
     }
 
     /// Get the current worker state by ID
@@ -380,6 +399,12 @@ impl VmClient for MockVmServiceClient {
                     // Return an error
                     Err(ClientError::Grpc(Status::internal(error_msg.clone())))
                 }
+                MockExecutionBehavior::HttpResponse(_) => {
+                    // This behavior is for invoke_http, not invoke_worker
+                    Err(ClientError::Grpc(Status::unimplemented(
+                        "HttpResponse behavior is for invoke_http, not invoke_worker".to_string(),
+                    )))
+                }
             };
 
             if let Ok(response) = &result {
@@ -393,6 +418,66 @@ impl VmClient for MockVmServiceClient {
             }
 
             result
+        } else {
+            Err(ClientError::Grpc(Status::not_found(format!(
+                "Worker '{}' not found",
+                id
+            ))))
+        }
+    }
+
+    async fn invoke_http(
+        &mut self,
+        id: String,
+        request: ProtoHttpRequest,
+    ) -> Result<ProtoHttpResponse, ClientError> {
+        self.check_failure()?;
+
+        debug!("MockVmServiceClient: Invoking HTTP for worker '{}'", id);
+        let mut workers = self.workers.lock().unwrap();
+
+        if let Some(worker) = workers.get_mut(&id) {
+            if worker.status != WorkerStatus::Running {
+                return Err(ClientError::Grpc(Status::failed_precondition(format!(
+                    "Worker '{}' is not in RUNNING state (current state: {:?})",
+                    id, worker.status
+                ))));
+            }
+
+            worker.logs.push_str(&format!(
+                "HTTP Invoked with method {} uri {}\n",
+                request.method, request.uri
+            ));
+
+            {
+                let mut http_invocations_map = self.http_invocations.lock().unwrap();
+                http_invocations_map
+                    .entry(id.clone())
+                    .or_default()
+                    .push(request.clone());
+            }
+
+            let behaviors = self.execution_behavior.lock().unwrap();
+            let default_behavior = self.default_execution_behavior.lock().unwrap();
+            let behavior = behaviors.get(&id).unwrap_or(&default_behavior);
+
+            match behavior {
+                MockExecutionBehavior::HttpResponse(response) => Ok(response.clone()),
+                MockExecutionBehavior::Error(error_msg) => {
+                    Err(ClientError::Grpc(Status::internal(error_msg.clone())))
+                }
+                _ => {
+                    // Default simple HTTP response for other behaviors or if not specifically HttpResponse
+                    Ok(ProtoHttpResponse {
+                        status_code: 200,
+                        headers: vec![ProtoHeader {
+                            key: "content-type".to_string(),
+                            value: b"text/plain".to_vec(),
+                        }],
+                        body: format!("Mock HTTP response for {}", id).into_bytes(),
+                    })
+                }
+            }
         } else {
             Err(ClientError::Grpc(Status::not_found(format!(
                 "Worker '{}' not found",

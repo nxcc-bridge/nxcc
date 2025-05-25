@@ -7,9 +7,10 @@ use std::{
 };
 
 use nxcc_interface::proto::vm::{
-    GetAttestationRequest, GetWorkerLogsRequest, GetWorkerStatusRequest, InvokeWorkerRequest,
-    ListRunningWorkersRequest, StartWorkerRequest, StopWorkerRequest, TrustedConfig,
-    UntrustedConfig, WorkerStatus,
+    GetAttestationRequest, GetWorkerLogsRequest, GetWorkerStatusRequest, Header as ProtoHeader,
+    HttpRequest as ProtoHttpRequest, HttpResponse as ProtoHttpResponse, InvokeHttpRequest,
+    InvokeHttpResponse, InvokeWorkerRequest, ListRunningWorkersRequest, StartWorkerRequest,
+    StopWorkerRequest, TrustedConfig, UntrustedConfig, WorkerStatus,
 };
 
 use super::*;
@@ -23,6 +24,7 @@ struct MockVmRuntime {
     get_status_count: AtomicUsize,
     list_workers_count: AtomicUsize,
     get_logs_count: AtomicUsize,
+    invoke_http_count: AtomicUsize,
     force_attestation_error: AtomicBool,
     workers: Mutex<HashMap<String, WorkerStatus>>, // Simulate worker state
 }
@@ -65,6 +67,24 @@ impl VmRuntime for MockVmRuntime {
         }
         // Simulate some work
         Ok(payload.iter().map(|b| b.wrapping_add(1)).collect())
+    }
+
+    async fn invoke_http(
+        &self,
+        id: String,
+        request: ProtoHttpRequest,
+    ) -> Result<ProtoHttpResponse, VmError> {
+        self.invoke_http_count.fetch_add(1, Ordering::SeqCst);
+        let workers = self.workers.lock().unwrap();
+        if !workers.contains_key(&id) {
+            return Err(VmError::new(format!("Worker instance not found: {}", id)));
+        }
+        // Simulate an HTTP response
+        Ok(ProtoHttpResponse {
+            status_code: 200,
+            headers: request.headers, // Echo back headers
+            body: request.body,       // Echo back body
+        })
     }
 
     async fn get_attestation(
@@ -180,6 +200,38 @@ async fn test_vm_service_grpc_stop_invoke_attestation() {
     let response = service.get_attestation(request).await.unwrap().into_inner();
     assert!(response.report.is_some());
     assert_eq!(response.report.unwrap().user_data, vec![7, 8]);
+}
+
+#[tokio::test]
+async fn test_vm_service_grpc_invoke_http() {
+    let runtime = Arc::new(MockVmRuntime::default());
+    runtime
+        .workers
+        .lock()
+        .unwrap()
+        .insert("http-worker-1".to_string(), WorkerStatus::Running);
+    let service = VmServiceGrpc::new(runtime.clone());
+
+    let http_request_proto = ProtoHttpRequest {
+        method: "GET".to_string(),
+        uri: "/test/path".to_string(),
+        headers: vec![ProtoHeader {
+            key: "X-Custom".to_string(),
+            value: b"value".to_vec(),
+        }],
+        body: b"request body".to_vec(),
+    };
+    let request = Request::new(InvokeHttpRequest {
+        worker_id: "http-worker-1".to_string(),
+        request: Some(http_request_proto.clone()),
+    });
+
+    let response = service.invoke_http(request).await.unwrap().into_inner();
+    assert!(response.response.is_some());
+    let http_response = response.response.unwrap();
+    assert_eq!(http_response.status_code, 200);
+    assert_eq!(http_response.body, http_request_proto.body);
+    assert_eq!(runtime.invoke_http_count.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]

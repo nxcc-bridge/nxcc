@@ -5,9 +5,12 @@ use nxcc_interface::{
         DeliverBatchEventsRequest as ProtoDeliverBatchEventsRequest, DetachVmRequest,
         ExecutePolicyRequest as ProtoExecutePolicyRequest,
         ExecutePolicyResponse as ProtoExecutePolicyResponse, GenerateSecretsRequest,
-        GetReportRequest, GetSecretsRequest, PutSecretsRequest, PutSecretsResponse,
-        RunWorkerRequest, SecretsBundle as ProtoSecretsBundle, TerminateWorkerRequest,
-        VmAddress as ProtoVmAddress, runner_client::RunnerClient, secrets_client::SecretsClient,
+        GetReportRequest, GetSecretsRequest,
+        InvokeHttpWorkerRequest as ProtoInvokeHttpWorkerRequest,
+        InvokeHttpWorkerResponse as ProtoInvokeHttpWorkerResponse, PutSecretsRequest,
+        PutSecretsResponse, RunWorkerRequest, SecretsBundle as ProtoSecretsBundle,
+        TerminateWorkerRequest, VmAddress as ProtoVmAddress, runner_client::RunnerClient,
+        secrets_client::SecretsClient,
     },
     types::{AttestationReport, ConsumerInfo, EnvReport, SecretId, SecretsBox},
 };
@@ -270,5 +273,24 @@ impl EnclaveClient {
                 inner.message
             ))
         }
+    }
+
+    pub async fn invoke_http_worker(
+        &self,
+        worker_id: String,
+        http_request: nxcc_interface::proto::vm::HttpRequest,
+    ) -> Result<nxcc_interface::proto::vm::HttpResponse, String> {
+        let req = ProtoInvokeHttpWorkerRequest {
+            worker_id,
+            request: Some(http_request),
+        };
+        let mut client = self.runner();
+        let resp = client
+            .invoke_http_worker(req)
+            .await
+            .map_err(|e| e.to_string())?;
+        resp.into_inner()
+            .response
+            .ok_or_else(|| "Enclave returned no HttpResponse".to_string())
     }
 }

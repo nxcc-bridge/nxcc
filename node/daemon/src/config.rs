@@ -41,6 +41,10 @@ pub struct Config {
     #[serde(default)]
     #[clap(flatten)]
     pub enclave: EnclaveConfig,
+
+    #[serde(default)]
+    #[clap(flatten)]
+    pub http: HttpConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, clap::Args)]
@@ -169,6 +173,36 @@ fn default_default_vm_id() -> String {
 }
 fn default_default_vm_uds_path() -> String {
     "/tmp/nxcc-workerd-vmm.sock".to_string()
+}
+
+/// Configuration for the daemon's HTTP listener for workers.
+#[derive(Debug, Clone, Serialize, Deserialize, clap::Args)]
+pub struct HttpConfig {
+    /// The base path under which workers will be mounted.
+    #[clap(long, default_value = "/nxcc_workers")]
+    #[serde(default = "default_http_base_mount_path")]
+    pub base_mount_path: String,
+
+    /// The listen address for the HTTP server (e.g., "0.0.0.0:8080").
+    #[clap(long, default_value = "0.0.0.0:3000")] // Changed default port from 8080 to 3000 to avoid common conflicts
+    #[serde(default = "default_http_listen_addr")]
+    pub listen_addr: String,
+}
+
+impl Default for HttpConfig {
+    fn default() -> Self {
+        Self {
+            base_mount_path: default_http_base_mount_path(),
+            listen_addr: default_http_listen_addr(),
+        }
+    }
+}
+
+fn default_http_base_mount_path() -> String {
+    "/nxcc_workers".to_string()
+}
+fn default_http_listen_addr() -> String {
+    "0.0.0.0:3000".to_string()
 }
 
 impl Config {

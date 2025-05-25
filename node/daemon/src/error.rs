@@ -19,6 +19,12 @@ pub enum AppError {
 
     #[error("Internal error: {0}")]
     Internal(String),
+
+    #[error("Validation error: {0}")]
+    Validation(String),
+
+    #[error("Authorization error: {0}")]
+    Authorization(String),
 }
 
 impl From<libp2p::core::transport::TransportError<std::io::Error>> for AppError {

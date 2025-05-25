@@ -1,7 +1,14 @@
 use nxcc_interface::proto::enclave::{
     DeliverBatchEventsRequest, DetachVmRequest, EventDelivery,
-    ExecutePolicyRequest as ProtoExecutePolicyRequest, RunWorkerRequest, TerminateWorkerRequest,
-    runner_server::Runner as _, secrets_server::Secrets as _,
+    ExecutePolicyRequest as ProtoExecutePolicyRequest, InvokeHttpWorkerRequest, RunWorkerRequest,
+    TerminateWorkerRequest, runner_server::Runner as _, secrets_server::Secrets as _,
+};
+use nxcc_interface::proto::vm::{
+    // Added
+    Header as ProtoHeader,
+    HttpRequest as ProtoHttpRequest,
+    HttpResponse as ProtoHttpResponse,
+    // runner_server::Runner as _, secrets_server::Secrets as _,
 };
 use tonic::{Code, Request};
 use tracing::info;
@@ -107,4 +114,131 @@ async fn test_runner_ops_non_existent_entities() {
     assert!(response.unwrap().into_inner().success);
 
     info!("Test OK: Runner operations correctly handled non-existent VMs/workers");
+}
+
+#[tokio::test]
+#[tracing_test::traced_test]
+async fn test_grpc_invoke_http_worker_success() {
+    let (_secrets_service, runner_service, mock_vm_client, _secrets_grpc, runner_grpc) =
+        setup_services();
+    let vm_id = "mock-vm-grpc-http";
+    attach_mock_vm(&runner_service, vm_id, mock_vm_client.clone()).await;
+    let worker_id = run_policy_worker(&runner_grpc, &mock_vm_client, vm_id).await; // Use existing helper
+
+    let http_request_proto = ProtoHttpRequest {
+        method: "PUT".to_string(),
+        uri: "/data/item1".to_string(),
+        headers: vec![ProtoHeader {
+            key: "Content-Type".to_string(),
+            value: b"application/json".to_vec(),
+        }],
+        body: b"{\"value\": 42}".to_vec(),
+    };
+
+    let expected_http_response_proto = ProtoHttpResponse {
+        status_code: 201,
+        headers: vec![ProtoHeader {
+            key: "Location".to_string(),
+            value: b"/data/item1".to_vec(),
+        }],
+        body: b"Created".to_vec(),
+    };
+
+    // Configure mock VM to return the expected HTTP response
+    mock_vm_client.set_worker_execution_behavior(
+        &worker_id,
+        nxcc_vm_base::client::mock::MockExecutionBehavior::HttpResponse(
+            expected_http_response_proto.clone(),
+        ),
+    );
+
+    let grpc_request = Request::new(InvokeHttpWorkerRequest {
+        worker_id: worker_id.clone(),
+        request: Some(http_request_proto.clone()),
+    });
+
+    let grpc_response = runner_grpc.invoke_http_worker(grpc_request).await;
+    assert!(
+        grpc_response.is_ok(),
+        "gRPC InvokeHttpWorker failed: {:?}",
+        grpc_response.err()
+    );
+    let response_inner = grpc_response.unwrap().into_inner();
+    assert!(
+        response_inner.response.is_some(),
+        "gRPC response missing HttpResponse payload"
+    );
+    assert_eq!(
+        response_inner.response.unwrap(),
+        expected_http_response_proto
+    );
+
+    // Verify mock VM was called
+    let http_invocations = mock_vm_client.get_http_invocations(&worker_id);
+    assert_eq!(http_invocations.len(), 1);
+    assert_eq!(http_invocations[0], http_request_proto);
+    info!("Test OK: gRPC InvokeHttpWorker succeeded");
+}
+
+#[tokio::test]
+#[tracing_test::traced_test]
+async fn test_grpc_invoke_http_worker_missing_request_payload() {
+    let (_secrets_service, _runner_service, _mock_vm_client, _secrets_grpc, runner_grpc) =
+        setup_services();
+
+    let grpc_request = Request::new(InvokeHttpWorkerRequest {
+        worker_id: "any-worker-id".to_string(),
+        request: None, // Missing HttpRequest payload
+    });
+
+    let grpc_response = runner_grpc.invoke_http_worker(grpc_request).await;
+    assert!(grpc_response.is_err(), "gRPC call should have failed");
+    let status = grpc_response.err().unwrap();
+    assert_eq!(status.code(), Code::InvalidArgument);
+    assert!(status.message().contains("Missing HttpRequest"));
+    info!("Test OK: gRPC InvokeHttpWorker failed correctly for missing payload");
+}
+
+#[tokio::test]
+#[tracing_test::traced_test]
+async fn test_grpc_invoke_http_worker_runner_error_mapping() {
+    let (_secrets_service, runner_service, _mock_vm_client, _secrets_grpc, runner_grpc) =
+        setup_services();
+    // We don't need to attach a real VM or worker, as we'll rely on RunnerService's internal checks.
+
+    // Case 1: WorkerNotFound
+    let grpc_request_not_found = Request::new(InvokeHttpWorkerRequest {
+        worker_id: "worker-does-not-exist-for-grpc".to_string(),
+        request: Some(ProtoHttpRequest::default()),
+    });
+    let grpc_response_not_found = runner_grpc.invoke_http_worker(grpc_request_not_found).await;
+    assert_eq!(
+        grpc_response_not_found.err().unwrap().code(),
+        Code::NotFound
+    );
+
+    // Case 2: VmNotAttached (requires a worker_map entry but no VM in vms map)
+    let vm_id_detached = "vm-detached-for-grpc";
+    let worker_id_on_detached_vm = "worker-on-detached-vm-for-grpc";
+    runner_service
+        .set_worker_vm_mapping(
+            worker_id_on_detached_vm.to_string(),
+            vm_id_detached.to_string(),
+        )
+        .await;
+    // Do NOT attach vm_id_detached to runner_service.vms
+
+    let grpc_request_vm_detached = Request::new(InvokeHttpWorkerRequest {
+        worker_id: worker_id_on_detached_vm.to_string(),
+        request: Some(ProtoHttpRequest::default()),
+    });
+    let grpc_response_vm_detached = runner_grpc
+        .invoke_http_worker(grpc_request_vm_detached)
+        .await;
+    assert_eq!(
+        grpc_response_vm_detached.err().unwrap().code(),
+        Code::FailedPrecondition,
+        "Expected FailedPrecondition for VmNotAttached"
+    );
+    info!("Test OK: gRPC InvokeHttpWorker error mapping verified");
 }

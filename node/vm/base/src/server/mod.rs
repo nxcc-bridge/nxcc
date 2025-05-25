@@ -68,6 +68,13 @@ pub trait VmRuntime: Send + Sync + 'static {
         payload: Vec<u8>,
     ) -> Result<Vec<u8>, VmError>;
 
+    /// Invokes a worker with an HTTP request.
+    async fn invoke_http(
+        &self,
+        id: String,
+        request: nxcc_interface::proto::vm::HttpRequest,
+    ) -> Result<nxcc_interface::proto::vm::HttpResponse, VmError>;
+
     /// Retrieves an attestation report from the execution environment.
     async fn get_attestation(
         &self,
@@ -89,9 +96,10 @@ pub trait VmRuntime: Send + Sync + 'static {
 
 use nxcc_interface::proto::vm::{
     GetAttestationRequest, GetAttestationResponse, GetWorkerLogsRequest, GetWorkerLogsResponse,
-    GetWorkerStatusRequest, GetWorkerStatusResponse, InvokeWorkerRequest, InvokeWorkerResponse,
-    ListRunningWorkersRequest, ListRunningWorkersResponse, StartWorkerRequest, StartWorkerResponse,
-    StopWorkerRequest, StopWorkerResponse, WorkerStatus,
+    GetWorkerStatusRequest, GetWorkerStatusResponse, HttpRequest as ProtoHttpRequest,
+    HttpResponse as ProtoHttpResponse, InvokeHttpRequest, InvokeHttpResponse, InvokeWorkerRequest,
+    InvokeWorkerResponse, ListRunningWorkersRequest, ListRunningWorkersResponse,
+    StartWorkerRequest, StartWorkerResponse, StopWorkerRequest, StopWorkerResponse, WorkerStatus,
     vm_server::{Vm, VmServer},
 };
 
@@ -204,6 +212,39 @@ impl<T: VmRuntime> Vm for VmServiceGrpc<T> {
                     success: false,
                     error_message: e.to_string(),
                 }))
+            }
+        }
+    }
+
+    async fn invoke_http(
+        &self,
+        request: Request<InvokeHttpRequest>,
+    ) -> Result<Response<InvokeHttpResponse>, Status> {
+        let req_inner = request.into_inner();
+        let worker_id = req_inner.worker_id;
+        let http_request_proto = req_inner
+            .request
+            .ok_or_else(|| Status::invalid_argument("Missing HttpRequest in InvokeHttpRequest"))?;
+
+        debug!(
+            "gRPC InvokeHttp request for worker_id '{}', uri '{}', method '{}'",
+            worker_id, http_request_proto.uri, http_request_proto.method
+        );
+
+        match self
+            .runtime
+            .invoke_http(worker_id.clone(), http_request_proto)
+            .await
+        {
+            Ok(http_response_proto) => {
+                debug!("Successfully invoked HTTP worker {}", worker_id);
+                Ok(Response::new(InvokeHttpResponse {
+                    response: Some(http_response_proto),
+                }))
+            }
+            Err(e) => {
+                error!("Failed to invoke HTTP worker {}: {}", worker_id, e);
+                Err(Status::internal(format!("HTTP invocation failed: {}", e)))
             }
         }
     }

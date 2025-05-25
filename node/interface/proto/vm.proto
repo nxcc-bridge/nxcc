@@ -42,6 +42,9 @@ service Vm {
 
   /// Retrieves debug logs from a specific worker instance.
   rpc GetWorkerLogs(GetWorkerLogsRequest) returns (GetWorkerLogsResponse);
+
+  /// Sends an HTTP request to a specific worker instance.
+  rpc InvokeHttp(InvokeHttpRequest) returns (InvokeHttpResponse);
 }
 
 
@@ -143,6 +146,37 @@ message InvokeWorkerResponse {
   bool success = 2;
   /// Optional error message if invocation failed.
   string error_message = 3;
+}
+
+// --- HTTP Invocation Messages ---
+
+message Header {
+    string key = 1;
+    bytes value = 2; // HeaderValue can be bytes
+}
+
+message HttpRequest {
+    string method = 1;
+    string uri = 2; // Path and query string, e.g., "/foo/bar?q=1"
+    repeated Header headers = 3;
+    bytes body = 4;
+}
+
+message HttpResponse {
+    uint32 status_code = 1;
+    repeated Header headers = 2;
+    bytes body = 3;
+}
+
+message InvokeHttpRequest {
+  string worker_id = 1;
+  HttpRequest request = 2;
+}
+
+message InvokeHttpResponse {
+  HttpResponse response = 1;
+  // bool success = 2; // Implicit in gRPC status or if response indicates app error
+  // string error_message = 3;
 }
 
 

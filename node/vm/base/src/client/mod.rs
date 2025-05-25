@@ -8,9 +8,10 @@ use std::{future::Future, net::SocketAddr, path::Path};
 use hyper_util::rt::TokioIo;
 use nxcc_interface::{
     proto::vm::{
-        GetAttestationRequest, GetWorkerLogsRequest, GetWorkerStatusRequest, InvokeWorkerRequest,
-        ListRunningWorkersRequest, StartWorkerRequest, StopWorkerRequest, TrustedConfig,
-        UntrustedConfig, WorkerStatus,
+        GetAttestationRequest, GetWorkerLogsRequest, GetWorkerStatusRequest,
+        HttpRequest as ProtoHttpRequest, HttpResponse as ProtoHttpResponse, InvokeHttpRequest,
+        InvokeHttpResponse, InvokeWorkerRequest, ListRunningWorkersRequest, StartWorkerRequest,
+        StopWorkerRequest, TrustedConfig, UntrustedConfig, WorkerStatus,
     },
     types::AttestationReport,
 };
@@ -70,6 +71,13 @@ pub trait VmClient {
         handler_name: String,
         payload: Vec<u8>,
     ) -> impl Future<Output = Result<Vec<u8>, ClientError>> + Send;
+
+    /// Invoke an HTTP request on a worker
+    fn invoke_http(
+        &mut self,
+        id: String,
+        request: ProtoHttpRequest,
+    ) -> impl Future<Output = Result<ProtoHttpResponse, ClientError>> + Send;
 
     /// Get an attestation report from the VM service
     fn get_attestation(
@@ -239,6 +247,25 @@ impl VmClient for VmServiceClient {
                 response.error_message.clone(),
             )))
         }
+    }
+
+    async fn invoke_http(
+        &mut self,
+        id: String,
+        request: ProtoHttpRequest,
+    ) -> Result<ProtoHttpResponse, ClientError> {
+        let req = InvokeHttpRequest {
+            worker_id: id,
+            request: Some(request),
+        };
+
+        let response = self.inner.invoke_http(req).await?.into_inner();
+
+        // Assuming InvokeHttpResponse directly contains HttpResponse or an error.
+        // If success is indicated by gRPC status, this is simpler.
+        response
+            .response
+            .ok_or_else(|| ClientError::Grpc(Status::internal("No HttpResponse received from VM")))
     }
 
     async fn get_attestation(

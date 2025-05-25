@@ -7,12 +7,20 @@ use std::{
 
 use async_trait::async_trait; // Already present
 use http_body_util::BodyExt;
-use hyper::{Method, Request, StatusCode, body::Bytes};
+use hyper::{
+    Method, Request, Response as HyperResponse, StatusCode,
+    body::Bytes,
+    header,
+    header::{HeaderName, HeaderValue},
+};
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
 use hyperlocal::UnixConnector;
 use nxcc_interface::types::EventPayload; // For deserializing VmEventInvocation
 use nxcc_interface::{
-    proto::vm::{TrustedConfig, UntrustedConfig, WorkerStatus},
+    proto::vm::{
+        Header as ProtoHeader, HttpRequest as ProtoHttpRequest, HttpResponse as ProtoHttpResponse,
+        TrustedConfig, UntrustedConfig, WorkerStatus,
+    },
     types::AttestationReport,
 };
 use nxcc_vm_base::server::{VmError, VmRuntime};
@@ -101,19 +109,34 @@ impl WorkerdVmm {
     /// Makes an HTTP invocation via a Unix-domain socket.
     async fn invoke_via_uds(
         &self,
-        instance_id: &str,  // <-- New parameter
-        uds_path: &Path,    // Socket path
-        handler_path: &str, // Path component for the handler, e.g., "/myHandler"
-        payload: Vec<u8>,
-    ) -> Result<Vec<u8>, WorkerdVmError> {
+        instance_id: &str, // <-- New parameter
+        uds_path: &Path,
+        proto_http_request: ProtoHttpRequest,
+    ) -> Result<ProtoHttpResponse, WorkerdVmError> {
         let client: Client<UnixConnector, http_body_util::Full<Bytes>> =
             Client::builder(TokioExecutor::new()).build(UnixConnector);
 
-        let req = Request::builder()
-            .method(Method::POST)
-            .uri(hyperlocal::Uri::new(uds_path, handler_path))
-            .header("Content-Type", "application/octet-stream") // Assuming worker expects raw bytes for event/policy payloads
-            .body(http_body_util::Full::new(Bytes::from(payload)))
+        let method = Method::from_bytes(proto_http_request.method.as_bytes())
+            .map_err(|e| WorkerdVmError::InvalidHttpRequest(format!("Invalid method: {}", e)))?;
+
+        let mut hyper_request_builder = Request::builder()
+            .method(method)
+            .uri(hyperlocal::Uri::new(uds_path, &proto_http_request.uri));
+
+        for header_proto in proto_http_request.headers {
+            let header_name = HeaderName::from_bytes(header_proto.key.as_bytes()).map_err(|e| {
+                WorkerdVmError::InvalidHttpRequest(format!("Invalid header name: {}", e))
+            })?;
+            let header_value = HeaderValue::from_bytes(&header_proto.value).map_err(|e| {
+                WorkerdVmError::InvalidHttpRequest(format!("Invalid header value: {}", e))
+            })?;
+            hyper_request_builder = hyper_request_builder.header(header_name, header_value);
+        }
+
+        let hyper_request = hyper_request_builder
+            .body(http_body_util::Full::new(Bytes::from(
+                proto_http_request.body,
+            )))
             .map_err(|e| WorkerdVmError::UdsCommunicationFailed {
                 path: uds_path.to_path_buf(),
                 source: Box::new(e),
@@ -122,20 +145,26 @@ impl WorkerdVmm {
         debug!(
             "Sending invocation to UDS: {} at path {}",
             uds_path.display(),
-            handler_path
+            proto_http_request.uri
         );
 
-        let response =
-            client
-                .request(req)
-                .await
-                .map_err(|e| WorkerdVmError::UdsCommunicationFailed {
-                    path: uds_path.to_path_buf(),
-                    source: Box::new(e),
-                })?;
+        let response = client.request(hyper_request).await.map_err(|e| {
+            WorkerdVmError::UdsCommunicationFailed {
+                path: uds_path.to_path_buf(),
+                source: Box::new(e),
+            }
+        })?;
+
+        let mut proto_response_headers = Vec::new();
+        for (name, value) in response.headers().iter() {
+            proto_response_headers.push(ProtoHeader {
+                key: name.as_str().to_string(),
+                value: value.as_bytes().to_vec(),
+            });
+        }
 
         let status = response.status();
-        let body_bytes = response
+        let response_body_bytes = response
             .into_body()
             .collect()
             .await
@@ -145,41 +174,15 @@ impl WorkerdVmm {
             })?
             .to_bytes();
 
-        if status != StatusCode::OK {
-            let body_string = String::from_utf8_lossy(&body_bytes).to_string();
+        Ok(ProtoHttpResponse {
+            status_code: status.as_u16() as u32,
+            headers: proto_response_headers,
+            body: response_body_bytes.to_vec(),
+        })
 
-            // 1) Grab the status (and optionally logs) for this worker
-            let worker_status = match self.get_worker_status(instance_id.to_string()).await {
-                Ok(s) => s,
-                Err(_) => WorkerStatus::Unspecified,
-            };
-
-            // 2) Optionally fetch logs as well (if desired)
-            let worker_logs = match self.get_worker_logs(instance_id.to_string()).await {
-                Ok(logs) => logs,
-                Err(_) => "<Could not retrieve logs>".to_string(),
-            };
-
-            error!(
-                ?instance_id,
-                ?worker_status,
-                "Worker invocation failed with status {}: {}\nWorker logs:\n{}",
-                status,
-                body_string,
-                worker_logs
-            );
-
-            return Err(WorkerdVmError::InvocationHttpFailed {
-                status: status.as_u16(),
-                body: body_string,
-            });
-        }
-
-        debug!(
-            "Received successful invocation response, size: {}",
-            body_bytes.len()
-        );
-        Ok(body_bytes.to_vec())
+        // The original error handling for non-OK status is now implicitly handled
+        // by the caller of invoke_http, as the full HttpResponse is returned.
+        // The daemon will decide what to do based on the status code.
     }
 }
 
@@ -551,10 +554,55 @@ impl VmRuntime for WorkerdVmm {
 
         debug!(instance_id = ?id, %http_handler_path, "Invoking worker via UDS");
 
-        self.invoke_via_uds(&id, &uds_path, &http_handler_path, payload)
+        // For invoke_worker, we still use the old path, assuming it's a POST with octet-stream
+        let proto_http_request = ProtoHttpRequest {
+            method: "POST".to_string(),
+            uri: http_handler_path,
+            headers: vec![ProtoHeader {
+                key: header::CONTENT_TYPE.to_string(),
+                value: "application/octet-stream".as_bytes().to_vec(),
+            }],
+            body: payload,
+        };
+
+        self.invoke_via_uds(&id, &uds_path, proto_http_request)
             .await
             .map_err(|e| {
                 error!(instance_id = ?id, "Invocation via UDS failed: {}", e);
+                e.into()
+            })
+            .map(|resp| resp.body) // Return only the body for invoke_worker
+    }
+
+    async fn invoke_http(
+        &self,
+        id: String,
+        request: ProtoHttpRequest,
+    ) -> Result<ProtoHttpResponse, VmError> {
+        let worker_lock = {
+            let workers = self.workers.lock().await;
+            workers.get(&id).cloned()
+        }
+        .ok_or_else(|| WorkerdVmError::WorkerNotFound(id.clone()))?;
+
+        let uds_path = {
+            let worker = worker_lock.lock().await;
+            if worker.status != WorkerStatus::Running {
+                error!(
+                    instance_id = ?id,
+                    "Attempted to HTTP invoke worker in non-running state: {:?}", worker.status
+                );
+                return Err(WorkerdVmError::WorkerNotRunnable(worker.status).into());
+            }
+            worker.uds_path.clone()
+        };
+
+        debug!(instance_id = ?id, uri = %request.uri, "Invoking worker HTTP endpoint via UDS");
+
+        self.invoke_via_uds(&id, &uds_path, request)
+            .await
+            .map_err(|e| {
+                error!(instance_id = ?id, "HTTP Invocation via UDS failed: {}", e);
                 e.into()
             })
     }

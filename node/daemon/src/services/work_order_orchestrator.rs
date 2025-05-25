@@ -1,6 +1,9 @@
 use std::{collections::HashMap, sync::Arc};
 
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
+use base64::{
+    Engine as _,
+    engine::general_purpose::{STANDARD as BASE64_STANDARD, URL_SAFE_NO_PAD},
+};
 use nxcc_interface::types::{
     ConsumerInfo,
     DSSE_WORK_ORDER_PAYLOAD_TYPE,
@@ -14,6 +17,7 @@ use nxcc_interface::types::{
     WorkerEventKind,
     WorkerManifest,
 };
+use sha2::{Digest, Sha256};
 use tokio::sync::{RwLock, broadcast};
 use tracing::{debug, error, info, warn};
 
@@ -29,10 +33,12 @@ use crate::{
 
 struct ActiveWorkOrder {
     payload: WorkOrderPayload,
-    enclave_worker_id: Option<String>,
-    // status: WorkOrderStatus, // Future enhancement
+    enclave_worker_id: String, // Should be set once worker is running
+    dsse_hash_b64url: String,  // The unique ID for this work order instance
+                               // status: WorkOrderStatus, // Future enhancement
 }
 
+/// Manages the lifecycle of work orders, including running workers and setting up event listeners.
 pub struct WorkOrderOrchestrator {
     enclave_client: EnclaveClient,
     secrets_service: Arc<SecretsService>,
@@ -41,8 +47,10 @@ pub struct WorkOrderOrchestrator {
     gateway_manager: Arc<GatewayManager>,
     config: Arc<Config>,
     active_work_orders: RwLock<HashMap<String, ActiveWorkOrder>>,
+    /// Maps mount path segment (hash of work order) to enclave_worker_id for HTTP routing.
+    http_mounts: Arc<RwLock<HashMap<String, String>>>,
     daemon_event_tx: tokio::sync::mpsc::Sender<nxcc_interface::proto::enclave::EventDelivery>,
-    daemon_shutdown_rx: broadcast::Receiver<()>,
+    daemon_shutdown_rx: broadcast::Receiver<()>, // Used for web3 listeners
 }
 
 impl WorkOrderOrchestrator {
@@ -53,6 +61,7 @@ impl WorkOrderOrchestrator {
         policy_manager: Arc<PolicyManager>,
         gateway_manager: Arc<GatewayManager>,
         config: Arc<Config>,
+        http_mounts: Arc<RwLock<HashMap<String, String>>>,
         daemon_event_tx: tokio::sync::mpsc::Sender<nxcc_interface::proto::enclave::EventDelivery>,
         daemon_shutdown_rx: broadcast::Receiver<()>,
     ) -> Arc<Self> {
@@ -64,6 +73,7 @@ impl WorkOrderOrchestrator {
             gateway_manager,
             config,
             active_work_orders: RwLock::new(HashMap::new()),
+            http_mounts,
             daemon_event_tx,
             daemon_shutdown_rx,
         })
@@ -73,6 +83,12 @@ impl WorkOrderOrchestrator {
         self: Arc<Self>,
         work_order_dsse_bytes: Vec<u8>,
     ) -> Result<(String, String), AppError> {
+        // Calculate SHA256 hash of the raw DSSE envelope bytes for unique ID and mount path.
+        let mut hasher = Sha256::new();
+        hasher.update(&work_order_dsse_bytes);
+        let work_order_hash_bytes = hasher.finalize();
+        let work_order_hash_b64url = URL_SAFE_NO_PAD.encode(work_order_hash_bytes);
+
         // 1. Deserialize DsseEnvelope
         let dsse_envelope: DsseEnvelope =
             serde_json::from_slice(&work_order_dsse_bytes).map_err(|e| {
@@ -80,6 +96,26 @@ impl WorkOrderOrchestrator {
             })?;
 
         // TODO: DSSE signature validation would happen here, likely by calling out to a policy.
+
+        // Check for duplicate work order submission
+        if self
+            .active_work_orders
+            .read()
+            .await
+            .contains_key(&work_order_hash_b64url)
+        {
+            let msg = format!(
+                "Work order with hash {} already exists and is active.",
+                work_order_hash_b64url
+            );
+            warn!("{}", msg);
+            // It's not an error per se, more like a duplicate submission.
+            // The gRPC handler expects Ok(SubmitWorkOrderResponse) even for app-level "failures".
+            return Ok((
+                work_order_hash_b64url,
+                "Work order already active.".to_string(),
+            ));
+        }
         // For now, we assume it's valid if it parses.
         if dsse_envelope.payload_type != DSSE_WORK_ORDER_PAYLOAD_TYPE {
             return Err(AppError::Service(format!(
@@ -113,7 +149,10 @@ impl WorkOrderOrchestrator {
                 &SecretId::default(), // secret_id_for_log (using Default impl)
             )
             .await?;
-        debug!("Fetched worker bundle for work order {}", wo_payload.id);
+        debug!(
+            "Fetched worker bundle for work order (hash: {})",
+            work_order_hash_b64url
+        );
 
         // 5. Deserialize WorkerBundlePayload (payload() method handles DSSE_WORKER_BUNDLE_PAYLOAD_TYPE check)
         let actual_bundle_payload = actual_worker_bundle.payload();
@@ -121,11 +160,11 @@ impl WorkOrderOrchestrator {
         // 6. Check VM ID
         if actual_bundle_payload.vm != self.config.enclave.default_vm_id {
             let msg = format!(
-                "Work order {} requests VM '{}', but only default VM '{}' is supported.",
-                wo_payload.id, actual_bundle_payload.vm, self.config.enclave.default_vm_id
+                "Work order (hash: {}) requests VM '{}', but only default VM '{}' is supported.",
+                work_order_hash_b64url, actual_bundle_payload.vm, self.config.enclave.default_vm_id
             );
             error!("{}", msg);
-            return Err(AppError::Service(msg));
+            return Err(AppError::Validation(msg));
         }
 
         // 7. Self-Authorization for secrets via policy execution
@@ -134,7 +173,7 @@ impl WorkOrderOrchestrator {
             wo_payload.id
         );
         let daemon_env_report_for_self_auth =
-            self.secrets_service.get_own_env_report(vec![]).await?;
+            self.secrets_service.get_own_env_report(vec![]).await?; // TODO: This should be the enclave's report, not daemon's
         let worker_consumer_info_for_self_auth = ConsumerInfo {
             bundle_hash: actual_worker_bundle.hash_signed_payload(),
             signature: actual_worker_bundle.get_dsse_signature(),
@@ -143,7 +182,7 @@ impl WorkOrderOrchestrator {
         for (secret_id, _name) in &worker_manifest.identities {
             info!(
                 "Performing self-authorization for secret {:?} for work order {}",
-                secret_id, wo_payload.id
+                secret_id, work_order_hash_b64url
             );
             let policy_package = self.policy_manager.get_policy(secret_id).await?;
 
@@ -164,20 +203,20 @@ impl WorkOrderOrchestrator {
                 })?;
             if !authorized {
                 let msg = format!(
-                    "Self-authorization policy denied for secret {:?} for work order {}",
-                    secret_id, wo_payload.id
+                    "Self-authorization policy denied for secret {:?} for work order (hash: {})",
+                    secret_id, work_order_hash_b64url
                 );
                 error!("{}", msg);
-                return Err(AppError::Service(msg));
+                return Err(AppError::Authorization(msg));
             }
             debug!(
-                "Self-authorization policy approved for secret {:?} for work order {}",
-                secret_id, wo_payload.id
+                "Self-authorization policy approved for secret {:?} for work order (hash: {})",
+                secret_id, work_order_hash_b64url
             );
         }
         debug!(
-            "All secrets self-authorized via policy execution for work order {}",
-            wo_payload.id
+            "All secrets self-authorized via policy execution for work order (hash: {})",
+            work_order_hash_b64url
         );
 
         // 8. Ensure secrets are present in the enclave
@@ -185,8 +224,8 @@ impl WorkOrderOrchestrator {
         if !needed_secret_ids_with_names.is_empty() {
             info!(
                 "Checking for {} secrets needed by work order {}",
-                needed_secret_ids_with_names.len(),
-                wo_payload.id
+                needed_secret_ids_with_names.len(), // Using payload.id for logging clarity
+                work_order_hash_b64url
             );
             let needed_ids: Vec<_> = needed_secret_ids_with_names
                 .iter()
@@ -199,7 +238,7 @@ impl WorkOrderOrchestrator {
                 .map_err(|e| {
                     AppError::Service(format!(
                         "Failed to check secrets for work order {}: {}",
-                        wo_payload.id, e
+                        work_order_hash_b64url, e
                     ))
                 })?;
 
@@ -218,7 +257,7 @@ impl WorkOrderOrchestrator {
                     debug!(
                         "Secret {:?} for work order {} is missing or expired. Will attempt to \
                          fetch/generate.",
-                        id, wo_payload.id
+                        id, work_order_hash_b64url
                     );
                     missing_secret_requests.insert(
                         id.clone(),
@@ -233,8 +272,8 @@ impl WorkOrderOrchestrator {
             if !missing_secret_requests.is_empty() {
                 info!(
                     "Fetching/generating {} missing secrets for work order {}",
-                    missing_secret_requests.len(),
-                    wo_payload.id
+                    missing_secret_requests.len(), // Using payload.id for logging clarity
+                    work_order_hash_b64url
                 );
                 let daemon_env_report = self.secrets_service.get_own_env_report(vec![]).await?;
                 self.secrets_service
@@ -244,27 +283,20 @@ impl WorkOrderOrchestrator {
                     .map_err(|e| {
                         AppError::Service(format!(
                             "Failed to get secrets for work order {}: {:?}",
-                            wo_payload.id, e
+                            work_order_hash_b64url, e
                         ))
                     })?;
-                debug!("Missing secrets processed for work order {}", wo_payload.id);
+                debug!(
+                    "Missing secrets processed for work order (hash: {})",
+                    work_order_hash_b64url
+                );
             }
         }
 
-        // 9. Store active work order (basic for now)
-        let active_wo = ActiveWorkOrder {
-            payload: wo_payload.clone(),
-            enclave_worker_id: None,
-        };
-        self.active_work_orders
-            .write()
-            .await
-            .insert(wo_payload.id.clone(), active_wo);
-
-        // 10. Run Worker
+        // 9. Run Worker
         info!(
-            "Requesting enclave to run worker for work order {}",
-            wo_payload.id
+            "Requesting enclave to run worker for work order (hash: {})",
+            work_order_hash_b64url
         );
         let manifest_bytes = serde_json::to_vec(&worker_manifest).map_err(|e| {
             AppError::Internal(format!("Failed to serialize worker manifest: {}", e))
@@ -282,25 +314,26 @@ impl WorkOrderOrchestrator {
             .map_err(|e| {
                 AppError::Service(format!(
                     "Failed to run worker in enclave for {}: {}",
-                    wo_payload.id, e
+                    work_order_hash_b64url, e
                 ))
             })?;
         info!(
-            "Enclave started worker {} for work order {}",
-            enclave_worker_id, wo_payload.id
+            "Enclave started worker {} for work order (hash: {})",
+            enclave_worker_id, work_order_hash_b64url
         );
 
-        // Update active work order with enclave_worker_id
-        if let Some(ao) = self
-            .active_work_orders
+        // 10. Store active work order
+        let active_wo = ActiveWorkOrder {
+            payload: wo_payload.clone(), // Keep original payload for reference
+            enclave_worker_id: enclave_worker_id.clone(),
+            dsse_hash_b64url: work_order_hash_b64url.clone(),
+        };
+        self.active_work_orders // Keyed by the unique hash
             .write()
             .await
-            .get_mut(&wo_payload.id)
-        {
-            ao.enclave_worker_id = Some(enclave_worker_id.clone());
-        }
+            .insert(work_order_hash_b64url.clone(), active_wo);
 
-        // 11. Handle Launch Event first, then other event subscriptions
+        // 11. Handle Event Subscriptions (Launch, Web3, HTTP mounting)
         let enclave_worker_id_clone_for_listeners = enclave_worker_id.clone();
         let wo_id_clone_for_listeners = wo_payload.id.clone();
 
@@ -308,6 +341,7 @@ impl WorkOrderOrchestrator {
         let mut launch_event_queued_successfully = false;
         let mut web3_event_configs = Vec::new();
 
+        let mut http_requested = false;
         for event_config in &wo_payload.events {
             match &event_config.kind {
                 WorkerEventKind::Launch => {
@@ -327,7 +361,7 @@ impl WorkOrderOrchestrator {
                     if let Err(e) = self.daemon_event_tx.send(event_delivery).await {
                         error!(
                             "Failed to send Launch event to daemon queue for work_order {}: {}",
-                            wo_payload.id, e
+                            work_order_hash_b64url, e
                         );
                         // launch_event_queued_successfully remains false
                     } else {
@@ -336,6 +370,13 @@ impl WorkOrderOrchestrator {
                 }
                 WorkerEventKind::Web3Event(web3_config) => {
                     web3_event_configs.push(web3_config.clone());
+                }
+                WorkerEventKind::HttpRequestTrigger => {
+                    http_requested = true;
+                    info!(
+                        "Work order (hash: {}) requests HTTP capability.",
+                        work_order_hash_b64url
+                    );
                 }
                 e => {
                     warn!("Received unknown worker event: {e:?}");
@@ -351,6 +392,19 @@ impl WorkOrderOrchestrator {
         } else {
             true // No launch event, so proceed with Web3 listeners
         };
+
+        if http_requested {
+            // Mount the worker for HTTP requests
+            // The key for http_mounts is the base64url encoded hash of the work order DSSE bytes
+            self.http_mounts
+                .write()
+                .await
+                .insert(work_order_hash_b64url.clone(), enclave_worker_id.clone());
+            info!(
+                "Mounted HTTP worker at segment: {} (enclave_worker_id: {})",
+                work_order_hash_b64url, enclave_worker_id
+            );
+        }
 
         if should_setup_web3_listeners {
             for web3_config in web3_event_configs {
@@ -372,8 +426,8 @@ impl WorkOrderOrchestrator {
 
                 info!(
                     "Work order {} requests Web3 event listener for chain {}: Address: {:?}, \
-                     Topics: {:?}, Handler: {}",
-                    wo_id_clone_for_listeners,
+                     Topics: {:?}, Handler: {} (for work_order_hash: {})",
+                    wo_id_clone_for_listeners, // payload.id for logging
                     web3_config.chain,
                     web3_config
                         .address
@@ -381,7 +435,8 @@ impl WorkOrderOrchestrator {
                         .map(|a| format!("{a:#x}"))
                         .collect::<Vec<_>>(),
                     web3_config.topics,
-                    original_event_config.handler
+                    original_event_config.handler,
+                    work_order_hash_b64url // actual unique ID
                 );
 
                 let wo_id_listener = wo_id_clone_for_listeners.clone();
@@ -391,9 +446,10 @@ impl WorkOrderOrchestrator {
                 let shutdown_rx_clone = self.daemon_shutdown_rx.resubscribe();
                 let daemon_event_tx_clone = self.daemon_event_tx.clone();
 
+                let wo_hash_b64 = work_order_hash_b64url.clone();
                 tokio::spawn(async move {
                     start_web3_event_listener(
-                        wo_id_listener,
+                        wo_hash_b64, // Use the unique hash for listener identification
                         enclave_worker_id_listener,
                         handler_name_listener,
                         web3_config,
@@ -408,13 +464,13 @@ impl WorkOrderOrchestrator {
             // This implies a Launch event was defined but failed to be queued.
             warn!(
                 "Skipping Web3 event listener setup for work order {} due to Launch event failure.",
-                wo_payload.id
+                work_order_hash_b64url
             );
         }
 
         Ok((
-            wo_payload.id,
-            "Work order submitted and processed.".to_string(),
+            work_order_hash_b64url, // Return the unique hash as the ID
+            format!("Work order submitted and processed. ID: {}.", wo_payload.id),
         ))
     }
 }

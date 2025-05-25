@@ -6,8 +6,9 @@ use nxcc_interface::{
             AttachVmRequest, AttachVmResponse, CheckSecretsRequest, CheckSecretsResponse,
             DeliverBatchEventsRequest, DeliverBatchEventsResponse, DetachVmRequest,
             ExecutePolicyRequest, ExecutePolicyResponse, GenerateSecretsRequest, GetReportRequest,
-            GetSecretsRequest, GetSecretsResponse, PutSecretsRequest, PutSecretsResponse,
-            RunWorkerRequest, RunWorkerResponse, SecretStatus, TerminateWorkerRequest,
+            GetSecretsRequest, GetSecretsResponse, InvokeHttpWorkerRequest,
+            InvokeHttpWorkerResponse, PutSecretsRequest, PutSecretsResponse, RunWorkerRequest,
+            RunWorkerResponse, SecretStatus, TerminateWorkerRequest,
             runner_server::{Runner, RunnerServer},
             secrets_server::{Secrets as SecretsServerTrait, SecretsServer},
         },
@@ -374,6 +375,33 @@ impl Runner for EnclaveRunnerGrpcService {
             Ok(()) => Ok(Response::new(DeliverBatchEventsResponse {
                 success: true,
                 message: "Batch delivered".to_string(),
+            })),
+            Err(e) => Err(map_runner_error(e)),
+        }
+    }
+
+    async fn invoke_http_worker(
+        &self,
+        request: Request<InvokeHttpWorkerRequest>,
+    ) -> Result<Response<InvokeHttpWorkerResponse>, Status> {
+        let req_inner = request.into_inner();
+        debug!(
+            "gRPC InvokeHttpWorker request for worker_id '{}', uri '{}'",
+            req_inner.worker_id,
+            req_inner.request.as_ref().map_or("N/A", |r| r.uri.as_str())
+        );
+
+        let http_request_proto = req_inner.request.ok_or_else(|| {
+            Status::invalid_argument("Missing HttpRequest in InvokeHttpWorkerRequest")
+        })?;
+
+        match self
+            .runner
+            .invoke_http_worker(req_inner.worker_id, http_request_proto)
+            .await
+        {
+            Ok(http_response_proto) => Ok(Response::new(InvokeHttpWorkerResponse {
+                response: Some(http_response_proto),
             })),
             Err(e) => Err(map_runner_error(e)),
         }

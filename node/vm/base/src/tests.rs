@@ -1,6 +1,9 @@
 use std::{collections::HashMap, error::Error, sync::Arc};
 
-use nxcc_interface::proto::vm::{TrustedConfig, UntrustedConfig, WorkerStatus};
+use nxcc_interface::proto::vm::{
+    Header as ProtoHeader, HttpRequest as ProtoHttpRequest, HttpResponse as ProtoHttpResponse,
+    TrustedConfig, UntrustedConfig, WorkerStatus,
+};
 use tokio::net::TcpListener;
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::{Certificate, ClientTlsConfig, Identity, Server};
@@ -43,6 +46,22 @@ impl VmRuntime for E2EMockVmRuntime {
     ) -> Result<Vec<u8>, VmError> {
         if id.starts_with("instance-e2e-") {
             Ok(payload) // Echo payload
+        } else {
+            Err(VmError::new("Not found"))
+        }
+    }
+
+    async fn invoke_http(
+        &self,
+        id: String,
+        request: ProtoHttpRequest,
+    ) -> Result<ProtoHttpResponse, VmError> {
+        if id.starts_with("instance-e2e-") {
+            Ok(ProtoHttpResponse {
+                status_code: 200,
+                headers: request.headers,
+                body: request.body,
+            })
         } else {
             Err(VmError::new("Not found"))
         }
@@ -177,6 +196,24 @@ async fn test_e2e_with_client_binding() -> Result<(), Box<dyn Error>> {
         "First client reconnection InvokeWorker failed"
     );
     assert_eq!(invoke_result.unwrap(), vec![7, 8, 9]); // Mock echoes
+
+    // 10. Test first client operations (InvokeHttp)
+    let http_request_payload = ProtoHttpRequest {
+        method: "POST".to_string(),
+        uri: "/e2e/resource".to_string(),
+        headers: vec![ProtoHeader {
+            key: "Content-Type".to_string(),
+            value: b"application/json".to_vec(),
+        }],
+        body: b"{\"data\":\"payload\"}".to_vec(),
+    };
+    let http_invoke_result = client1_reconnect
+        .invoke_http(worker_id.clone(), http_request_payload.clone())
+        .await;
+    assert!(http_invoke_result.is_ok(), "First client InvokeHttp failed");
+    let http_response = http_invoke_result.unwrap();
+    assert_eq!(http_response.status_code, 200);
+    assert_eq!(http_response.body, http_request_payload.body);
 
     // 11. Create a second client with a *different* certificate signed by the *same* CA
     let client2_bundle = certs.generate_additional_client_cert("client2")?;

@@ -1,6 +1,7 @@
 syntax = "proto3";
 
 package interface;
+
 import "google/protobuf/empty.proto";
 
 // Common types shared across daemon/enclave.
@@ -93,5 +94,6 @@ message EventPayload {
     // TimerEvent timer_event = 3;
     // HttpEvent http_event = 4;
     google.protobuf.Empty launch_event = 2;
+    google.protobuf.Empty http_request_trigger = 3;
   }
 }

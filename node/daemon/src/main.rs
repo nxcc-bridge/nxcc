@@ -4,21 +4,24 @@ use tokio::time::{Duration, interval};
 mod config;
 mod error;
 mod grpc;
+mod http_server; // New module for Axum server
 mod identity;
 mod network;
 mod policy;
 mod services;
 mod web3;
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use grpc::enclave_client;
 use nxcc_interface::proto::enclave as enclave_proto;
+use tokio::sync::RwLock;
 use tracing::{Level, error, info};
 use tracing_subscriber::{EnvFilter, fmt::Subscriber};
 
 use crate::{
     config::{Config, EnclaveConfig},
+    http_server::start_http_server,
     identity::{create_ephemeral_identity, get_or_create_identity},
     network::NetworkManager,
     policy::PolicyManager,
@@ -109,10 +112,13 @@ async fn main() -> anyhow::Result<()> {
 
     network.start(shutdown_tx.subscribe()).await?;
 
+    let http_mounts = Arc::new(RwLock::new(HashMap::<String, String>::new()));
+
     {
         let grpc_config = config.grpc.clone();
         let secrets_service_clone = secrets_service.clone();
         let enclave_client_clone = enclave_client.clone();
+        let http_mounts_clone_for_wo = http_mounts.clone();
         let work_order_orchestrator =
             crate::services::work_order_orchestrator::WorkOrderOrchestrator::new(
                 enclave_client.clone(),
@@ -121,6 +127,7 @@ async fn main() -> anyhow::Result<()> {
                 policy_manager.clone(),
                 gateway_manager.clone(),
                 Arc::new(config.clone()),
+                http_mounts_clone_for_wo,
                 daemon_event_tx.clone(),
                 shutdown_rx.resubscribe(),
             );
@@ -140,6 +147,27 @@ async fn main() -> anyhow::Result<()> {
             }
         });
     }
+
+    // Start HTTP server for worker requests
+    let http_config = config.http.clone();
+    let enclave_client_for_http = enclave_client.clone();
+    let mut shutdown_rx_for_http = shutdown_tx.subscribe();
+    let http_mounts_for_server = http_mounts.clone();
+
+    tokio::spawn(async move {
+        if let Err(e) = start_http_server(
+            &http_config,
+            http_mounts_for_server,
+            enclave_client_for_http,
+            async move {
+                shutdown_rx_for_http.recv().await.ok();
+            },
+        )
+        .await
+        {
+            error!("HTTP server error: {}", e);
+        }
+    });
 
     // Task to batch and send events from daemon_event_rx to enclave
     let enclave_client_for_event_delivery = enclave_client.clone();

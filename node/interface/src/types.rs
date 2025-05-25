@@ -641,6 +641,8 @@ pub enum WorkerEventKind {
     Launch,
     /// Describes a Web3 event subscription.
     Web3Event(Web3Event),
+    /// Indicates the worker can handle HTTP requests.
+    HttpRequestTrigger,
 }
 
 /// Configuration for a Web3 event listener, mirroring Alloy's Filter structure.
@@ -797,6 +799,7 @@ impl From<interface::Web3Log> for Web3Log {
 pub enum EventPayload<'a> {
     Web3Log(Web3Log),
     Launch,
+    HttpRequestTrigger,
     #[serde(borrow)]
     _Phantom(std::marker::PhantomData<&'a ()>), // Future event types
 }
@@ -808,6 +811,9 @@ impl From<interface::EventPayload> for EventPayload<'_> {
                 EventPayload::Web3Log(Web3Log::from(log))
             }
             Some(interface::event_payload::Payload::LaunchEvent(_)) => EventPayload::Launch,
+            Some(interface::event_payload::Payload::HttpRequestTrigger(_)) => {
+                EventPayload::HttpRequestTrigger
+            }
             None => panic!("EventPayload proto is empty"), // Or handle as error
         }
     }
@@ -821,6 +827,9 @@ impl From<EventPayload<'_>> for interface::EventPayload {
             },
             EventPayload::Launch => Self {
                 payload: Some(interface::event_payload::Payload::LaunchEvent(())),
+            },
+            EventPayload::HttpRequestTrigger => Self {
+                payload: Some(interface::event_payload::Payload::HttpRequestTrigger(())),
             },
             EventPayload::_Phantom(_) => panic!("Cannot convert _Phantom EventPayload"),
         }

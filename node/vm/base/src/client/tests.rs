@@ -1,6 +1,9 @@
 use std::{collections::HashMap, error::Error, sync::Arc};
 
-use nxcc_interface::proto::vm::{TrustedConfig, UntrustedConfig, WorkerStatus};
+use nxcc_interface::proto::vm::{
+    Header as ProtoHeader, HttpRequest as ProtoHttpRequest, HttpResponse as ProtoHttpResponse,
+    InvokeHttpRequest, InvokeHttpResponse, TrustedConfig, UntrustedConfig, WorkerStatus,
+};
 use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
 
@@ -92,6 +95,34 @@ impl nxcc_interface::proto::vm::vm_server::Vm for MockVmService {
                     error_message: "Worker not found".to_string(),
                 },
             ))
+        }
+    }
+
+    async fn invoke_http(
+        &self,
+        request: Request<InvokeHttpRequest>,
+    ) -> Result<Response<InvokeHttpResponse>, Status> {
+        let req_inner = request.into_inner();
+        let workers = self.workers.lock().await;
+
+        if workers.contains_key(&req_inner.worker_id) {
+            // Simple echo-like behavior for HTTP mock
+            let proto_req = req_inner.request.unwrap_or_default();
+            Ok(Response::new(InvokeHttpResponse {
+                response: Some(ProtoHttpResponse {
+                    status_code: 200,
+                    headers: proto_req.headers, // Echo headers
+                    body: proto_req.body,       // Echo body
+                }),
+            }))
+        } else {
+            Ok(Response::new(InvokeHttpResponse {
+                response: Some(ProtoHttpResponse {
+                    status_code: 404,
+                    headers: vec![],
+                    body: b"Worker not found".to_vec(),
+                }),
+            }))
         }
     }
 
@@ -257,6 +288,24 @@ async fn test_client_operations() -> Result<(), Box<dyn Error>> {
         .await?;
     assert_eq!(result, vec![7, 8, 9]); // Mock service echoes payload
 
+    // Invoke HTTP
+    let http_req_payload = ProtoHttpRequest {
+        method: "POST".to_string(),
+        uri: "/test".to_string(),
+        headers: vec![ProtoHeader {
+            key: "X-Test".to_string(),
+            value: b"true".to_vec(),
+        }],
+        body: b"http body".to_vec(),
+    };
+    let http_resp = client
+        .invoke_http(worker_id.clone(), http_req_payload.clone())
+        .await?;
+    assert_eq!(http_resp.status_code, 200);
+    assert_eq!(http_resp.body, http_req_payload.body);
+    assert_eq!(http_resp.headers.len(), 1);
+    assert_eq!(http_resp.headers[0].key, "X-Test");
+
     // Get worker logs
     let logs = client.get_worker_logs(worker_id.clone()).await?;
     assert!(logs.contains(&worker_id)); // Mock service includes ID in logs
@@ -347,6 +396,21 @@ async fn test_client_error_handling() {
         e => panic!("Expected Grpc error, got {:?}", e),
     }
 
+    // Try to invoke HTTP on non-existent worker
+    let http_req_payload = ProtoHttpRequest {
+        method: "GET".to_string(),
+        uri: "/".to_string(),
+        headers: vec![],
+        body: vec![],
+    };
+    let result = client
+        .invoke_http("non-existent".to_string(), http_req_payload)
+        .await;
+    assert!(result.is_err()); // MockVmServiceClient's invoke_http returns error for not found
+    match result.err().unwrap() {
+        ClientError::Grpc(status) => assert!(status.message().contains("Worker not found")),
+        e => panic!("Expected Grpc error, got {:?}", e),
+    }
     // Try to get logs of non-existent worker
     let result = client.get_worker_logs("non-existent".to_string()).await;
     assert!(result.is_err());
@@ -363,8 +427,11 @@ async fn test_client_error_handling() {
 #[cfg(feature = "test")]
 #[tokio::test]
 async fn test_mock_client() {
-    use super::mock::{MockAttestationBehavior, MockVmServiceClient};
+    use nxcc_interface::proto::vm::{
+        Header as ProtoHeader, HttpRequest as ProtoHttpRequest, HttpResponse as ProtoHttpResponse,
+    };
 
+    use super::mock::{MockAttestationBehavior, MockVmServiceClient};
     // Create a new mock client
     let mut client = MockVmServiceClient::new();
 
@@ -413,6 +480,37 @@ async fn test_mock_client() {
         .await
         .unwrap();
     assert_eq!(result, payload); // Mock echoes back the payload
+
+    // Invoke HTTP on mock
+    let http_req_payload = ProtoHttpRequest {
+        method: "PUT".to_string(),
+        uri: "/mock/resource".to_string(),
+        headers: vec![ProtoHeader {
+            key: "X-Mock".to_string(),
+            value: b"mock-val".to_vec(),
+        }],
+        body: b"mock http body".to_vec(),
+    };
+    // Set specific HTTP response behavior
+    client.set_worker_execution_behavior(
+        &worker_id,
+        crate::client::mock::MockExecutionBehavior::HttpResponse(ProtoHttpResponse {
+            status_code: 201,
+            headers: vec![ProtoHeader {
+                key: "Location".to_string(),
+                value: b"/mock/resource/1".to_vec(),
+            }],
+            body: b"Created".to_vec(),
+        }),
+    );
+
+    let http_resp = client
+        .invoke_http(worker_id.clone(), http_req_payload.clone())
+        .await
+        .unwrap();
+    assert_eq!(http_resp.status_code, 201);
+    assert_eq!(http_resp.body, b"Created".to_vec());
+    assert_eq!(http_resp.headers[0].key, "Location");
 
     // Get worker logs
     let logs = client.get_worker_logs(worker_id.clone()).await.unwrap();

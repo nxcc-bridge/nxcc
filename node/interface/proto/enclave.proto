@@ -5,6 +5,7 @@ package enclave;
 
 import "google/protobuf/empty.proto";
 import "interface.proto";
+import "vm.proto"; // For vm.HttpRequest and vm.HttpResponse
 
 // The main secrets service inside the TEE (EnclaveSecrets).
 service Secrets {
@@ -92,6 +93,9 @@ service Runner {
 
   /// Delivers a batch of asynchronous events to specified workers.
   rpc DeliverBatchEvents (DeliverBatchEventsRequest) returns (DeliverBatchEventsResponse);
+
+  /// Invokes a worker with an HTTP request.
+  rpc InvokeHttpWorker (InvokeHttpWorkerRequest) returns (InvokeHttpWorkerResponse);
 }
 
 // --- AttachVm Messages ---
@@ -194,4 +198,15 @@ message ExecutePolicyRequest {
 message ExecutePolicyResponse {
   /// The subset of the requested contexts that satisfied the policy.
   repeated interface.PolicyExecutionRequest satisfied_contexts = 1;
+}
+
+// --- InvokeHttpWorker Messages ---
+
+message InvokeHttpWorkerRequest {
+  string worker_id = 1; // Enclave's worker_id for the target worker
+  vm.HttpRequest request = 2;
+}
+
+message InvokeHttpWorkerResponse {
+  vm.HttpResponse response = 1;
 }

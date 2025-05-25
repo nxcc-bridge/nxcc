@@ -87,6 +87,9 @@ pub enum WorkerdVmError {
 
     #[error("Code detection error: {0}")]
     CodeDetectionError(String), // Example
+
+    #[error("Invalid HTTP request structure: {0}")]
+    InvalidHttpRequest(String),
 }
 
 impl From<WorkerdVmError> for VmError {

@@ -4,7 +4,10 @@ mod tests;
 use std::{collections::HashMap, sync::Arc};
 
 use nxcc_interface::{
-    proto::vm::{InvokeWorkerRequest as ProtoInvokeWorkerRequest, TrustedConfig, UntrustedConfig},
+    proto::vm::{
+        HttpRequest as ProtoHttpRequest, HttpResponse as ProtoHttpResponse,
+        InvokeWorkerRequest as ProtoInvokeWorkerRequest, TrustedConfig, UntrustedConfig,
+    },
     types::{
         ConsumerInfo, EventPayload, PolicyExecutionReport, PolicyExecutionRequest, VmAddress,
         Web3Log, WorkerBundle, WorkerManifest,
@@ -116,6 +119,19 @@ impl VmClient {
             VmClient::Real(client) => client.invoke_worker(worker_id, handler_name, payload).await,
             #[cfg(test)]
             VmClient::Mock(client) => client.invoke_worker(worker_id, handler_name, payload).await,
+        }
+    }
+
+    // Async function to invoke an HTTP request on a worker
+    pub async fn invoke_http(
+        &mut self,
+        worker_id: String,
+        request: ProtoHttpRequest,
+    ) -> Result<ProtoHttpResponse, ClientError> {
+        match self {
+            VmClient::Real(client) => client.invoke_http(worker_id, request).await,
+            #[cfg(test)]
+            VmClient::Mock(client) => client.invoke_http(worker_id, request).await,
         }
     }
 }
@@ -586,5 +602,48 @@ impl RunnerService {
             }
         }
         Ok(())
+    }
+
+    /// Invokes a worker with an HTTP request.
+    pub async fn invoke_http_worker(
+        &self,
+        worker_id: String,
+        http_request: ProtoHttpRequest,
+    ) -> Result<ProtoHttpResponse, RunnerError> {
+        info!(
+            "Invoking HTTP worker '{}' with URI: {}",
+            worker_id, http_request.uri
+        );
+
+        let vm_id = {
+            let worker_map_guard = self.worker_map.read().await;
+            worker_map_guard
+                .get(&worker_id)
+                .cloned()
+                .ok_or_else(|| RunnerError::WorkerNotFound(worker_id.clone()))?
+        };
+
+        let mut vms_guard = self.vms.write().await;
+        let client = vms_guard
+            .get_mut(&vm_id)
+            .ok_or_else(|| RunnerError::VmNotAttached(vm_id.clone()))?;
+
+        client
+            .invoke_http(worker_id.clone(), http_request)
+            .await
+            .map_err(|e| {
+                error!(
+                    "HTTP invocation failed for worker '{}' in VM '{}': {}",
+                    worker_id, vm_id, e
+                );
+                RunnerError::VmConnection(e)
+            })
+    }
+}
+
+#[cfg(test)]
+impl RunnerService {
+    pub(crate) async fn set_worker_vm_mapping(&self, worker_id: String, vm_id: String) {
+        self.worker_map.write().await.insert(worker_id, vm_id);
     }
 }
