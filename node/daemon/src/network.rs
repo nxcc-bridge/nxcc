@@ -23,12 +23,6 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-pub enum NotifierMessage {
-    Notification(String),
-    Response(String),
-}
-
-#[derive(Debug, Clone)]
 pub enum SecretsMessage {
     PublishSecretsRequest {
         request_id: u64,
@@ -119,7 +113,6 @@ impl From<kad::Event> for AppEvent {
 pub struct NetworkManager {
     local_key: libp2p::identity::Keypair,
     config: Config,
-    notifier_receiver: mpsc::Receiver<NotifierMessage>,
     secrets_receiver: mpsc::Receiver<SecretsMessage>,
     secrets_service: Arc<SecretsService>,
 }
@@ -129,13 +122,11 @@ impl NetworkManager {
         local_key: libp2p::identity::Keypair,
         config: Config,
         secrets_service: Arc<SecretsService>,
-        notifier_receiver: mpsc::Receiver<NotifierMessage>,
         secrets_receiver: mpsc::Receiver<SecretsMessage>,
     ) -> Result<Self, AppError> {
         Ok(Self {
             local_key,
             config,
-            notifier_receiver,
             secrets_receiver,
             secrets_service,
         })
@@ -165,7 +156,6 @@ impl NetworkManager {
         }
 
         let secrets_service = Arc::clone(&self.secrets_service);
-        let notifier_rx = std::mem::replace(&mut self.notifier_receiver, mpsc::channel(1).1);
         let secrets_rx = std::mem::replace(&mut self.secrets_receiver, mpsc::channel(1).1);
 
         // Subscribe to a global "secrets" topic for gossip
@@ -175,7 +165,6 @@ impl NetworkManager {
         tokio::spawn(async move {
             run_network_loop(
                 swarm,
-                notifier_rx,
                 secrets_rx,
                 secrets_service,
                 secrets_topic,
@@ -293,7 +282,6 @@ impl NetworkManager {
 
 async fn run_network_loop(
     mut swarm: Swarm<AppBehaviour>,
-    mut notifier_rx: mpsc::Receiver<NotifierMessage>,
     mut secrets_rx: mpsc::Receiver<SecretsMessage>,
     secrets_service: Arc<SecretsService>,
     topic: gossipsub::IdentTopic,
@@ -303,14 +291,6 @@ async fn run_network_loop(
         tokio::select! {
             event = swarm.select_next_some() => {
                 handle_swarm_event(event, &mut swarm, &topic, &secrets_service).await;
-            },
-
-            msg = notifier_rx.next() => {
-                if let Some(msg) = msg {
-                    if let Err(e) = handle_notifier_message(msg, &mut swarm, &topic).await {
-                        error!("Failed to handle notifier message: {e}");
-                    }
-                }
             },
 
             msg = secrets_rx.next() => {
@@ -545,34 +525,6 @@ fn handle_ping_event(event: ping::Event) {
 
 fn handle_kademlia_event(event: kad::Event) {
     debug!("Kademlia event: {:?}", event);
-}
-
-async fn handle_notifier_message(
-    msg: NotifierMessage,
-    swarm: &mut Swarm<AppBehaviour>,
-    topic: &gossipsub::IdentTopic,
-) -> Result<(), AppError> {
-    match msg {
-        NotifierMessage::Notification(content) => {
-            info!("Publishing notification to network: {content}");
-            // Create a gossip message for the notification
-            let timestamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_err(|e| AppError::Network(format!("System time error: {e}")))?
-                .as_secs();
-
-            let gossip = GossipMessage::Notification {
-                content: content.clone(),
-                timestamp,
-            };
-
-            publish_message(swarm, topic, &gossip)?;
-        }
-        NotifierMessage::Response(content) => {
-            info!("NotifierResponse: {content}");
-        }
-    }
-    Ok(())
 }
 
 async fn handle_secrets_message(

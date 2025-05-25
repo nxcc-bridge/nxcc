@@ -57,7 +57,6 @@ async fn main() -> anyhow::Result<()> {
     let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel::<()>(1);
 
     let (secrets_tx, secrets_rx) = futures::channel::mpsc::channel(64);
-    let (notifier_tx, notifier_rx) = futures::channel::mpsc::channel(64);
 
     // Central event queue for daemon to send events to enclave
     let (daemon_event_tx, mut daemon_event_rx) =
@@ -100,18 +99,10 @@ async fn main() -> anyhow::Result<()> {
         local_key.clone(),      // Pass the local keypair
     );
 
-    {
-        let notifier_tx_clone = notifier_tx.clone();
-        tokio::spawn(async move {
-            services::notifier::start_service(notifier_tx_clone).await;
-        });
-    }
-
     let mut network = NetworkManager::new(
         local_key,
         config.clone(),
         secrets_service.clone(),
-        notifier_rx,
         secrets_rx,
     )
     .await?;

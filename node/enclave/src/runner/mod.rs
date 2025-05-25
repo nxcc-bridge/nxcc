@@ -17,7 +17,7 @@ use nxcc_vm_base::{
     tls::MtlsCertificates,
 };
 use thiserror::Error;
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, error, info, warn};
 
 use crate::secrets::Secrets;
@@ -360,70 +360,13 @@ impl RunnerService {
         {
             Ok(instance_id) => {
                 info!(
-                    "Successfully started worker instance '{}' in VM '{}', proceeding to launch \
-                     event if any.",
+                    "Successfully started worker instance '{}' in VM '{}'.",
                     instance_id, vm_id
                 );
-
-                // If there's a launch payload, deliver it now.
-                if let Some(launch_payload) = launch_event_payload {
-                    info!("Delivering launch event to worker '{}'", instance_id);
-                    // The client is already mutable from the vms_guard
-                    match client
-                        .invoke_worker(instance_id.clone(), launch_payload)
-                        .await
-                    {
-                        Ok(_) => {
-                            debug!(
-                                "Launch event successfully delivered to worker '{}'",
-                                instance_id
-                            );
-                            // All VM operations successful, now update worker_map
-                            let mut worker_map_guard = self.worker_map.write().await;
-                            worker_map_guard.insert(instance_id.clone(), vm_id.clone());
-                            drop(worker_map_guard); // Explicitly drop guard
-                            Ok(instance_id)
-                        }
-                        Err(e) => {
-                            error!(
-                                "Failed to deliver launch event to worker '{}': {}. Attempting to \
-                                 stop worker.",
-                                instance_id, e
-                            );
-                            // Attempt to clean up the worker in the VM since start_worker succeeded
-                            // but the subsequent launch event invocation failed.
-                            if let Err(stop_err) = client.stop_worker(instance_id.clone()).await {
-                                error!(
-                                    "Failed to stop worker '{}' in VM {} after launch event \
-                                     failure: {}",
-                                    instance_id, vm_id, stop_err
-                                );
-                                // Worker might be orphaned in the VM. worker_map is not updated.
-                            } else {
-                                info!(
-                                    "Successfully stopped worker '{}' in VM {} after launch event \
-                                     failure.",
-                                    instance_id, vm_id
-                                );
-                            }
-                            // Do not add to worker_map as the launch failed.
-                            Err(RunnerError::WorkerStartFailed(format!(
-                                "Launch event delivery failed: {}",
-                                e
-                            )))
-                        }
-                    }
-                } else {
-                    // No launch payload, start_worker was successful. Update worker_map.
-                    info!(
-                        "No launch event payload for worker '{}'. Worker started.",
-                        instance_id
-                    );
-                    let mut worker_map_guard = self.worker_map.write().await;
-                    worker_map_guard.insert(instance_id.clone(), vm_id.clone());
-                    drop(worker_map_guard); // Explicitly drop guard
-                    Ok(instance_id)
-                }
+                let mut worker_map_guard = self.worker_map.write().await;
+                worker_map_guard.insert(instance_id.clone(), vm_id.clone());
+                drop(worker_map_guard);
+                Ok(instance_id)
             }
             Err(e) => {
                 error!("Failed to start worker in VM '{}': {}", vm_id, e);
@@ -484,43 +427,6 @@ impl RunnerService {
                 Err(e.into())
             }
         }
-    }
-
-    /// Invokes a generic worker with a payload.
-    pub async fn invoke_worker(
-        &self,
-        worker_id: String,
-        payload: Vec<u8>,
-    ) -> Result<Vec<u8>, RunnerError> {
-        debug!(
-            "Invoking worker '{}' with payload size {}",
-            worker_id,
-            payload.len()
-        );
-
-        let vm_id = {
-            let worker_map_guard = self.worker_map.read().await;
-            worker_map_guard
-                .get(&worker_id)
-                .cloned()
-                .ok_or_else(|| RunnerError::WorkerNotFound(worker_id.clone()))?
-        };
-
-        let mut vms_guard = self.vms.write().await; // Write lock for mutable client
-        let client = vms_guard
-            .get_mut(&vm_id)
-            .ok_or_else(|| RunnerError::VmNotAttached(vm_id.clone()))?;
-
-        client
-            .invoke_worker(worker_id.clone(), payload)
-            .await
-            .map_err(|e| {
-                error!(
-                    "Failed to invoke worker '{}' in VM '{}': {}",
-                    worker_id, vm_id, e
-                );
-                e.into()
-            })
     }
 
     /// Executes a policy worker against multiple contexts.
