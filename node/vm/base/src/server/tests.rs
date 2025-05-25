@@ -52,7 +52,12 @@ impl VmRuntime for MockVmRuntime {
         }
     }
 
-    async fn invoke_worker(&self, id: String, payload: Vec<u8>) -> Result<Vec<u8>, VmError> {
+    async fn invoke_worker(
+        &self,
+        id: String,
+        _handler_name: String,
+        payload: Vec<u8>,
+    ) -> Result<Vec<u8>, VmError> {
         self.invoke_worker_count.fetch_add(1, Ordering::SeqCst);
         let workers = self.workers.lock().unwrap();
         if !workers.contains_key(&id) {
@@ -160,6 +165,7 @@ async fn test_vm_service_grpc_stop_invoke_attestation() {
     // Test invoke_worker (happy path)
     let request = Request::new(InvokeWorkerRequest {
         id: "instance-456".to_string(),
+        handler_name: "default_handler".to_string(),
         payload: vec![10, 20],
     });
     let response = service.invoke_worker(request).await.unwrap().into_inner();
@@ -266,6 +272,7 @@ async fn test_vm_service_grpc_errors() {
     // Test invoke_worker (error path - not found)
     let request = Request::new(InvokeWorkerRequest {
         id: "invalid-id".to_string(),
+        handler_name: "default_handler".to_string(),
         payload: vec![],
     });
     let response = service.invoke_worker(request).await.unwrap().into_inner();

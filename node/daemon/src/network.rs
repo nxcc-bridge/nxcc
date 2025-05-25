@@ -163,14 +163,7 @@ impl NetworkManager {
 
         // Run swarm in a background task
         tokio::spawn(async move {
-            run_network_loop(
-                swarm,
-                secrets_rx,
-                secrets_service,
-                secrets_topic,
-                shutdown,
-            )
-            .await;
+            run_network_loop(swarm, secrets_rx, secrets_service, secrets_topic, shutdown).await;
         });
 
         Ok(())

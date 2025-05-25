@@ -131,6 +131,8 @@ message InvokeWorkerRequest {
   string id = 1;
   /// The payload/data to send to the worker instance.
   bytes payload = 2;
+  /// The name of the handler function to invoke in the worker.
+  string handler_name = 3;
 }
 
 /// Response received after invoking a worker instance.

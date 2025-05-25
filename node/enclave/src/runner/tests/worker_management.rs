@@ -11,18 +11,13 @@ async fn test_run_worker_success() {
     let manifest_obj = test_worker_manifest();
     let bundle_code = vec![1, 2, 3];
     let bundle_obj = test_worker_bundle(bundle_code.clone());
-    let launch_payload = Some(b"launch_data".to_vec());
+    // launch_payload is no longer passed directly to run_worker
     let expected_instance_id = "instance-policy-worker-1"; // Default mock ID format
 
     attach_mock_vm(&runner_service, vm_id, mock_client.clone()).await; // Clone needed if we inspect mock later
 
     let result = runner_service
-        .run_worker(
-            vm_id.to_string(),
-            manifest_obj.clone(),
-            bundle_obj.clone(),
-            launch_payload.clone(),
-        )
+        .run_worker(vm_id.to_string(), manifest_obj.clone(), bundle_obj.clone())
         .await;
 
     let instance_id = result.unwrap();
@@ -40,14 +35,13 @@ async fn test_run_worker_success() {
     assert_eq!(status, WorkerStatus::Running);
     assert_eq!(code, bundle_code);
 
-    // Verify launch payload was invoked
+    // Verify no invocations happened directly within run_worker
     let invocations = mock_client.get_invocations(expected_instance_id);
     assert_eq!(
         invocations.len(),
-        1,
-        "Expected one invocation for launch event"
+        0,
+        "Expected zero invocations directly from run_worker"
     );
-    assert_eq!(invocations[0], launch_payload.unwrap());
 
     mock_client.clear_invocations(expected_instance_id); // Clear for next tests
 }
@@ -58,15 +52,9 @@ async fn test_run_worker_vm_not_attached() {
     let vm_id = "vm-not-here";
     let manifest_obj = test_worker_manifest();
     let bundle_obj = test_worker_bundle(vec![1, 2, 3]);
-    let launch_payload = Some(b"launch_data".to_vec());
 
     let result = runner_service
-        .run_worker(
-            vm_id.to_string(),
-            manifest_obj.clone(),
-            bundle_obj.clone(),
-            launch_payload,
-        )
+        .run_worker(vm_id.to_string(), manifest_obj.clone(), bundle_obj.clone())
         .await;
 
     assert!(matches!(result, Err(RunnerError::VmNotAttached(id)) if id == vm_id));
@@ -79,57 +67,16 @@ async fn test_run_worker_start_fails_in_vm() {
     let vm_id = "vm-fail-start";
     let manifest_obj = test_worker_manifest();
     let bundle_obj = test_worker_bundle(vec![1, 2, 3]);
-    let launch_payload = Some(b"launch_data".to_vec());
     let error_msg = "VM resource limit exceeded";
 
     attach_mock_vm(&runner_service, vm_id, mock_client.clone()).await;
     mock_client.fail_next_operation(error_msg); // Configure mock to fail start_worker
 
     let result = runner_service
-        .run_worker(
-            vm_id.to_string(),
-            manifest_obj.clone(),
-            bundle_obj.clone(),
-            launch_payload,
-        )
+        .run_worker(vm_id.to_string(), manifest_obj.clone(), bundle_obj.clone())
         .await;
 
     assert!(matches!(result, Err(RunnerError::WorkerStartFailed(msg)) if msg == error_msg));
-    assert!(runner_service.worker_map.read().await.is_empty()); // Should not be added to map
-}
-
-#[tokio::test]
-async fn test_run_worker_launch_event_invocation_fails() {
-    let (_secrets, runner_service, mock_client) = setup();
-    let vm_id = "vm-launch-fail";
-    let manifest_obj = test_worker_manifest();
-    let bundle_obj = test_worker_bundle(vec![1, 2, 3]);
-    let launch_payload = Some(b"launch_data_for_fail".to_vec());
-    let expected_worker_id = "instance-policy-worker-1"; // Mock default
-    let launch_error_msg = "Launch event invocation failed in VM";
-
-    attach_mock_vm(&runner_service, vm_id, mock_client.clone()).await;
-
-    // Configure mock VM: start_worker succeeds, but subsequent invoke_worker (for launch) fails
-    mock_client.set_worker_execution_behavior(
-        expected_worker_id, // This behavior will apply to the launch invocation
-        MockExecutionBehavior::Error(launch_error_msg.to_string()),
-    );
-
-    let result = runner_service
-        .run_worker(
-            vm_id.to_string(),
-            manifest_obj.clone(),
-            bundle_obj.clone(),
-            launch_payload.clone(),
-        )
-        .await;
-
-    let result_msg = format!("{:?}", result);
-    assert!(
-        matches!(result, Err(RunnerError::WorkerStartFailed(msg)) if msg.contains(launch_error_msg)),
-        "Expected WorkerStartFailed due to launch event failure, got {result_msg}"
-    );
     assert!(runner_service.worker_map.read().await.is_empty()); // Should not be added to map
 }
 

@@ -35,7 +35,12 @@ impl VmRuntime for E2EMockVmRuntime {
         }
     }
 
-    async fn invoke_worker(&self, id: String, payload: Vec<u8>) -> Result<Vec<u8>, VmError> {
+    async fn invoke_worker(
+        &self,
+        id: String,
+        _handler_name: String,
+        payload: Vec<u8>,
+    ) -> Result<Vec<u8>, VmError> {
         if id.starts_with("instance-e2e-") {
             Ok(payload) // Echo payload
         } else {
@@ -161,7 +166,11 @@ async fn test_e2e_with_client_binding() -> Result<(), Box<dyn Error>> {
 
     // 10. Verify the first client can still call methods after reconnecting (InvokeWorker)
     let invoke_result = client1_reconnect
-        .invoke_worker(worker_id.clone(), vec![7, 8, 9])
+        .invoke_worker(
+            worker_id.clone(),
+            "default_handler".to_string(),
+            vec![7, 8, 9],
+        )
         .await;
     assert!(
         invoke_result.is_ok(),

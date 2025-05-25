@@ -45,6 +45,7 @@ pub fn web3_event_config_to_alloy_filter(config: &Web3EventConfig) -> Filter {
 pub async fn start_web3_event_listener(
     work_order_id: String,
     enclave_worker_id: String,
+    handler_name: String,
     config: Web3EventConfig,
     gateway_manager: Arc<GatewayManager>,
     mut shutdown_rx: broadcast::Receiver<()>,
@@ -105,6 +106,7 @@ pub async fn start_web3_event_listener(
                                     let event_delivery = enclave_proto::EventDelivery {
                                         worker_id: enclave_worker_id.clone(),
                                         event_payload: Some(event_payload_proto),
+                                        handler_name: handler_name.clone()
                                     };
                                     if let Err(e) = daemon_event_tx.send(event_delivery).await {
                                         error!("Failed to send Web3 event to daemon queue for work_order_id {}: {}", work_order_id, e);

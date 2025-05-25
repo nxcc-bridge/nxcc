@@ -273,13 +273,12 @@ impl Runner for EnclaveRunnerGrpcService {
             .map_err(|e| {
                 Status::invalid_argument(format!("Failed to deserialize WorkerManifest: {}", e))
             })?;
-        let launch_payload = req.launch_event_payload; // This is Option<Vec<u8>>
 
         let worker_bundle = WorkerBundle(req.worker_bundle_bytes);
 
         match self
             .runner
-            .run_worker(req.vm_id, worker_manifest, worker_bundle, launch_payload)
+            .run_worker(req.vm_id, worker_manifest, worker_bundle)
             .await
         {
             Ok(worker_id) => Ok(Response::new(RunWorkerResponse {
@@ -367,7 +366,8 @@ impl Runner for EnclaveRunnerGrpcService {
                 .event_payload
                 .ok_or_else(|| Status::invalid_argument("EventDelivery missing event_payload"))?;
             let rust_event_payload = EventPayload::from(event_payload_proto);
-            internal_events.push((worker_id, rust_event_payload));
+            let handler_name = proto_event_delivery.handler_name;
+            internal_events.push((worker_id, handler_name, rust_event_payload));
         }
 
         match self.runner.deliver_batch_events(internal_events).await {

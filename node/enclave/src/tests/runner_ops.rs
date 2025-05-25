@@ -25,7 +25,6 @@ async fn test_runner_ops_non_existent_entities() {
         vm_id: non_existent_vm_id.to_string(),
         worker_manifest_bytes: vec![],
         worker_bundle_bytes: vec![],
-        launch_event_payload: None,
     });
     assert_eq!(
         runner_grpc
@@ -34,7 +33,7 @@ async fn test_runner_ops_non_existent_entities() {
             .err()
             .unwrap()
             .code(),
-        Code::InvalidArgument
+        Code::InvalidArgument // This should be FailedPrecondition if VM not attached
     );
 
     // Test DetachVm on non-existent VM (should be OK)
@@ -88,6 +87,7 @@ async fn test_runner_ops_non_existent_entities() {
     let event_delivery = EventDelivery {
         worker_id: non_existent_worker_id.to_string(),
         event_payload: Some(dummy_event_payload),
+        handler_name: "default_handler".to_string(),
     };
     let deliver_req_bad_worker = Request::new(DeliverBatchEventsRequest {
         events: vec![event_delivery],

@@ -1,9 +1,16 @@
 export default {
   async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    const handlerName = url.pathname.startsWith("/") ? url.pathname.substring(1) : url.pathname;
+
+    if (handlerName !== "_policy") {
+      console.error(`Policy worker received unexpected handler: ${handlerName}`);
+      return new Response(`Policy worker: unexpected handler ${handlerName}`, { status: 400 });
+    }
+
     try {
-      const rawText = await request.text();
-      // console.log("Raw request body:", rawText); // Keep for debugging if needed
-      const contextsArray = JSON.parse(rawText); // This is Vec<PolicyExecutionRequest>
+      // The body is Vec<PolicyExecutionRequest> directly, not wrapped in VmEventInvocation
+      const contextsArray = await request.json(); 
       // console.log("Parsed JSON object (contextsArray):", contextsArray);
 
       // For each context in the input array, decide if it's approved.

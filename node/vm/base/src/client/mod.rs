@@ -67,6 +67,7 @@ pub trait VmClient {
     fn invoke_worker(
         &mut self,
         id: String,
+        handler_name: String,
         payload: Vec<u8>,
     ) -> impl Future<Output = Result<Vec<u8>, ClientError>> + Send;
 
@@ -220,9 +221,14 @@ impl VmClient for VmServiceClient {
     async fn invoke_worker(
         &mut self,
         id: String,
+        handler_name: String,
         payload: Vec<u8>,
     ) -> Result<Vec<u8>, ClientError> {
-        let request = InvokeWorkerRequest { id, payload };
+        let request = InvokeWorkerRequest {
+            id,
+            payload,
+            handler_name,
+        };
 
         let response = self.inner.invoke_worker(request).await?.into_inner();
 

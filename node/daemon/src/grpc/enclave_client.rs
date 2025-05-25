@@ -197,13 +197,11 @@ impl EnclaveClient {
         vm_id: String,
         worker_manifest_bytes: Vec<u8>,
         worker_bundle_bytes: Vec<u8>,
-        launch_event_payload: Option<Vec<u8>>,
     ) -> Result<String, String> {
         let req = RunWorkerRequest {
             vm_id,
             worker_manifest_bytes,
             worker_bundle_bytes,
-            launch_event_payload,
         };
         let mut client = self.runner();
         let resp = client.run_worker(req).await.map_err(|e| e.to_string())?;

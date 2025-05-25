@@ -249,7 +249,11 @@ async fn test_client_operations() -> Result<(), Box<dyn Error>> {
 
     // Invoke worker
     let result = client
-        .invoke_worker(worker_id.clone(), vec![7, 8, 9])
+        .invoke_worker(
+            worker_id.clone(),
+            "default_handler".to_string(),
+            vec![7, 8, 9],
+        )
         .await?;
     assert_eq!(result, vec![7, 8, 9]); // Mock service echoes payload
 
@@ -331,7 +335,11 @@ async fn test_client_error_handling() {
 
     // Try to invoke non-existent worker
     let result = client
-        .invoke_worker("non-existent".to_string(), vec![])
+        .invoke_worker(
+            "non-existent".to_string(),
+            "default_handler".to_string(),
+            vec![],
+        )
         .await;
     assert!(result.is_err());
     match result.err().unwrap() {
@@ -397,7 +405,11 @@ async fn test_mock_client() {
     // Invoke worker
     let payload = vec![7, 8, 9];
     let result = client
-        .invoke_worker(worker_id.clone(), payload.clone())
+        .invoke_worker(
+            worker_id.clone(),
+            "default_handler".to_string(),
+            payload.clone(),
+        )
         .await
         .unwrap();
     assert_eq!(result, payload); // Mock echoes back the payload

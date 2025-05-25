@@ -131,7 +131,7 @@ async fn test_start_invoke_stop_single_worker() -> Result<(), Box<dyn std::error
 
     let payload = b"test payload".to_vec();
     let response = vmm
-        .invoke_worker(worker_id.clone(), payload)
+        .invoke_worker(worker_id.clone(), "fetch".to_string(), payload)
         .await
         .expect("Failed to invoke worker");
     assert_eq!(
@@ -157,7 +157,11 @@ async fn test_start_invoke_stop_single_worker() -> Result<(), Box<dyn std::error
     );
 
     let invoke_stopped_result = vmm
-        .invoke_worker(worker_id.clone(), b"after stop".to_vec())
+        .invoke_worker(
+            worker_id.clone(),
+            "fetch".to_string(),
+            b"after stop".to_vec(),
+        )
         .await;
     assert!(invoke_stopped_result.is_err());
     let err = invoke_stopped_result
@@ -209,13 +213,17 @@ async fn test_multiple_workers_lifecycle() -> Result<(), Box<dyn std::error::Err
     assert!(running_workers.contains(&id2));
     assert_eq!(running_workers.len(), 2);
 
-    let resp1 = vmm.invoke_worker(id1.clone(), b"ping1".to_vec()).await?;
+    let resp1 = vmm
+        .invoke_worker(id1.clone(), "fetch".to_string(), b"ping1".to_vec())
+        .await?;
     assert_eq!(
         String::from_utf8_lossy(&resp1),
         "Response from worker1: ping1"
     );
 
-    let resp2 = vmm.invoke_worker(id2.clone(), b"ping2".to_vec()).await?;
+    let resp2 = vmm
+        .invoke_worker(id2.clone(), "fetch".to_string(), b"ping2".to_vec())
+        .await?;
     assert_eq!(
         String::from_utf8_lossy(&resp2),
         "Response from worker2: ping2"
@@ -241,7 +249,9 @@ async fn test_multiple_workers_lifecycle() -> Result<(), Box<dyn std::error::Err
     assert!(running_workers_after_stop.contains(&id2));
     assert_eq!(running_workers_after_stop.len(), 1);
 
-    let invoke_stopped_result = vmm.invoke_worker(id1.clone(), b"post-stop".to_vec()).await;
+    let invoke_stopped_result = vmm
+        .invoke_worker(id1.clone(), "fetch".to_string(), b"post-stop".to_vec())
+        .await;
     assert!(invoke_stopped_result.is_err());
     let err_str = invoke_stopped_result.unwrap_err().to_string();
     assert!(
@@ -252,7 +262,7 @@ async fn test_multiple_workers_lifecycle() -> Result<(), Box<dyn std::error::Err
     );
 
     let resp2_again = vmm
-        .invoke_worker(id2.clone(), b"ping2 again".to_vec())
+        .invoke_worker(id2.clone(), "fetch".to_string(), b"ping2 again".to_vec())
         .await?;
     assert_eq!(
         String::from_utf8_lossy(&resp2_again),
@@ -298,7 +308,9 @@ async fn test_worker_config_bindings() -> Result<(), Box<dyn std::error::Error>>
     assert_eq!(status, WorkerStatus::Running);
 
     // Instead of a simple expect, handle the error and print status/logs
-    let response_result = vmm.invoke_worker(worker_id.clone(), vec![]).await;
+    let response_result = vmm
+        .invoke_worker(worker_id.clone(), "fetch".to_string(), vec![])
+        .await;
     if let Err(e) = response_result {
         // Print more info if you like
         let worker_status = vmm.get_worker_status(worker_id.clone()).await?;
@@ -341,7 +353,9 @@ async fn test_error_handling_non_existent_worker() {
             .contains("Worker instance not found")
     );
 
-    let invoke_res = vmm.invoke_worker(non_existent_id.clone(), vec![]).await;
+    let invoke_res = vmm
+        .invoke_worker(non_existent_id.clone(), "fetch".to_string(), vec![])
+        .await;
     assert!(invoke_res.is_err());
     assert!(
         invoke_res
@@ -509,7 +523,9 @@ async fn test_multiple_secret_keys_derived_bits() -> Result<(), Box<dyn std::err
 
     // 4) Invoke the worker (no special payload needed).
     //    The worker will return a JSON array of {keyName, derivedBase64} objects.
-    let invoke_result = vmm.invoke_worker(worker_id.clone(), vec![]).await?;
+    let invoke_result = vmm
+        .invoke_worker(worker_id.clone(), "fetch".to_string(), vec![])
+        .await?;
     let response_str = String::from_utf8_lossy(&invoke_result);
     let parsed: serde_json::Value = serde_json::from_str(&response_str)?;
 

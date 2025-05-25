@@ -133,7 +133,6 @@ pub async fn run_policy_worker(
         vm_id: vm_id.to_string(),
         worker_manifest_bytes: policy_manifest_bytes,
         worker_bundle_bytes: policy_bundle_bytes,
-        launch_event_payload: None, // Add missing field
     });
 
     let run_worker_resp = runner_grpc

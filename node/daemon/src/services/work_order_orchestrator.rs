@@ -277,7 +277,6 @@ impl WorkOrderOrchestrator {
                 self.config.enclave.default_vm_id.clone(),
                 manifest_bytes,
                 bundle_bytes,
-                None, // Launch event is now sent asynchronously via DeliverBatchEvents
             )
             .await
             .map_err(|e| {
@@ -321,6 +320,7 @@ impl WorkOrderOrchestrator {
                     };
                     let event_delivery = nxcc_interface::proto::enclave::EventDelivery {
                         worker_id: enclave_worker_id.clone(),
+                        handler_name: event_config.handler.clone(),
                         event_payload: Some(launch_event_payload_proto),
                     };
                     // Send to the daemon's central event queue
@@ -354,9 +354,25 @@ impl WorkOrderOrchestrator {
 
         if should_setup_web3_listeners {
             for web3_config in web3_event_configs {
+                // Find the original event_config to get the handler name
+                let original_event_config = wo_payload
+                    .events
+                    .iter()
+                    .find(|e| {
+                        if let WorkerEventKind::Web3Event(cfg) = &e.kind {
+                            // This comparison might need to be more robust if Web3Event can have identical configs but different handlers
+                            cfg == &web3_config
+                        } else {
+                            false
+                        }
+                    })
+                    .ok_or_else(|| {
+                        AppError::Internal("Could not find original Web3Event config".to_string())
+                    })?;
+
                 info!(
                     "Work order {} requests Web3 event listener for chain {}: Address: {:?}, \
-                     Topics: {:?}",
+                     Topics: {:?}, Handler: {}",
                     wo_id_clone_for_listeners,
                     web3_config.chain,
                     web3_config
@@ -364,11 +380,13 @@ impl WorkOrderOrchestrator {
                         .iter()
                         .map(|a| format!("{a:#x}"))
                         .collect::<Vec<_>>(),
-                    web3_config.topics
+                    web3_config.topics,
+                    original_event_config.handler
                 );
 
                 let wo_id_listener = wo_id_clone_for_listeners.clone();
                 let enclave_worker_id_listener = enclave_worker_id_clone_for_listeners.clone();
+                let handler_name_listener = original_event_config.handler.clone();
                 let gateway_manager_clone = self.gateway_manager.clone();
                 let shutdown_rx_clone = self.daemon_shutdown_rx.resubscribe();
                 let daemon_event_tx_clone = self.daemon_event_tx.clone();
@@ -377,6 +395,7 @@ impl WorkOrderOrchestrator {
                     start_web3_event_listener(
                         wo_id_listener,
                         enclave_worker_id_listener,
+                        handler_name_listener,
                         web3_config,
                         gateway_manager_clone,
                         shutdown_rx_clone,

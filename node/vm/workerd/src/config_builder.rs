@@ -343,7 +343,7 @@ mod tests {
         let service::Network(Ok(network)) = internet_service.which()? else {
             panic!("internet service should be a network service");
         };
-        assert_eq!(network.get_allow()?.len(), 1);
+        assert_eq!(network.get_allow()?.len(), 2);
         assert_eq!(network.get_allow()?.get(0)?, "public");
         assert!(network.has_tls_options());
         assert!(network.get_tls_options()?.get_trust_browser_cas());

@@ -5,16 +5,18 @@ use std::{
     time::{Duration, Instant},
 };
 
-use async_trait::async_trait;
+use async_trait::async_trait; // Already present
 use http_body_util::BodyExt;
 use hyper::{Method, Request, StatusCode, body::Bytes};
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
 use hyperlocal::UnixConnector;
+use nxcc_interface::types::EventPayload; // For deserializing VmEventInvocation
 use nxcc_interface::{
     proto::vm::{TrustedConfig, UntrustedConfig, WorkerStatus},
     types::AttestationReport,
 };
 use nxcc_vm_base::server::{VmError, VmRuntime};
+use serde::Deserialize; // For VmEventInvocation
 use tempfile::TempDir;
 use tokio::{
     fs::File,
@@ -30,6 +32,15 @@ use crate::{
     config_builder::{CodeType, build_config, detect_code_type},
     errors::WorkerdVmError,
 };
+
+/// Expected structure of the payload received by `WorkerdVmm::invoke_worker`
+/// when the invocation is for an event.
+#[derive(Deserialize)]
+struct VmEventInvocationRequest<'a> {
+    handler: String,
+    #[serde(borrow)]
+    event_payload: EventPayload<'a>, // Assuming EventPayload can be deserialized with lifetime if needed, or owned
+}
 
 /// Holds information about a single worker process.
 #[derive(Debug)]
@@ -90,8 +101,9 @@ impl WorkerdVmm {
     /// Makes an HTTP invocation via a Unix-domain socket.
     async fn invoke_via_uds(
         &self,
-        instance_id: &str, // <-- New parameter
-        uds_path: &Path,
+        instance_id: &str,  // <-- New parameter
+        uds_path: &Path,    // Socket path
+        handler_path: &str, // Path component for the handler, e.g., "/myHandler"
         payload: Vec<u8>,
     ) -> Result<Vec<u8>, WorkerdVmError> {
         let client: Client<UnixConnector, http_body_util::Full<Bytes>> =
@@ -99,15 +111,19 @@ impl WorkerdVmm {
 
         let req = Request::builder()
             .method(Method::POST)
-            .uri(hyperlocal::Uri::new(uds_path, "/"))
-            .header("Content-Type", "application/octet-stream")
+            .uri(hyperlocal::Uri::new(uds_path, handler_path))
+            .header("Content-Type", "application/octet-stream") // Assuming worker expects raw bytes for event/policy payloads
             .body(http_body_util::Full::new(Bytes::from(payload)))
             .map_err(|e| WorkerdVmError::UdsCommunicationFailed {
                 path: uds_path.to_path_buf(),
                 source: Box::new(e),
             })?;
 
-        debug!("Sending invocation to UDS: {}", uds_path.display());
+        debug!(
+            "Sending invocation to UDS: {} at path {}",
+            uds_path.display(),
+            handler_path
+        );
 
         let response =
             client
@@ -204,8 +220,8 @@ impl VmRuntime for WorkerdVmm {
             &untrusted_config,
             &trusted_config,
             &uds_path,
-            "main",
-            "invoke_socket",
+            "main",          // Default service name for the socket
+            "invoke_socket", // Name of the socket binding in config
         )?;
 
         // Write the config
@@ -492,7 +508,12 @@ impl VmRuntime for WorkerdVmm {
         }
     }
 
-    async fn invoke_worker(&self, id: String, payload: Vec<u8>) -> Result<Vec<u8>, VmError> {
+    async fn invoke_worker(
+        &self,
+        id: String,
+        handler_name: String,
+        payload: Vec<u8>,
+    ) -> Result<Vec<u8>, VmError> {
         let worker_lock = {
             let workers = self.workers.lock().await;
             workers.get(&id).cloned()
@@ -512,7 +533,25 @@ impl VmRuntime for WorkerdVmm {
             worker.uds_path.clone()
         };
 
-        self.invoke_via_uds(&id, &uds_path, payload)
+        // The `payload` here is the one constructed by `RunnerService`, which is
+        // `VmEventInvocation` serialized to JSON (or whatever RunnerService chose for events),
+        // or the direct policy context payload.
+        // The `handler_name` parameter to *this* function (`WorkerdVmm::invoke_worker`)
+        // is the one extracted by `RunnerService` from `VmEventInvocation.handler` for events,
+        // or a fixed name like "_policy" for policy execution.
+
+        // The actual bytes to send to the worker's HTTP endpoint are in `payload`.
+        // The `handler_name` is used to construct the HTTP path.
+
+        let http_handler_path = if handler_name.starts_with('/') {
+            handler_name.clone()
+        } else {
+            format!("/{}", handler_name)
+        };
+
+        debug!(instance_id = ?id, %http_handler_path, "Invoking worker via UDS");
+
+        self.invoke_via_uds(&id, &uds_path, &http_handler_path, payload)
             .await
             .map_err(|e| {
                 error!(instance_id = ?id, "Invocation via UDS failed: {}", e);

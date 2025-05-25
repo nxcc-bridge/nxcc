@@ -324,6 +324,7 @@ impl VmClient for MockVmServiceClient {
     async fn invoke_worker(
         &mut self,
         id: String,
+        _handler_name: String, // Mock doesn't use handler_name for now
         payload: Vec<u8>,
     ) -> Result<Vec<u8>, ClientError> {
         self.check_failure()?;

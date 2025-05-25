@@ -4,7 +4,7 @@ mod tests;
 use std::{collections::HashMap, sync::Arc};
 
 use nxcc_interface::{
-    proto::vm::{TrustedConfig, UntrustedConfig},
+    proto::vm::{InvokeWorkerRequest as ProtoInvokeWorkerRequest, TrustedConfig, UntrustedConfig},
     types::{
         ConsumerInfo, EventPayload, PolicyExecutionReport, PolicyExecutionRequest, VmAddress,
         Web3Log, WorkerBundle, WorkerManifest,
@@ -16,8 +16,9 @@ use nxcc_vm_base::{
     client::{ClientError, VmClient as _, VmServiceClient},
     tls::MtlsCertificates,
 };
+use serde::Serialize;
 use thiserror::Error;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 use tracing::{debug, error, info, warn};
 
 use crate::secrets::Secrets;
@@ -108,12 +109,13 @@ impl VmClient {
     pub async fn invoke_worker(
         &mut self,
         worker_id: String,
+        handler_name: String, // Added handler_name
         payload: Vec<u8>,
     ) -> Result<Vec<u8>, ClientError> {
         match self {
-            VmClient::Real(client) => client.invoke_worker(worker_id, payload).await,
+            VmClient::Real(client) => client.invoke_worker(worker_id, handler_name, payload).await,
             #[cfg(test)]
-            VmClient::Mock(client) => client.invoke_worker(worker_id, payload).await,
+            VmClient::Mock(client) => client.invoke_worker(worker_id, handler_name, payload).await,
         }
     }
 }
@@ -141,13 +143,23 @@ pub struct RunnerService {
     worker_map: Arc<RwLock<HashMap<String, String>>>,
     /// Shared secrets service for storing authorizations.
     secrets: Arc<Secrets>,
-    /// Sender for the internal event queue.
-    event_tx: mpsc::Sender<(String, Vec<u8>)>, // (worker_id, serialized_event_payload)
+    /// Sender for the internal event queue: (worker_id, handler_name, serialized_vm_invocation_payload)
+    event_tx: mpsc::Sender<(String, String, Vec<u8>)>,
+}
+
+/// Structure passed as payload to VmClient::invoke_worker for event delivery.
+/// The VM (e.g., workerd VMM) will deserialize this and use the handler_name.
+#[derive(Serialize)] // Keep Serialize
+struct VmEventInvocation<'a> {
+    // Owned version
+    handler: String,
+    #[serde(borrow)]
+    event_payload: EventPayload<'a>,
 }
 
 impl RunnerService {
     pub fn new(secrets: Arc<Secrets>) -> Self {
-        let (event_tx, mut event_rx) = mpsc::channel::<(String, Vec<u8>)>(1024); // TODO: Make capacity configurable
+        let (event_tx, mut event_rx) = mpsc::channel::<(String, String, Vec<u8>)>(1024); // TODO: Make capacity configurable
 
         let vms_clone = Arc::new(RwLock::new(HashMap::<String, VmClient>::new()));
         let worker_map_clone = Arc::new(RwLock::new(HashMap::<String, String>::new()));
@@ -157,30 +169,41 @@ impl RunnerService {
 
         tokio::spawn(async move {
             info!("Enclave event processing task started.");
-            while let Some((worker_id, vm_payload)) = event_rx.recv().await {
+            while let Some((worker_id, handler_name, vm_invocation_payload_bytes)) =
+                event_rx.recv().await
+            {
                 debug!(
-                    "Processing event for worker_id: {}, payload_size: {}",
+                    "Processing event for worker_id: {}, handler: {}, payload_size: {}",
                     worker_id,
-                    vm_payload.len()
+                    handler_name,
+                    vm_invocation_payload_bytes.len()
                 );
                 let vm_id_option = worker_map_for_task.read().await.get(&worker_id).cloned();
 
                 if let Some(vm_id) = vm_id_option {
                     let mut vms_guard = vms_for_task.write().await;
                     if let Some(client) = vms_guard.get_mut(&vm_id) {
-                        match client.invoke_worker(worker_id.clone(), vm_payload).await {
+                        match client
+                            .invoke_worker(
+                                worker_id.clone(),
+                                handler_name.clone(),
+                                vm_invocation_payload_bytes,
+                            )
+                            .await
+                        {
                             Ok(response) => {
                                 debug!(
-                                    "Worker {} invocation successful, response_size: {}",
+                                    "Worker {} handler {} invocation successful, response_size: {}",
                                     worker_id,
+                                    handler_name,
                                     response.len()
                                 );
                                 // TODO: Handle worker response if necessary
                             }
                             Err(e) => {
                                 error!(
-                                    "Failed to invoke worker {} in VM {}: {}",
-                                    worker_id, vm_id, e
+                                    "Failed to invoke worker {} handler {} in VM {}: {}",
+                                    worker_id, handler_name, vm_id, e
                                 );
                             }
                         }
@@ -293,7 +316,6 @@ impl RunnerService {
         vm_id: String,
         worker_manifest: WorkerManifest,
         worker_bundle: WorkerBundle,
-        launch_event_payload: Option<Vec<u8>>,
     ) -> Result<String, RunnerError> {
         info!(
             "Requesting to run worker in VM '{}' (manifest user_data: {:?}, bundle payload size: \
@@ -456,19 +478,22 @@ impl RunnerService {
             .get_mut(&vm_id)
             .ok_or_else(|| RunnerError::VmNotAttached(vm_id.clone()))?;
 
+        const POLICY_HANDLER_NAME: &str = "_policy"; // Default handler for policy execution
         let result_payload = client
-            .invoke_worker(worker_id.clone(), payload)
+            .invoke_worker(worker_id.clone(), POLICY_HANDLER_NAME.to_string(), payload)
             .await
             .map_err(|e| {
                 error!(
-                    "Policy execution invocation failed for worker '{}' in VM '{}': {}",
-                    worker_id, vm_id, e
+                    "Policy execution (handler: {}) invocation failed for worker '{}' in VM '{}': \
+                     {}",
+                    POLICY_HANDLER_NAME, worker_id, vm_id, e
                 );
                 RunnerError::VmConnection(e) // Or map specific errors
             })?;
 
         // Deserialize the result payload from the VM
-        // TODO: we assume VM returns Vec<bool> indicating success for each context index
+        // For policy execution, the VM returns Vec<bool> indicating success for each context index.
+        // The handler_name for policy execution is fixed (e.g., "_policy").
         let results: Vec<bool> = serde_json::from_slice(result_payload.as_slice())
             .map_err(|e| RunnerError::Deserialization(e.to_string()))?;
 
@@ -524,28 +549,38 @@ impl RunnerService {
     /// Delivers a batch of asynchronous events to appropriate workers.
     pub async fn deliver_batch_events(
         &self,
-        events: Vec<(String, EventPayload)>, // (worker_id, event_payload)
+        events: Vec<(String, String, EventPayload<'static>)>, // (worker_id, handler_name, event_payload)
     ) -> Result<(), RunnerError> {
         info!("Received batch of {} events for delivery.", events.len());
-        for (worker_id, event_payload) in events {
+        for (worker_id, handler_name, event_payload) in events {
             // 1. Verification (stub)
-            debug!("Stub verification for event to worker_id: {}", worker_id);
+            debug!(
+                "Stub verification for event to worker_id: {}, handler: {}",
+                worker_id, handler_name
+            );
 
-            // 2. Serialize payload for VM
-            // Assuming worker expects JSON for now.
-            let vm_payload_bytes = serde_json::to_vec(&event_payload).map_err(|e| {
-                RunnerError::Internal(format!("Failed to serialize event payload: {}", e))
+            // 2. Serialize VmEventInvocation for VM
+            let vm_invocation = VmEventInvocation {
+                handler: handler_name.clone(), // Clone handler_name
+                event_payload,                 // Move event_payload
+            };
+            let vm_invocation_payload_bytes = serde_json::to_vec(&vm_invocation).map_err(|e| {
+                RunnerError::Internal(format!("Failed to serialize VmEventInvocation: {}", e))
             })?;
 
             // 3. Send to internal queue
             if let Err(e) = self
                 .event_tx
-                .send((worker_id.clone(), vm_payload_bytes))
+                .send((
+                    worker_id.clone(),
+                    handler_name.clone(),
+                    vm_invocation_payload_bytes,
+                ))
                 .await
             {
                 error!(
-                    "Failed to send event to internal queue for worker {}: {}",
-                    worker_id, e
+                    "Failed to send event (handler: {}) to internal queue for worker {}: {}",
+                    handler_name, worker_id, e
                 );
                 return Err(RunnerError::EventSendError(e.to_string()));
             }

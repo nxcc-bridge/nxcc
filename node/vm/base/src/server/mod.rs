@@ -61,7 +61,12 @@ pub trait VmRuntime: Send + Sync + 'static {
     async fn stop_worker(&self, id: String) -> Result<(), VmError>;
 
     /// Invokes a function or sends data to a worker instance.
-    async fn invoke_worker(&self, id: String, payload: Vec<u8>) -> Result<Vec<u8>, VmError>;
+    async fn invoke_worker(
+        &self,
+        id: String,
+        handler_name: String,
+        payload: Vec<u8>,
+    ) -> Result<Vec<u8>, VmError>;
 
     /// Retrieves an attestation report from the execution environment.
     async fn get_attestation(
@@ -173,12 +178,17 @@ impl<T: VmRuntime> Vm for VmServiceGrpc<T> {
     ) -> Result<Response<InvokeWorkerResponse>, Status> {
         let req = request.into_inner();
         debug!(
-            "gRPC InvokeWorker request for id '{}', payload size {}",
+            "gRPC InvokeWorker request for id '{}', handler '{}', payload size {}",
             req.id,
+            req.handler_name,
             req.payload.len()
         );
 
-        match self.runtime.invoke_worker(req.id, req.payload).await {
+        match self
+            .runtime
+            .invoke_worker(req.id, req.handler_name, req.payload)
+            .await
+        {
             Ok(result) => {
                 debug!("Successfully invoked worker, result size {}", result.len());
                 Ok(Response::new(InvokeWorkerResponse {

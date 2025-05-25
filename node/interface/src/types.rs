@@ -626,6 +626,8 @@ pub struct WorkOrderPayload {
 /// An event that can trigger a worker.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorkerEvent {
+    /// The name of the function in the worker to handle this event.
+    pub handler: String,
     #[serde(flatten)]
     pub kind: WorkerEventKind,
 }
@@ -792,13 +794,14 @@ impl From<interface::Web3Log> for Web3Log {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(untagged)]
-pub enum EventPayload {
+pub enum EventPayload<'a> {
     Web3Log(Web3Log),
     Launch,
-    // Future event types
+    #[serde(borrow)]
+    _Phantom(std::marker::PhantomData<&'a ()>), // Future event types
 }
 
-impl From<interface::EventPayload> for EventPayload {
+impl From<interface::EventPayload> for EventPayload<'_> {
     fn from(p_payload: interface::EventPayload) -> Self {
         match p_payload.payload {
             Some(interface::event_payload::Payload::Web3Log(log)) => {
@@ -810,7 +813,7 @@ impl From<interface::EventPayload> for EventPayload {
     }
 }
 
-impl From<EventPayload> for interface::EventPayload {
+impl From<EventPayload<'_>> for interface::EventPayload {
     fn from(payload: EventPayload) -> Self {
         match payload {
             EventPayload::Web3Log(log) => Self {
@@ -819,6 +822,7 @@ impl From<EventPayload> for interface::EventPayload {
             EventPayload::Launch => Self {
                 payload: Some(interface::event_payload::Payload::LaunchEvent(())),
             },
+            EventPayload::_Phantom(_) => panic!("Cannot convert _Phantom EventPayload"),
         }
     }
 }

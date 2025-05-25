@@ -16,7 +16,7 @@ async fn test_deliver_single_web3_event_success() {
     let manifest = test_worker_manifest();
     let bundle = test_worker_bundle(b"some code".to_vec());
     let launched_worker_id = runner_service
-        .run_worker(vm_id.to_string(), manifest, bundle, None)
+        .run_worker(vm_id.to_string(), manifest, bundle)
         .await
         .expect("Failed to run worker for event delivery test");
     assert_eq!(launched_worker_id, worker_id);
@@ -34,7 +34,13 @@ async fn test_deliver_single_web3_event_success() {
         removed: false,
     };
     let event_payload = EventPayload::Web3Log(web3_log.clone());
-    let serialized_payload = serde_json::to_vec(&web3_log).unwrap();
+
+    let handler_name = "handleWeb3Event".to_string();
+    let vm_event_invocation_payload = serde_json::to_vec(&crate::runner::VmEventInvocation {
+        handler: handler_name.clone(),
+        event_payload: event_payload.clone(),
+    })
+    .unwrap();
 
     // Configure mock VM to expect this invocation
     mock_client.set_worker_execution_behavior(
@@ -44,7 +50,11 @@ async fn test_deliver_single_web3_event_success() {
 
     // Deliver the event
     let result = runner_service
-        .deliver_batch_events(vec![(launched_worker_id.clone(), event_payload)])
+        .deliver_batch_events(vec![(
+            launched_worker_id.clone(),
+            handler_name,
+            event_payload,
+        )])
         .await;
     assert!(result.is_ok(), "deliver_batch_events failed");
 
@@ -58,8 +68,9 @@ async fn test_deliver_single_web3_event_success() {
         1,
         "Mock VM should have received one invocation"
     );
+    // The actual payload sent to the VM client's invoke_worker is VmEventInvocation serialized
     assert_eq!(
-        invocations[0], serialized_payload,
+        invocations[0], vm_event_invocation_payload,
         "Invocation payload mismatch"
     );
 }
@@ -74,7 +85,7 @@ async fn test_deliver_batch_events_multiple() {
     let manifest = test_worker_manifest();
     let bundle = test_worker_bundle(b"batch code".to_vec());
     let launched_worker_id = runner_service
-        .run_worker(vm_id.to_string(), manifest, bundle, None)
+        .run_worker(vm_id.to_string(), manifest, bundle)
         .await
         .expect("Failed to run worker for batch event test");
     assert_eq!(launched_worker_id, worker_id);
@@ -85,7 +96,12 @@ async fn test_deliver_batch_events_multiple() {
         ..Default::default()
     };
     let event_payload1 = EventPayload::Web3Log(web3_log1.clone());
-    let serialized_payload1 = serde_json::to_vec(&web3_log1).unwrap();
+    let handler_name1 = "handler1".to_string();
+    let vm_payload1 = serde_json::to_vec(&crate::runner::VmEventInvocation {
+        handler: handler_name1.clone(),
+        event_payload: event_payload1.clone(),
+    })
+    .unwrap();
 
     let web3_log2 = Web3Log {
         address: Address::repeat_byte(0x22),
@@ -93,7 +109,12 @@ async fn test_deliver_batch_events_multiple() {
         ..Default::default()
     };
     let event_payload2 = EventPayload::Web3Log(web3_log2.clone());
-    let serialized_payload2 = serde_json::to_vec(&web3_log2).unwrap();
+    let handler_name2 = "handler2".to_string();
+    let vm_payload2 = serde_json::to_vec(&crate::runner::VmEventInvocation {
+        handler: handler_name2.clone(),
+        event_payload: event_payload2.clone(),
+    })
+    .unwrap();
 
     mock_client.set_worker_execution_behavior(
         &launched_worker_id,
@@ -102,8 +123,8 @@ async fn test_deliver_batch_events_multiple() {
 
     let result = runner_service
         .deliver_batch_events(vec![
-            (launched_worker_id.clone(), event_payload1),
-            (launched_worker_id.clone(), event_payload2),
+            (launched_worker_id.clone(), handler_name1, event_payload1),
+            (launched_worker_id.clone(), handler_name2, event_payload2),
         ])
         .await;
     assert!(result.is_ok());
@@ -112,8 +133,8 @@ async fn test_deliver_batch_events_multiple() {
 
     let invocations = mock_client.get_invocations(&launched_worker_id);
     assert_eq!(invocations.len(), 2);
-    assert!(invocations.contains(&serialized_payload1));
-    assert!(invocations.contains(&serialized_payload2));
+    assert!(invocations.contains(&vm_payload1));
+    assert!(invocations.contains(&vm_payload2));
 }
 
 #[tokio::test]
@@ -127,11 +148,16 @@ async fn test_deliver_event_to_non_existent_worker() {
         ..Default::default()
     };
     let event_payload = EventPayload::Web3Log(web3_log);
+    let handler_name = "someHandler".to_string();
 
     // deliver_batch_events itself should succeed as it just sends to a channel.
     // The internal event loop will log an error.
     let result = runner_service
-        .deliver_batch_events(vec![(non_existent_worker_id.to_string(), event_payload)])
+        .deliver_batch_events(vec![(
+            non_existent_worker_id.to_string(),
+            handler_name,
+            event_payload,
+        )])
         .await;
     assert!(result.is_ok());
 
@@ -158,24 +184,31 @@ async fn test_deliver_launch_event_success() {
     let manifest = test_worker_manifest();
     let bundle = test_worker_bundle(b"launch code".to_vec());
     let launched_worker_id = runner_service
-        .run_worker(vm_id.to_string(), manifest, bundle, None) // No synchronous launch payload
+        .run_worker(vm_id.to_string(), manifest, bundle)
         .await
         .expect("Failed to run worker for launch event test");
     assert_eq!(launched_worker_id, worker_id);
 
     // Prepare a Launch event
     let event_payload = EventPayload::Launch;
-    // Expected payload for a parameterless Launch event, as serialized by RunnerService
-    let serialized_payload = b"{}".to_vec();
+    let handler_name = "handleLaunch".to_string();
+    let vm_event_invocation_payload = serde_json::to_vec(&crate::runner::VmEventInvocation {
+        handler: handler_name.clone(),
+        event_payload: event_payload.clone(),
+    })
+    .unwrap();
 
     mock_client.set_worker_execution_behavior(
         &launched_worker_id,
         MockExecutionBehavior::Fixed(b"launch_ack".to_vec()),
     );
-
     // Deliver the event
     let result = runner_service
-        .deliver_batch_events(vec![(launched_worker_id.clone(), event_payload)])
+        .deliver_batch_events(vec![(
+            launched_worker_id.clone(),
+            handler_name,
+            event_payload,
+        )])
         .await;
     assert!(result.is_ok(), "deliver_batch_events for Launch failed");
 
@@ -187,8 +220,9 @@ async fn test_deliver_launch_event_success() {
         1,
         "Mock VM should have received one invocation for Launch"
     );
+    // The actual payload sent to the VM client's invoke_worker is VmEventInvocation serialized
     assert_eq!(
-        invocations[0], serialized_payload,
+        invocations[0], vm_event_invocation_payload,
         "Launch event invocation payload mismatch"
     );
 }

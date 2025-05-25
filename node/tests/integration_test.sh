@@ -172,7 +172,7 @@ WORK_ORDER_PAYLOAD_FILE="$TEST_DIR/work_order_payload.json"
 jq -n \
 	--arg id "test-work-order-$(date +%s%N)" \
 	--slurpfile worker_manifest "$WORKER_MANIFEST_FILE" \
-	'{id: $id, worker: $worker_manifest[0], events: [{"kind": "launch"}]}' > "$WORK_ORDER_PAYLOAD_FILE"
+	'{id: $id, worker: $worker_manifest[0], events: [{"handler": "launch", "kind": "launch"}]}' > "$WORK_ORDER_PAYLOAD_FILE"
 
 # 6. DSSE Envelope for the WorkOrder (using files to avoid argument list too long)
 WORK_ORDER_PAYLOAD_B64_FILE="$TEST_DIR/work_order_payload_b64.txt"
@@ -377,11 +377,12 @@ jq -n \
     --arg contract_address "$CONTRACT_ADDRESS" \
     --arg event_sig "$EVENT_VALUE_CHANGED_SIGNATURE" \
     '{
-        id: $id,
-        worker: $worker_manifest[0],
-        events: [
-            {"kind": "launch"},
+ id: $id,
+ worker: $worker_manifest[0],
+ events: [
+            {"handler": "launch", "kind": "launch"},
             {
+                "handler": "valueChanged",
                 "kind": "web3_event",
                 "chain": $chain_id,
                 "address": [$contract_address],
