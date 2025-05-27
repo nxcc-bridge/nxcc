@@ -23,32 +23,13 @@ async fn universal_http_handler(
     mut request: Request<axum::body::Body>,
 ) -> impl IntoResponse {
     let path = request.uri().path().to_string();
-
-    // Ensure base_mount_path ends with a slash for correct prefix checking, unless it's just "/"
-    let base_mount_path_prefix = if state.base_mount_path == "/" {
-        "/".to_string()
-    } else {
-        format!("{}/", state.base_mount_path.trim_end_matches('/'))
-    };
-
-    if !path.starts_with(&base_mount_path_prefix) {
-        debug!(
-            "Path {} does not match base {}",
-            path, base_mount_path_prefix
-        );
-        return (StatusCode::NOT_FOUND, "Base path mismatch").into_response();
-    }
-
-    let path_after_base = path[base_mount_path_prefix.len()..].trim_start_matches('/');
-    let mut segments = path_after_base.splitn(2, '/');
+    let path = path.trim_start_matches('/');
+    let mut segments = path.splitn(2, '/');
     let mount_segment = segments.next().unwrap_or("").to_string();
     let worker_path_segment = segments.next().unwrap_or("");
 
     if mount_segment.is_empty() {
-        debug!(
-            "Missing mount segment in path_after_base: {}",
-            path_after_base
-        );
+        debug!("Missing mount segment in path_after_base: {}", path);
         return (StatusCode::NOT_FOUND, "Missing mount segment").into_response();
     }
 

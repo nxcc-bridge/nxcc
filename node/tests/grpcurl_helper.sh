@@ -40,7 +40,7 @@ grpcurl_attach_vm() {
 		echo "ERROR: grpcurl AttachVm failed with exit code $_grp_exit_code for $_daemon_sock"
 		return 1
 	fi
-	echo "AttachVm call completed for $_daemon_sock."
+	echo "AttachVm call completed for $_daemon_sock." >&2
 
 	return 0
 }
@@ -51,7 +51,7 @@ grpcurl_submit_work_order() {
 	_daemon_sock="$1"
 	_payload_file="$2"
 
-	echo "Calling SubmitWorkOrder on $_daemon_sock with payload from $_payload_file..."
+	echo "Calling SubmitWorkOrder on $_daemon_sock with payload from $_payload_file..." >&2
 
 	cat $_payload_file | grpcurl \
 		-proto "$DAEMON_PROTO" \
@@ -62,12 +62,11 @@ grpcurl_submit_work_order() {
 		daemon.WorkOrder/SubmitWorkOrder
 	_grp_exit_code=$?
 	if [ $_grp_exit_code -ne 0 ]; then
-		echo "ERROR: grpcurl SubmitWorkOrder failed with exit code $_grp_exit_code for $_daemon_sock"
+		echo "ERROR: grpcurl SubmitWorkOrder failed with exit code $_grp_exit_code for $_daemon_sock" >&2
 		return 1
 	fi
-	echo "SubmitWorkOrder call completed for $_daemon_sock."
+	echo "SubmitWorkOrder call completed for $_daemon_sock." >&2
 	return 0
-	set +x
 }
 
 # Function to call Daemon's GetSecrets
@@ -79,7 +78,7 @@ grpcurl_get_secrets() {
 	_identity_id_num="$4"
 	_node_id="$5" # Node ID of the *requester* (e.g., Alice's daemon asking for itself)
 
-	echo "Calling GetSecrets on $_daemon_sock for $_identity_addr/$_identity_id_num (Node: $_node_id)..."
+	echo "Calling GetSecrets on $_daemon_sock for $_identity_addr/$_identity_id_num (Node: $_node_id)..." >&2
 	grpcurl \
 		-proto "$DAEMON_PROTO" \
 		-import-path "$PROTO_DIR" \
@@ -102,11 +101,11 @@ grpcurl_get_secrets() {
 		"unix://$_daemon_sock" \
 		daemon.Secrets/GetSecrets
 	_grp_exit_code=$?
-	if [ $_grp_exit_code -ne 0 ]; then
+	if [ $_grp_exit_code -ne 0 ]; then # TODO: this is not the daemon secrets service, it's the enclave one.
 		echo "ERROR: grpcurl GetSecrets failed with exit code $_grp_exit_code for $_daemon_sock"
 		return 1
 	fi
-	echo "GetSecrets call completed for $_daemon_sock."
+	echo "GetSecrets call completed for $_daemon_sock." >&2
 
 	return 0
 }
@@ -121,9 +120,9 @@ grpcurl_check_secrets_enclave() {
 	_identity_id_num="$4"
 
 	# Sleep before making the gRPC call
-	sleep 1
+	sleep 1 >&2
 
-	echo "Calling CheckSecrets on Enclave ($_enclave_sock) for $_identity_addr/$_identity_id_num..."
+	echo "Calling CheckSecrets on Enclave ($_enclave_sock) for $_identity_addr/$_identity_id_num..." >&2
 	grpcurl \
 		-proto "$ENCLAVE_PROTO" \
 		-import-path "$PROTO_DIR" \
@@ -141,13 +140,13 @@ grpcurl_check_secrets_enclave() {
 		enclave.Secrets/CheckSecrets
 	_grp_exit_code=$?
 	if [ $_grp_exit_code -ne 0 ]; then
-		echo "ERROR: grpcurl CheckSecrets failed with exit code $_grp_exit_code for $_enclave_sock"
+		echo "ERROR: grpcurl CheckSecrets failed with exit code $_grp_exit_code for $_enclave_sock" >&2
 		return 1
 	fi
-	echo "CheckSecrets call completed for $_enclave_sock."
+	echo "CheckSecrets call completed for $_enclave_sock." >&2
 
 	# Sleep after the call
-	sleep 1
+	sleep 1 >&2
 
 	return 0
 }
@@ -164,10 +163,10 @@ poll_until_secret_found() {
 	_start_time=$(date +%s)
 	_end_time=$((_start_time + _timeout_secs))
 
-	echo "Polling CheckSecrets on $_enclave_sock for $_identity_addr/$_identity_id_num (Timeout: ${_timeout_secs}s)..."
+	echo "Polling CheckSecrets on $_enclave_sock for $_identity_addr/$_identity_id_num (Timeout: ${_timeout_secs}s)..." >&2
 
 	# Initial sleep before starting to poll
-	sleep 3
+	sleep 3 >&2
 
 	while [ "$(date +%s)" -lt $_end_time ]; do
 		_output=$(grpcurl_check_secrets_enclave "$_enclave_sock" "$_chain_id" "$_identity_addr" "$_identity_id_num" 2>&1)
@@ -176,23 +175,23 @@ poll_until_secret_found() {
 		if [ $_grpcurl_exit -eq 0 ]; then
 			# Check if "found": true is in the output
 			if echo "$_output" | grep '"found": *true' >/dev/null; then
-				echo "Secret $_identity_addr/$_identity_id_num found on $_enclave_sock."
+				echo "Secret $_identity_addr/$_identity_id_num found on $_enclave_sock." >&2
 				# Sleep a bit after finding the secret to ensure stability
-				sleep 1
+				sleep 1 >&2
 				return 0 # Success
 			else
-				printf "." # Progress indicator
+				printf "." >&2 # Progress indicator
 			fi
 		else
-			echo "Warning: CheckSecrets call failed during polling (Exit: $_grpcurl_exit): $_output"
+			echo "Warning: CheckSecrets call failed during polling (Exit: $_grpcurl_exit): $_output" >&2
 			# Continue polling, maybe the service wasn't ready yet
 		fi
 
 		# Use the provided interval for polling
-		sleep "$_interval_secs"
+		sleep "$_interval_secs" >&2
 	done
 
-	echo "ERROR: Timeout waiting for secret $_identity_addr/$_identity_id_num on $_enclave_sock."
+	echo "ERROR: Timeout waiting for secret $_identity_addr/$_identity_id_num on $_enclave_sock." >&2
 	return 1 # Failure (timeout)
 }
 

@@ -179,12 +179,12 @@ fn default_default_vm_uds_path() -> String {
 #[derive(Debug, Clone, Serialize, Deserialize, clap::Args)]
 pub struct HttpConfig {
     /// The base path under which workers will be mounted.
-    #[clap(long, default_value = "/nxcc_workers")]
+    #[clap(long, default_value = "/w")]
     #[serde(default = "default_http_base_mount_path")]
     pub base_mount_path: String,
 
-    /// The listen address for the HTTP server (e.g., "0.0.0.0:8080").
-    #[clap(long, default_value = "0.0.0.0:3000")] // Changed default port from 8080 to 3000 to avoid common conflicts
+    /// The listen address for the HTTP server
+    #[clap(long, default_value = "0.0.0.0:6922")]
     #[serde(default = "default_http_listen_addr")]
     pub listen_addr: String,
 }
@@ -199,10 +199,10 @@ impl Default for HttpConfig {
 }
 
 fn default_http_base_mount_path() -> String {
-    "/nxcc_workers".to_string()
+    "/w".to_string()
 }
 fn default_http_listen_addr() -> String {
-    "0.0.0.0:3000".to_string()
+    "0.0.0.0:6922".to_string()
 }
 
 impl Config {

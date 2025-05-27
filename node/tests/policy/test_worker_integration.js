@@ -5,7 +5,9 @@ export default {
     console.log("Policy/Secret test worker: handleLaunch called.");
 
     if (!env.THE_SECRET) {
-      console.error("env.THE_SECRET not found in worker environment for handleLaunch");
+      console.error(
+        "env.THE_SECRET not found in worker environment for handleLaunch",
+      );
       return new Response("env.THE_SECRET not found (launch)", { status: 500 });
     }
 
@@ -37,13 +39,17 @@ export default {
       });
     } catch (e) {
       console.error("Error deriving bits:", e);
-      return new Response(`Worker error (launch): ${e.message}`, { status: 500 });
+      return new Response(`Worker error (launch): ${e.message}`, {
+        status: 500,
+      });
     }
   },
 
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    const handlerName = url.pathname.startsWith("/") ? url.pathname.substring(1) : url.pathname;
+    const handlerName = url.pathname.startsWith("/")
+      ? url.pathname.substring(1)
+      : url.pathname;
     const vmInvocationPayload = await request.json();
 
     if (handlerName === "launch" && this.handleLaunch) {
@@ -54,5 +60,5 @@ export default {
       console.error(`Unknown handler or path: ${handlerName}`);
       return new Response(`Unknown handler: ${handlerName}`, { status: 404 });
     }
-  }
+  },
 };

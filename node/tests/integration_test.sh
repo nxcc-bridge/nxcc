@@ -48,8 +48,8 @@ SECRET_NAME_IN_WORKER="THE_SECRET" # How the secret is named in the worker's env
 
 # Anvil configuration
 ANVIL_RPC_URL="http://127.0.0.1:8545"
-ANVIL_CHAIN_ID=31337 # Default Anvil chain ID
-DEPLOYER_PK="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" # Anvil default[0]
+ANVIL_CHAIN_ID=31337                                                                  # Default Anvil chain ID
+DEPLOYER_PK="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"      # Anvil default[0]
 WORKER_SENDER_PK="0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d" # Anvil default[1]
 
 # Path to the JS worker script for the test
@@ -121,14 +121,15 @@ trap cleanup EXIT INT TERM
 # --- Build JS Workers ---
 echo "--- Building JS Workers ---"
 if [ ! -d "$JS_WORKER_DIR/node_modules" ]; then
-    echo "Installing JS dependencies..."
-    (cd "$JS_WORKER_DIR" && npm install)
+	echo "Installing JS dependencies..."
+	(cd "$JS_WORKER_DIR" && npm install)
 fi
 echo "Building JS bundles..."
 (cd "$JS_WORKER_DIR" && npm run build)
 
 POLICY_WORKER_JS_BUNDLE_PATH="$JS_WORKER_DIR/dist/test_worker_integration.js"
 EVENT_HANDLER_WORKER_JS_BUNDLE_PATH="$JS_WORKER_DIR/dist/event_handler_worker.js"
+HTTP_ECHO_WORKER_JS_BUNDLE_PATH="$JS_WORKER_DIR/dist/http_echo_worker.js"
 
 # --- Prepare Test Worker and Work Order ---
 echo "--- Preparing Work Order for Original Secret Sharing Test ---"
@@ -142,20 +143,20 @@ WORKER_BUNDLE_PAYLOAD_FILE="$TEST_DIR/worker_bundle_payload.json"
 jq -n \
 	--arg vm "nxcc/workerd" \
 	--arg executable_b64 "$TEST_WORKER_JS_B64" \
-	'{vm: $vm, executable: $executable_b64, metadata: {}}' > "$WORKER_BUNDLE_PAYLOAD_FILE"
+	'{vm: $vm, executable: $executable_b64, metadata: {}}' >"$WORKER_BUNDLE_PAYLOAD_FILE"
 
 # 3. DSSE Envelope for the WorkerBundle (using files to avoid argument list too long)
 WORKER_BUNDLE_PAYLOAD_B64_FILE="$TEST_DIR/worker_bundle_payload_b64.txt"
-base64 < "$WORKER_BUNDLE_PAYLOAD_FILE" | tr -d '\n' > "$WORKER_BUNDLE_PAYLOAD_B64_FILE"
+base64 <"$WORKER_BUNDLE_PAYLOAD_FILE" | tr -d '\n' >"$WORKER_BUNDLE_PAYLOAD_B64_FILE"
 
 WORKER_BUNDLE_DSSE_FILE="$TEST_DIR/worker_bundle_dsse.json"
 jq -n \
 	--rawfile payload_b64 "$WORKER_BUNDLE_PAYLOAD_B64_FILE" \
 	--arg payload_type "application/vnd.nxcc.workerbundlepayload.v1+json" \
-	'{payload: $payload_b64, payloadType: $payload_type, signatures: [{keyid: "mock", sig: "'"$(printf "%s" "mocksig" | base64 | tr -d '\n')"'"}]}' > "$WORKER_BUNDLE_DSSE_FILE"
+	'{payload: $payload_b64, payloadType: $payload_type, signatures: [{keyid: "mock", sig: "'"$(printf "%s" "mocksig" | base64 | tr -d '\n')"'"}]}' >"$WORKER_BUNDLE_DSSE_FILE"
 
 WORKER_BUNDLE_DSSE_B64_FILE="$TEST_DIR/worker_bundle_dsse_b64.txt"
-base64 < "$WORKER_BUNDLE_DSSE_FILE" | tr -d '\n' > "$WORKER_BUNDLE_DSSE_B64_FILE"
+base64 <"$WORKER_BUNDLE_DSSE_FILE" | tr -d '\n' >"$WORKER_BUNDLE_DSSE_B64_FILE"
 
 # 4. WorkerManifest for the WorkOrder (using files to avoid argument list too long)
 WORKER_MANIFEST_FILE="$TEST_DIR/worker_manifest.json"
@@ -165,34 +166,33 @@ jq -n \
 	--arg identity_address "$SECRET_IDENTITY_ADDR" \
 	--arg identity_id_str "$SECRET_IDENTITY_ID_NUM" \
 	--arg secret_name "$SECRET_NAME_IN_WORKER" \
-	'{bundle: {source: ("data:application/json;base64," + $bundle_source_b64), hash: null}, identities: [[{chain_id: $chain_id, identity_address: $identity_address, identity_id: $identity_id_str}, $secret_name]], userdata: {}}' > "$WORKER_MANIFEST_FILE"
+	'{bundle: {source: ("data:application/json;base64," + $bundle_source_b64), hash: null}, identities: [[{chain_id: $chain_id, identity_address: $identity_address, identity_id: $identity_id_str}, $secret_name]], userdata: {}}' >"$WORKER_MANIFEST_FILE"
 
 # 5. WorkOrderPayload (using files to avoid argument list too long)
 WORK_ORDER_PAYLOAD_FILE="$TEST_DIR/work_order_payload.json"
 jq -n \
 	--arg id "test-work-order-$(date +%s%N)" \
 	--slurpfile worker_manifest "$WORKER_MANIFEST_FILE" \
-	'{id: $id, worker: $worker_manifest[0], events: [{"handler": "launch", "kind": "launch"}]}' > "$WORK_ORDER_PAYLOAD_FILE"
+	'{id: $id, worker: $worker_manifest[0], events: [{"handler": "launch", "kind": "launch"}]}' >"$WORK_ORDER_PAYLOAD_FILE"
 
 # 6. DSSE Envelope for the WorkOrder (using files to avoid argument list too long)
 WORK_ORDER_PAYLOAD_B64_FILE="$TEST_DIR/work_order_payload_b64.txt"
-base64 < "$WORK_ORDER_PAYLOAD_FILE" | tr -d '\n' > "$WORK_ORDER_PAYLOAD_B64_FILE"
+base64 <"$WORK_ORDER_PAYLOAD_FILE" | tr -d '\n' >"$WORK_ORDER_PAYLOAD_B64_FILE"
 
 ORIG_WORK_ORDER_DSSE_FILE="$TEST_DIR/orig_work_order_dsse.json"
 jq -n \
 	--rawfile payload_b64 "$WORK_ORDER_PAYLOAD_B64_FILE" \
 	--arg payload_type "$DSSE_WORK_ORDER_PAYLOAD_TYPE" \
-	'{payload: $payload_b64, payloadType: $payload_type, signatures: [{keyid: "mock", sig: "'"$(printf "%s" "mocksig" | base64 | tr -d '\n')"'"}]}' > "$ORIG_WORK_ORDER_DSSE_FILE"
+	'{payload: $payload_b64, payloadType: $payload_type, signatures: [{keyid: "mock", sig: "'"$(printf "%s" "mocksig" | base64 | tr -d '\n')"'"}]}' >"$ORIG_WORK_ORDER_DSSE_FILE"
 
 # Prepare the payload file for grpcurl
 ORIG_WORK_ORDER_DSSE_B64_FILE="$TEST_DIR/orig_work_order_dsse_b64.txt"
-base64 < "$ORIG_WORK_ORDER_DSSE_FILE" | tr -d '\n' > "$ORIG_WORK_ORDER_DSSE_B64_FILE"
+base64 <"$ORIG_WORK_ORDER_DSSE_FILE" | tr -d '\n' >"$ORIG_WORK_ORDER_DSSE_B64_FILE"
 
 GRPCURL_SUBMIT_ORIG_WO_PAYLOAD_FILE="$TEST_DIR/submit_orig_wo_payload.json"
 jq -n \
 	--rawfile work_order_dsse_bytes "$ORIG_WORK_ORDER_DSSE_B64_FILE" \
-	'{work_order_dsse_bytes: $work_order_dsse_bytes}' > "$GRPCURL_SUBMIT_ORIG_WO_PAYLOAD_FILE"
-
+	'{work_order_dsse_bytes: $work_order_dsse_bytes}' >"$GRPCURL_SUBMIT_ORIG_WO_PAYLOAD_FILE"
 
 # ==============================================================================
 # Original Test Workflow (Steps 1-3: Secret Sharing)
@@ -309,21 +309,21 @@ start_anvil
 # 4b. Deploy TestEvents.sol contract
 echo "Compiling and deploying TestEvents contract..."
 if ! command -v forge >/dev/null 2>&1; then
-    echo "ERROR: forge (foundry) command not found. Please install foundry."
-    exit 1
+	echo "ERROR: forge (foundry) command not found. Please install foundry."
+	exit 1
 fi
 (cd "$CONTRACTS_DIR" && forge build --force --via-ir) # Use via-ir for potentially smaller bytecode
-TEST_EVENTS_BYTECODE=$(jq -r .bytecode.object < "$SCRIPT_DIR/out/TestEvents.sol/TestEvents.json")
-TEST_EVENTS_ABI=$(jq .abi < "$SCRIPT_DIR/out/TestEvents.sol/TestEvents.json")
+TEST_EVENTS_BYTECODE=$(jq -r .bytecode.object <"$SCRIPT_DIR/out/TestEvents.sol/TestEvents.json")
+TEST_EVENTS_ABI=$(jq .abi <"$SCRIPT_DIR/out/TestEvents.sol/TestEvents.json")
 TEST_EVENTS_ABI_ESCAPED=$(echo "$TEST_EVENTS_ABI" | jq -c . | sed 's/"/\\"/g') # For embedding in JSON string
 
 DEPLOY_OUTPUT=$(cast send --json --rpc-url "$ANVIL_RPC_URL" --private-key "$DEPLOYER_PK" \
-    --create "$TEST_EVENTS_BYTECODE")
+	--create "$TEST_EVENTS_BYTECODE")
 CONTRACT_ADDRESS=$(echo "$DEPLOY_OUTPUT" | jq -r .contractAddress)
 if [ -z "$CONTRACT_ADDRESS" ] || [ "$CONTRACT_ADDRESS" = "null" ]; then
-    echo "ERROR: Failed to deploy TestEvents contract."
-    echo "$DEPLOY_OUTPUT"
-    exit 1
+	echo "ERROR: Failed to deploy TestEvents contract."
+	echo "$DEPLOY_OUTPUT"
+	exit 1
 fi
 echo "TestEvents contract deployed at: $CONTRACT_ADDRESS"
 
@@ -335,19 +335,19 @@ EVENT_WORKER_BUNDLE_PAYLOAD_FILE="$TEST_DIR/event_worker_bundle_payload.json"
 jq -n \
 	--arg vm "nxcc/workerd" \
 	--arg executable_b64 "$EVENT_HANDLER_WORKER_JS_B64" \
-	'{vm: $vm, executable: $executable_b64, metadata: {}}' > "$EVENT_WORKER_BUNDLE_PAYLOAD_FILE"
+	'{vm: $vm, executable: $executable_b64, metadata: {}}' >"$EVENT_WORKER_BUNDLE_PAYLOAD_FILE"
 
 EVENT_WORKER_BUNDLE_PAYLOAD_B64_FILE="$TEST_DIR/event_worker_bundle_payload_b64.txt"
-base64 < "$EVENT_WORKER_BUNDLE_PAYLOAD_FILE" | tr -d '\n' > "$EVENT_WORKER_BUNDLE_PAYLOAD_B64_FILE"
+base64 <"$EVENT_WORKER_BUNDLE_PAYLOAD_FILE" | tr -d '\n' >"$EVENT_WORKER_BUNDLE_PAYLOAD_B64_FILE"
 
 EVENT_WORKER_BUNDLE_DSSE_FILE="$TEST_DIR/event_worker_bundle_dsse.json"
 jq -n \
 	--rawfile payload_b64 "$EVENT_WORKER_BUNDLE_PAYLOAD_B64_FILE" \
 	--arg payload_type "application/vnd.nxcc.workerbundlepayload.v1+json" \
-	'{payload: $payload_b64, payloadType: $payload_type, signatures: [{keyid: "mock", sig: "'"$(printf "%s" "mocksig" | base64 | tr -d '\n')"'"}]}' > "$EVENT_WORKER_BUNDLE_DSSE_FILE"
+	'{payload: $payload_b64, payloadType: $payload_type, signatures: [{keyid: "mock", sig: "'"$(printf "%s" "mocksig" | base64 | tr -d '\n')"'"}]}' >"$EVENT_WORKER_BUNDLE_DSSE_FILE"
 
 EVENT_WORKER_BUNDLE_DSSE_B64_FILE="$TEST_DIR/event_worker_bundle_dsse_b64.txt"
-base64 < "$EVENT_WORKER_BUNDLE_DSSE_FILE" | tr -d '\n' > "$EVENT_WORKER_BUNDLE_DSSE_B64_FILE"
+base64 <"$EVENT_WORKER_BUNDLE_DSSE_FILE" | tr -d '\n' >"$EVENT_WORKER_BUNDLE_DSSE_B64_FILE"
 
 EVENT_WORKER_MANIFEST_FILE="$TEST_DIR/event_worker_manifest.json"
 jq -n \
@@ -364,19 +364,19 @@ jq -n \
             contractAbi: \"$TEST_EVENTS_ABI_ESCAPED\",
             ethereumPrivateKey: \$pk
         }
-    }" > "$EVENT_WORKER_MANIFEST_FILE"
+    }" >"$EVENT_WORKER_MANIFEST_FILE"
 
 EVENT_VALUE_CHANGED_SIGNATURE=$(cast sig-event "ValueChanged(uint256,uint256,bytes)")
 OTHER_EVENT_SIGNATURE=$(cast sig-event "OtherEvent(uint256)")
 
 EVENT_WORK_ORDER_PAYLOAD_FILE="$TEST_DIR/event_work_order_payload.json"
 jq -n \
-    --arg id "event-work-order-$(date +%s%N)" \
-    --slurpfile worker_manifest "$EVENT_WORKER_MANIFEST_FILE" \
-    --argjson chain_id "$ANVIL_CHAIN_ID" \
-    --arg contract_address "$CONTRACT_ADDRESS" \
-    --arg event_sig "$EVENT_VALUE_CHANGED_SIGNATURE" \
-    '{
+	--arg id "event-work-order-$(date +%s%N)" \
+	--slurpfile worker_manifest "$EVENT_WORKER_MANIFEST_FILE" \
+	--argjson chain_id "$ANVIL_CHAIN_ID" \
+	--arg contract_address "$CONTRACT_ADDRESS" \
+	--arg event_sig "$EVENT_VALUE_CHANGED_SIGNATURE" \
+	'{
  id: $id,
  worker: $worker_manifest[0],
  events: [
@@ -389,24 +389,24 @@ jq -n \
                 "topics": [[$event_sig]]
             }
         ]
-    }' > "$EVENT_WORK_ORDER_PAYLOAD_FILE"
+    }' >"$EVENT_WORK_ORDER_PAYLOAD_FILE"
 
 EVENT_WORK_ORDER_PAYLOAD_B64_FILE="$TEST_DIR/event_work_order_payload_b64.txt"
-base64 < "$EVENT_WORK_ORDER_PAYLOAD_FILE" | tr -d '\n' > "$EVENT_WORK_ORDER_PAYLOAD_B64_FILE"
+base64 <"$EVENT_WORK_ORDER_PAYLOAD_FILE" | tr -d '\n' >"$EVENT_WORK_ORDER_PAYLOAD_B64_FILE"
 
 EVENT_WORK_ORDER_DSSE_FILE="$TEST_DIR/event_work_order_dsse.json"
 jq -n \
 	--rawfile payload_b64 "$EVENT_WORK_ORDER_PAYLOAD_B64_FILE" \
 	--arg payload_type "$DSSE_WORK_ORDER_PAYLOAD_TYPE" \
-	'{payload: $payload_b64, payloadType: $payload_type, signatures: [{keyid: "mock", sig: "'"$(printf "%s" "mocksig" | base64 | tr -d '\n')"'"}]}' > "$EVENT_WORK_ORDER_DSSE_FILE"
+	'{payload: $payload_b64, payloadType: $payload_type, signatures: [{keyid: "mock", sig: "'"$(printf "%s" "mocksig" | base64 | tr -d '\n')"'"}]}' >"$EVENT_WORK_ORDER_DSSE_FILE"
 
 EVENT_WORK_ORDER_DSSE_B64_FILE="$TEST_DIR/event_work_order_dsse_b64.txt"
-base64 < "$EVENT_WORK_ORDER_DSSE_FILE" | tr -d '\n' > "$EVENT_WORK_ORDER_DSSE_B64_FILE"
+base64 <"$EVENT_WORK_ORDER_DSSE_FILE" | tr -d '\n' >"$EVENT_WORK_ORDER_DSSE_B64_FILE"
 
 GRPCURL_SUBMIT_EVENT_WO_PAYLOAD_FILE="$TEST_DIR/submit_event_wo_payload.json"
 jq -n \
 	--rawfile work_order_dsse_bytes "$EVENT_WORK_ORDER_DSSE_B64_FILE" \
-	'{work_order_dsse_bytes: $work_order_dsse_bytes}' > "$GRPCURL_SUBMIT_EVENT_WO_PAYLOAD_FILE"
+	'{work_order_dsse_bytes: $work_order_dsse_bytes}' >"$GRPCURL_SUBMIT_EVENT_WO_PAYLOAD_FILE"
 
 echo "Submitting event-listening work order to Alice and Bob..."
 grpcurl_submit_work_order "$alice_DAEMON_SOCK" "$GRPCURL_SUBMIT_EVENT_WO_PAYLOAD_FILE"
@@ -415,13 +415,13 @@ grpcurl_submit_work_order "$bob_DAEMON_SOCK" "$GRPCURL_SUBMIT_EVENT_WO_PAYLOAD_F
 # 4c. Trigger events
 echo "Triggering OtherEvent (should be ignored by workers)..."
 cast send --rpc-url "$ANVIL_RPC_URL" --private-key "$DEPLOYER_PK" "$CONTRACT_ADDRESS" \
-    "triggerOtherEvent(uint256)" 789 > /dev/null
+	"triggerOtherEvent(uint256)" 789 >/dev/null
 sleep 2 # Give time for potential (unwanted) processing
 
 INITIAL_VALUE_ON_CHAIN=$(cast call --rpc-url "$ANVIL_RPC_URL" "$CONTRACT_ADDRESS" "value()(uint256)")
 if [ "$INITIAL_VALUE_ON_CHAIN" -ne 0 ]; then # Assuming initial value is 0
-    echo "ERROR: Contract value changed after OtherEvent, expected no change. Value: $INITIAL_VALUE_ON_CHAIN"
-    exit 1
+	echo "ERROR: Contract value changed after OtherEvent, expected no change. Value: $INITIAL_VALUE_ON_CHAIN"
+	exit 1
 fi
 echo "Contract state unchanged after OtherEvent, as expected."
 
@@ -429,35 +429,183 @@ echo "Triggering ValueChanged event..."
 NEW_VALUE_FOR_EVENT=42
 EVENT_PAYLOAD_DATA_HEX="0xdeadbeefcafe"
 cast send --rpc-url "$ANVIL_RPC_URL" --private-key "$DEPLOYER_PK" "$CONTRACT_ADDRESS" \
-    "triggerEvent(uint256,bytes)" "$NEW_VALUE_FOR_EVENT" "$EVENT_PAYLOAD_DATA_HEX" > /dev/null
+	"triggerEvent(uint256,bytes)" "$NEW_VALUE_FOR_EVENT" "$EVENT_PAYLOAD_DATA_HEX" >/dev/null
 
 # 4d & 4e. Verify contract update
 echo "Polling contract state for update from ValueChanged event..."
 CONTRACT_UPDATED_SUCCESSFULLY=false
-for i in $(seq 1 10); do # Poll for updates
-    CURRENT_VALUE=$(cast call --rpc-url "$ANVIL_RPC_URL" "$CONTRACT_ADDRESS" "value()(uint256)")
-    CURRENT_DATA=$(cast call --rpc-url "$ANVIL_RPC_URL" "$CONTRACT_ADDRESS" "eventDataPayload()(bytes)")
+for i in $( # Poll for updates
+	seq 1 10
+); do
+	CURRENT_VALUE=$(cast call --rpc-url "$ANVIL_RPC_URL" "$CONTRACT_ADDRESS" "value()(uint256)")
+	CURRENT_DATA=$(cast call --rpc-url "$ANVIL_RPC_URL" "$CONTRACT_ADDRESS" "eventDataPayload()(bytes)")
 
-    if [ "$CURRENT_VALUE" -eq "$NEW_VALUE_FOR_EVENT" ] && [ "$CURRENT_DATA" = "$EVENT_PAYLOAD_DATA_HEX" ]; then
-        echo "SUCCESS (Event Test): Contract state updated as expected."
-        CONTRACT_UPDATED_SUCCESSFULLY=true
-        break
-    fi
-    printf "."
-    sleep 1
-		set +x
+	if [ "$CURRENT_VALUE" -eq "$NEW_VALUE_FOR_EVENT" ] && [ "$CURRENT_DATA" = "$EVENT_PAYLOAD_DATA_HEX" ]; then
+		echo "SUCCESS (Event Test): Contract state updated as expected."
+		CONTRACT_UPDATED_SUCCESSFULLY=true
+		break
+	fi
+	printf "."
+	sleep 1
 done
 
 if [ "$CONTRACT_UPDATED_SUCCESSFULLY" != "true" ]; then
-    echo "ERROR (Event Test): Contract state not updated as expected after timeout."
-    echo "Expected value: $NEW_VALUE_FOR_EVENT, Got: $CURRENT_VALUE"
-    echo "Expected data: $EVENT_PAYLOAD_DATA_HEX, Got: $CURRENT_DATA"
-    echo "Alice daemon log:" ; cat "$alice_DAEMON_LOG" || true
-    echo "Alice VM log:" ; cat "$alice_VM_LOG" || true
-    echo "Bob daemon log:" ; cat "$bob_DAEMON_LOG" || true
-    echo "Bob VM log:" ; cat "$bob_VM_LOG" || true
-    exit 1
+	echo "ERROR (Event Test): Contract state not updated as expected after timeout."
+	echo "Expected value: $NEW_VALUE_FOR_EVENT, Got: $CURRENT_VALUE"
+	echo "Expected data: $EVENT_PAYLOAD_DATA_HEX, Got: $CURRENT_DATA"
+	echo "Alice daemon log:"
+	cat "$alice_DAEMON_LOG" || true
+	echo "Alice VM log:"
+	cat "$alice_VM_LOG" || true
+	echo "Bob daemon log:"
+	cat "$bob_DAEMON_LOG" || true
+	echo "Bob VM log:"
+	cat "$bob_VM_LOG" || true
+	exit 1
 fi
+
+# ==============================================================================
+# New Test Workflow (Step 5: HTTP Worker Request/Response)
+# ==============================================================================
+echo "--- Starting New HTTP Worker Test Workflow ---"
+
+# 5a. Prepare Work Order for the HTTP echo worker
+echo "Preparing HTTP echo work order..."
+HTTP_ECHO_WORKER_JS_CONTENT=$(cat "$HTTP_ECHO_WORKER_JS_BUNDLE_PATH")
+HTTP_ECHO_WORKER_JS_B64=$(printf "%s" "$HTTP_ECHO_WORKER_JS_CONTENT" | base64 | tr -d '\n')
+
+HTTP_ECHO_WORKER_BUNDLE_PAYLOAD_FILE="$TEST_DIR/http_echo_worker_bundle_payload.json"
+jq -n \
+	--arg vm "nxcc/workerd" \
+	--arg executable_b64 "$HTTP_ECHO_WORKER_JS_B64" \
+	'{vm: $vm, executable: $executable_b64, metadata: {}}' >"$HTTP_ECHO_WORKER_BUNDLE_PAYLOAD_FILE"
+
+HTTP_ECHO_WORKER_BUNDLE_PAYLOAD_B64_FILE="$TEST_DIR/http_echo_worker_bundle_payload_b64.txt"
+base64 <"$HTTP_ECHO_WORKER_BUNDLE_PAYLOAD_FILE" | tr -d '\n' >"$HTTP_ECHO_WORKER_BUNDLE_PAYLOAD_B64_FILE"
+
+HTTP_ECHO_WORKER_BUNDLE_DSSE_FILE="$TEST_DIR/http_echo_worker_bundle_dsse.json"
+jq -n \
+	--rawfile payload_b64 "$HTTP_ECHO_WORKER_BUNDLE_PAYLOAD_B64_FILE" \
+	--arg payload_type "application/vnd.nxcc.workerbundlepayload.v1+json" \
+	'{payload: $payload_b64, payloadType: $payload_type, signatures: [{keyid: "mock", sig: "'"$(printf "%s" "mocksig" | base64 | tr -d '\n')"'"}]}' >"$HTTP_ECHO_WORKER_BUNDLE_DSSE_FILE"
+
+HTTP_ECHO_WORKER_BUNDLE_DSSE_B64_FILE="$TEST_DIR/http_echo_worker_bundle_dsse_b64.txt"
+base64 <"$HTTP_ECHO_WORKER_BUNDLE_DSSE_FILE" | tr -d '\n' >"$HTTP_ECHO_WORKER_BUNDLE_DSSE_B64_FILE"
+
+HTTP_ECHO_WORKER_MANIFEST_FILE="$TEST_DIR/http_echo_worker_manifest.json"
+jq -n \
+	--rawfile bundle_source_b64 "$HTTP_ECHO_WORKER_BUNDLE_DSSE_B64_FILE" \
+	"{
+        bundle: {source: (\"data:application/json;base64,\" + \$bundle_source_b64), hash: null},
+        identities: [],
+        userdata: {}
+    }" >"$HTTP_ECHO_WORKER_MANIFEST_FILE"
+
+HTTP_ECHO_WORK_ORDER_PAYLOAD_FILE="$TEST_DIR/http_echo_work_order_payload.json"
+jq -n \
+	--arg id "http-echo-work-order-$(date +%s%N)" \
+	--slurpfile worker_manifest "$HTTP_ECHO_WORKER_MANIFEST_FILE" \
+	'{
+        id: $id,
+        worker: $worker_manifest[0],
+        events: [
+            {"handler": "fetch", "kind": "http_request_trigger"}
+        ]
+    }' >"$HTTP_ECHO_WORK_ORDER_PAYLOAD_FILE"
+
+HTTP_ECHO_WORK_ORDER_PAYLOAD_B64_FILE="$TEST_DIR/http_echo_work_order_payload_b64.txt"
+base64 <"$HTTP_ECHO_WORK_ORDER_PAYLOAD_FILE" | tr -d '\n' >"$HTTP_ECHO_WORK_ORDER_PAYLOAD_B64_FILE"
+
+HTTP_ECHO_WORK_ORDER_DSSE_FILE="$TEST_DIR/http_echo_work_order_dsse.json"
+jq -n \
+	--rawfile payload_b64 "$HTTP_ECHO_WORK_ORDER_PAYLOAD_B64_FILE" \
+	--arg payload_type "$DSSE_WORK_ORDER_PAYLOAD_TYPE" \
+	'{payload: $payload_b64, payloadType: $payload_type, signatures: [{keyid: "mock", sig: "'"$(printf "%s" "mocksig" | base64 | tr -d '\n')"'"}]}' >"$HTTP_ECHO_WORK_ORDER_DSSE_FILE"
+
+HTTP_ECHO_WORK_ORDER_DSSE_B64_FILE="$TEST_DIR/http_echo_work_order_dsse_b64.txt"
+base64 <"$HTTP_ECHO_WORK_ORDER_DSSE_FILE" | tr -d '\n' >"$HTTP_ECHO_WORK_ORDER_DSSE_B64_FILE"
+
+GRPCURL_SUBMIT_HTTP_ECHO_WO_PAYLOAD_FILE="$TEST_DIR/submit_http_echo_wo_payload.json"
+jq -n \
+	--rawfile work_order_dsse_bytes "$HTTP_ECHO_WORK_ORDER_DSSE_B64_FILE" \
+	'{work_order_dsse_bytes: $work_order_dsse_bytes}' >"$GRPCURL_SUBMIT_HTTP_ECHO_WO_PAYLOAD_FILE"
+
+# 5b. Submit HTTP echo work order to Alice
+echo "Submitting HTTP echo work order to Alice..."
+HTTP_ECHO_WO_SUBMIT_RESPONSE=$(grpcurl_submit_work_order "$alice_DAEMON_SOCK" "$GRPCURL_SUBMIT_HTTP_ECHO_WO_PAYLOAD_FILE")
+echo "HTTP Echo Work Order Submit Response: $HTTP_ECHO_WO_SUBMIT_RESPONSE"
+
+HTTP_ECHO_WO_SUBMIT_SUCCESS=$(echo "$HTTP_ECHO_WO_SUBMIT_RESPONSE" | jq -r .success)
+if [ "$HTTP_ECHO_WO_SUBMIT_SUCCESS" != "true" ]; then
+	echo "ERROR: Submitting HTTP echo work order was not successful."
+	exit 1
+fi
+
+HTTP_ECHO_WORK_ORDER_ID=$(echo "$HTTP_ECHO_WO_SUBMIT_RESPONSE" | jq -r .workOrderId)
+if [ -z "$HTTP_ECHO_WORK_ORDER_ID" ] || [ "$HTTP_ECHO_WORK_ORDER_ID" = "null" ]; then
+	echo "ERROR: Failed to get workOrderId from HTTP echo work order submission."
+	exit 1
+fi
+echo "HTTP Echo Work Order ID (mount segment): $HTTP_ECHO_WORK_ORDER_ID"
+
+# Give some time for the worker to be mounted and ready
+sleep 2
+
+# 5c. Send HTTP request to the worker via Alice's daemon
+echo "Sending HTTP POST request to the echo worker..."
+HTTP_REQUEST_BODY="Hello From Test Script"
+HTTP_RESPONSE_FILE="$TEST_DIR/http_echo_worker_response.json"
+HTTP_STATUS_CODE=$(curl -s -w "%{http_code}" -X POST \
+	-H "Content-Type: text/plain" \
+	-H "X-Custom-Test-Header: custom-value" \
+	-d "$HTTP_REQUEST_BODY" \
+	"http://127.0.0.1:6922/w/${HTTP_ECHO_WORK_ORDER_ID}/test/path?queryArg=testVal" \
+	-o "$HTTP_RESPONSE_FILE")
+
+echo "HTTP Echo Worker Response Status Code: $HTTP_STATUS_CODE"
+echo "HTTP Echo Worker Response Body:"
+cat "$HTTP_RESPONSE_FILE"
+
+if [ "$HTTP_STATUS_CODE" -ne 200 ]; then
+	echo "ERROR (HTTP Worker Test): Worker returned status $HTTP_STATUS_CODE, expected 200."
+	echo "Alice daemon log:"
+	cat "$alice_DAEMON_LOG" || true
+	echo "Alice VM log:"
+	cat "$alice_VM_LOG" || true
+	exit 1
+fi
+
+# 5d. Verify the response
+jq -e '.message == "HTTP Echo Worker Response"' "$HTTP_RESPONSE_FILE" >/dev/null || {
+	echo "ERROR (HTTP Worker Test): Incorrect message"
+	exit 1
+}
+jq -e '.method == "POST"' "$HTTP_RESPONSE_FILE" >/dev/null || {
+	echo "ERROR (HTTP Worker Test): Incorrect method"
+	exit 1
+}
+jq -e '.pathname == "/test/path"' "$HTTP_RESPONSE_FILE" >/dev/null || {
+	echo "ERROR (HTTP Worker Test): Incorrect pathname"
+	exit 1
+}
+jq -e '.searchParams.queryArg == "testVal"' "$HTTP_RESPONSE_FILE" >/dev/null || {
+	echo "ERROR (HTTP Worker Test): Incorrect queryArg"
+	exit 1
+}
+jq -e '.headers["content-type"] == "text/plain"' "$HTTP_RESPONSE_FILE" >/dev/null || {
+	echo "ERROR (HTTP Worker Test): Incorrect content-type header"
+	exit 1
+}
+jq -e '.headers["x-custom-test-header"] == "custom-value"' "$HTTP_RESPONSE_FILE" >/dev/null || {
+	echo "ERROR (HTTP Worker Test): Incorrect x-custom-test-header"
+	exit 1
+}
+jq -e ".body == \"$HTTP_REQUEST_BODY\"" "$HTTP_RESPONSE_FILE" >/dev/null || {
+	echo "ERROR (HTTP Worker Test): Incorrect body echo"
+	exit 1
+}
+
+echo "SUCCESS (HTTP Worker Test): HTTP echo worker responded correctly."
 
 echo "--- Test Workflow Completed Successfully ---"
 
