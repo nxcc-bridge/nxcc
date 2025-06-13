@@ -1,0 +1,81 @@
+name: Build and Publish Node Docker Image
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*.*.*'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  GCP_LOCATION: europe
+  AR_REPO_NAME: nxcc-images
+  IMAGE_NAME: node
+  GHCR_REGISTRY: ghcr.io
+
+jobs:
+  build-and-push:
+    name: Build and Push to Registries
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Authenticate to Google Cloud. This is required for the gcloud CLI to work.
+      - name: Authenticate with Google Cloud
+        id: auth
+        uses: 'google-github-actions/auth@v2'
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      # Step 1: Login to the first registry (GitHub)
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Step 2: Login to the second registry (Google) using the recommended method
+      - name: Configure Docker for Google Artifact Registry
+        run: gcloud auth configure-docker ${{ env.GCP_LOCATION }}-docker.pkg.dev
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Step 3: Generate image names and tags for BOTH registries
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ env.GCP_LOCATION }}-docker.pkg.dev/${{ steps.auth.outputs.project_id }}/${{ env.AR_REPO_NAME }}/${{ env.IMAGE_NAME }}
+            ${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=semver,pattern={{version}}
+            type=sha,prefix=,format=short
+
+      # Step 4: Build once, and push to all tags from the metadata step
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./node
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BUILD_MODE=release
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
