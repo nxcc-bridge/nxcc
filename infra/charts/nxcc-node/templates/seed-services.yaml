@@ -1,0 +1,42 @@
+# This internal ClusterIP service provides a stable DNS name for all pods to use as a bootstrap peer address.
+# It load-balances across all available seed pods.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nxcc.fullname" . }}-seed-bootstrap
+  labels:
+    {{- include "nxcc.labels" . | nindent 4 }}
+    app.kubernetes.io/component: seed
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.seed.p2pPort }}
+      targetPort: p2p
+      protocol: TCP
+      name: p2p
+  selector:
+    {{- include "nxcc.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: seed
+---
+{{- if .Values.seed.public.enabled }}
+# This optional service creates a public-facing LoadBalancer.
+# It allows external nodes to use one of your pods as a public seed node.
+# NOTE: This will load-balance traffic across ALL seed pods.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nxcc.fullname" . }}-seed-public
+  labels:
+    {{- include "nxcc.labels" . | nindent 4 }}
+    app.kubernetes.io/component: seed
+spec:
+  type: LoadBalancer
+  ports:
+    - port: {{ .Values.seed.public.port }}
+      targetPort: p2p
+      protocol: TCP
+      name: p2p
+  selector:
+    {{- include "nxcc.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: seed
+{{- end }}

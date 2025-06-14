@@ -22,11 +22,11 @@ readonly WIF_PROVIDER_ID="nxcc-git-provider"
 # The name of the Artifact Registry repository to create.
 readonly AR_REPO_NAME="nxcc-images"
 # The name of the GKE cluster.
-readonly GKE_CLUSTER_NAME="nxcc-confidential-cluster"
+readonly GKE_CLUSTER_NAME="nxcc"
 # The Helm release name for the application.
-readonly HELM_RELEASE_NAME="nxcc-app"
+readonly HELM_RELEASE_NAME="nxcc-node"
 # The path to your Helm chart.
-readonly HELM_CHART_PATH="./helm/nxcc-app"
+readonly HELM_CHART_PATH="./charts/nxcc-node"
 
 # --- GCP Locations ---
 # Override with environment variables if needed.
@@ -388,12 +388,13 @@ app_deploy() {
   helm upgrade "${HELM_RELEASE_NAME}" "${HELM_CHART_PATH}" \
     --install \
     --atomic \
+    --timeout 5m \
     --wait \
     --namespace default \
-    --set image.repository="${GCP_AR_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO_NAME}/my-app" \
+    --set image.repository="${GCP_AR_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO_NAME}/node" \
     --set image.tag="latest" # Replace with your actual image tag in CI/CD
 
-  success "Application deployment complete. Use 'kubectl get pods -l app.kubernetes.io/name=nxcc-app' to check status."
+  success "Application deployment complete. Use 'kubectl get pods -l app.kubernetes.io/name=nxcc-node' to check status."
 }
 
 ################################################################################

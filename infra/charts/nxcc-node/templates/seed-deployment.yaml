@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nxcc.fullname" . }}-seed
+  labels:
+    {{- include "nxcc.labels" . | nindent 4 }}
+    app.kubernetes.io/component: seed
+spec:
+  replicas: {{ .Values.seed.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "nxcc.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: seed
+  template:
+    metadata:
+      annotations:
+        {{- include "nxcc.confidentialAnnotations" . | nindent 8 }}
+      labels:
+        {{- include "nxcc.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: seed
+    spec:
+      containers:
+        - name: nxcc-seed
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: p2p
+              containerPort: {{ .Values.seed.p2pPort }}
+              protocol: TCP
+          env:
+            # All pods (seeds and workers) use this internal service DNS name to find a bootstrap peer.
+            # Kubernetes will round-robin requests to this service, connecting the pod to one of the available seeds.
+            # This is sufficient for libp2p to join the network.
+            - name: NXCC_NETWORK_BOOTSTRAP_PEERS
+              value: "/dns4/{{ include "nxcc.fullname" . }}-seed-bootstrap.{{ .Release.Namespace }}.svc.cluster.local/tcp/{{ .Values.seed.p2pPort }}"
+            # Set the P2P listen address based on the Dockerfile default.
+            - name: NXCC_NETWORK_LISTEN_ADDRESSES
+              value: "/ip4/0.0.0.0/tcp/{{ .Values.seed.p2pPort }}"
+          resources:
+            {{- toYaml .Values.seed.resources | nindent 12 }}
+      # This is the key to high availability. It tells Kubernetes to spread the seed pods
+      # across different physical locations (availability zones).
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: "topology.kubernetes.io/zone"
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              {{- include "nxcc.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: seed

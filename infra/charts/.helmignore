@@ -1,0 +1,5 @@
+# Patterns to ignore when packaging Helm charts.
+.git/
+.github/
+.vscode/
+*.sh

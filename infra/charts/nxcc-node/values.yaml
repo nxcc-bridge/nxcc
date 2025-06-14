@@ -1,0 +1,84 @@
+# Default values for nxcc chart.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# -- Override the release name.
+nameOverride: ""
+# -- A fully qualified name for the release.
+fullnameOverride: ""
+
+image:
+  # -- The Docker image repository. This will be set by your CI/CD script.
+  repository: your-repo/nxcc
+  # -- The Docker image tag.
+  tag: "latest"
+  # -- The image pull policy.
+  pullPolicy: IfNotPresent
+
+# -- Configuration for enabling GKE Confidential Computing for all pods.
+# This adds the necessary annotations to schedule pods on TDX-enabled nodes.
+confidential:
+  enabled: false
+
+# -- Configuration for the small, highly-available seed nodes.
+# These nodes ensure the long-term secrets are not lost.
+seed:
+  # -- Number of seed node replicas.
+  replicaCount: 0
+  # -- Resources for each seed pod.
+  resources:
+    requests:
+      cpu: 1
+      memory: 1Gi
+    limits:
+      cpu: 1
+      memory: 1Gi
+  # -- P2P port for libp2p communication.
+  p2pPort: 9000
+
+  # -- Configuration for exposing a public seed node.
+  public:
+    # -- If true, create a Service of type LoadBalancer to expose the seed nodes publicly.
+    enabled: false
+    # -- The port for the public LoadBalancer service.
+    port: 9000
+
+# -- Configuration for the large worker node.
+# This node handles the main application logic and ingress traffic.
+worker:
+  # -- Number of worker node replicas. Will eventually be managed by an HPA.
+  replicaCount: 1
+  # -- Resources for the worker pod.
+  resources:
+    requests:
+      cpu: 2
+      memory: 2Gi
+    limits:
+      cpu: 2
+      memory: 2Gi
+  # -- The internal HTTP port your application listens on.
+  httpPort: 6922
+  # -- P2P port for libp2p communication.
+  p2pPort: 9000
+
+# -- Ingress configuration for the worker node.
+ingress:
+  # -- If true, create an Ingress resource.
+  enabled: true
+  # -- The IngressClass to use. For GKE, this is often "gce".
+  className: "gce"
+  # -- Ingress annotations. Useful for cert-manager, etc.
+  annotations: {}
+    # kubernetes.io/ingress.class: gce
+    # kubernetes.io/ingress.global-static-ip-name: "my-static-ip"
+  # -- Ingress host configuration.
+  hosts:
+    - host: chart-example.local
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  # -- Ingress TLS configuration.
+  tls: []
+  #  - secretName: chart-example-tls
+  #    hosts:
+  #      - chart-example.local

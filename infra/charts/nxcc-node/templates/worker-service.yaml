@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nxcc.fullname" . }}-worker
+  labels:
+    {{- include "nxcc.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80 # The service port can be 80, targeting the container's http port
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "nxcc.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
