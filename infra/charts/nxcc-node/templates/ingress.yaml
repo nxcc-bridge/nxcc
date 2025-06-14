@@ -24,7 +24,9 @@ spec:
     - host: {{ .host | quote }}
       http:
         paths:
-          {{- range .paths }}
+          {{- /* If paths are not specified for a host, provide a default to prevent an invalid Ingress resource. */}}
+          {{- $paths := .paths | default (list (dict "path" "/" "pathType" "ImplementationSpecific")) -}}
+          {{- range $paths }}
           - path: {{ .path }}
             pathType: {{ .pathType }}
             backend:

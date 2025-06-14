@@ -1,37 +1,39 @@
 #!/bin/bash
 #
-# Manages Google Cloud and Kubernetes resources for the nXCC confidential workload.
+# Manages cloud and local Kubernetes resources for the nXCC confidential workload.
 #
-# This script provides subcommands to handle different lifecycle stages:
-# - cicd-setup / cicd-teardown: One-time setup for CI/CD (Service Account, WIF, Artifact Registry).
-# - cluster-create / cluster-destroy: Infrequent setup for the GKE cluster.
-# - app-deploy / app-destroy: Frequent deployment of the application using Helm.
+# This script provides a structured command interface:
+# - ci <setup|teardown>: Manages one-time CI/CD resources in GCP (Service Account, WIF, etc.).
+# - cluster <create|destroy> <env>: Manages the Kubernetes cluster itself.
+#   - <env> can be 'gke' for a Google Kubernetes Engine cluster.
+#   - <env> can be 'kind' for a local Kubernetes-in-Docker cluster.
+# - k8s <deploy|destroy> <env>: Manages the application deployment via Helm.
+#   - <env> can be 'debug' (for kind), 'staging' (for gke), or 'prod' (for gke).
 #
-# The script is designed to be idempotent and explicitly handles GCP identity.
+# The script is designed to be idempotent and handles cloud provider identity.
 
 set -e
 set -o pipefail
 
 # --- Configuration ---
-# The name for the Service Account to be created.
+# GCP CI/CD and GKE Cluster Config
 readonly SERVICE_ACCOUNT_NAME="nxcc-ci-cd-runner"
-# The ID for the Workload Identity Pool.
 readonly WIF_POOL_ID="nxcc-ci-pool"
-# The ID for the Workload Identity Provider.
 readonly WIF_PROVIDER_ID="nxcc-git-provider"
-# The name of the Artifact Registry repository to create.
 readonly AR_REPO_NAME="nxcc-images"
-# The name of the GKE cluster.
 readonly GKE_CLUSTER_NAME="nxcc"
-# The path to your Helm chart.
+
+# Local KinD Cluster Config
+readonly KIND_CLUSTER_NAME="nxcc-debug"
+readonly LOCAL_IMAGE_NAME="nxcc-node-local" # Expected name of the local image for 'debug'
+readonly LOCAL_IMAGE_TAG="latest"
+
+# Helm Chart Config
 readonly HELM_CHART_PATH="./charts/nxcc-node"
 
 # --- GCP Locations ---
 # Override with environment variables if needed.
-# The location for the Artifact Registry. Can be a region or multi-region.
 readonly GCP_AR_LOCATION="${GCP_AR_LOCATION:-europe}"
-# The region for the GKE cluster. Must be a specific region that supports TDX.
-# See: https://cloud.google.com/compute/docs/regions-zones
 readonly GCP_GKE_REGION="${GCP_GKE_REGION:-europe-west1}"
 
 # --- Color Codes for Output ---
@@ -42,7 +44,6 @@ readonly C_RED='\033[0;31m'
 readonly C_RESET='\033[0m'
 
 # --- Global Variables for Resolved Identity ---
-# These will be populated by resolve_gcp_identity()
 GCP_ACCOUNT=""
 PROJECT_ID=""
 
@@ -54,7 +55,7 @@ error() { echo -e "${C_RED}ERROR:${C_RESET} $1" >&2; exit 1; }
 
 # --- Prerequisite Checks ---
 check_deps() {
-  for cmd in gcloud kubectl helm; do
+  for cmd in "$@"; do
     if ! command -v "$cmd" &>/dev/null; then
       error "'$cmd' CLI is not installed. Please install it to continue."
     fi
@@ -136,7 +137,7 @@ Please set it by one of the following methods:
 }
 
 
-# --- Main Logic Functions ---
+# --- CI/CD Functions ---
 
 ################################################################################
 # Manages CI/CD resources (Service Account, WIF, Artifact Registry).
@@ -306,11 +307,15 @@ cicd_teardown() {
   success "CI/CD teardown complete."
 }
 
+# --- Cluster Management Functions ---
+
 ################################################################################
 # Creates the GKE Autopilot cluster with Confidential Computing.
 ################################################################################
-cluster_create() {
+cluster_create_gke() {
   info "Starting GKE cluster creation..."
+  check_deps gcloud kubectl
+  resolve_gcp_identity
 
   info "Enabling GKE API..."
   if ! gcloud services list --enabled --project="${PROJECT_ID}" --account="${GCP_ACCOUNT}" --format="value(config.name)" | grep -q "^container.googleapis.com$"; then
@@ -350,8 +355,10 @@ cluster_create() {
 ################################################################################
 # Destroys the GKE cluster.
 ################################################################################
-cluster_destroy() {
+cluster_destroy_gke() {
   info "Starting GKE cluster destruction..."
+  check_deps gcloud
+  resolve_gcp_identity
 
   info "Removing GKE Developer role from CI/CD Service Account..."
   local sa_email="${SERVICE_ACCOUNT_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
@@ -373,17 +380,64 @@ cluster_destroy() {
 }
 
 ################################################################################
-# Deploys the application to a specific environment (namespace) using Helm.
-# Arguments:
-#   $1: The environment to deploy to (e.g., 'staging', 'prod').
+# Creates a local KinD cluster for debugging.
 ################################################################################
-app_deploy() {
+cluster_create_kind() {
+  info "Starting KinD cluster creation..."
+  check_deps kind docker
+
+  if kind get clusters | grep -q "^${KIND_CLUSTER_NAME}$"; then
+    warn "KinD cluster '${KIND_CLUSTER_NAME}' already exists."
+  else
+    info "Creating KinD cluster '${KIND_CLUSTER_NAME}'..."
+    kind create cluster --name "${KIND_CLUSTER_NAME}"
+    success "KinD cluster created."
+  fi
+
+  info "Attempting to load local Docker image '${LOCAL_IMAGE_NAME}:${LOCAL_IMAGE_TAG}' into the cluster..."
+  info "Note: This assumes you have already built the image (e.g., 'docker build -t ${LOCAL_IMAGE_NAME}:${LOCAL_IMAGE_TAG} .')."
+  if ! docker image inspect "${LOCAL_IMAGE_NAME}:${LOCAL_IMAGE_TAG}" &>/dev/null; then
+      warn "Local image '${LOCAL_IMAGE_NAME}:${LOCAL_IMAGE_TAG}' not found. Skipping image load."
+      warn "Deployment may fail if the image is not available in the cluster."
+  else
+      kind load docker-image "${LOCAL_IMAGE_NAME}:${LOCAL_IMAGE_TAG}" --name "${KIND_CLUSTER_NAME}"
+      success "Image loaded into KinD cluster."
+  fi
+
+  success "KinD cluster setup is complete. Current context is '$(kubectl config current-context)'."
+}
+
+################################################################################
+# Destroys the local KinD cluster.
+################################################################################
+cluster_destroy_kind() {
+  info "Starting KinD cluster destruction..."
+  check_deps kind
+
+  if kind get clusters | grep -q "^${KIND_CLUSTER_NAME}$"; then
+    info "Deleting KinD cluster '${KIND_CLUSTER_NAME}'..."
+    kind delete cluster --name "${KIND_CLUSTER_NAME}"
+    success "KinD cluster deleted."
+  else
+    warn "KinD cluster '${KIND_CLUSTER_NAME}' does not exist. Nothing to do."
+  fi
+}
+
+# --- Helm Chart Management Functions ---
+
+################################################################################
+# Deploys the application to a specific environment using Helm.
+# Arguments:
+#   $1: The environment to deploy to ('debug', 'staging', 'prod').
+################################################################################
+k8s_deploy() {
   local env="$1"
   local helm_release_name="nxcc-node-${env}"
   local namespace="${env}"
   local helm_set_args=()
 
   info "Starting application deployment to '${env}' environment..."
+  check_deps helm kubectl
 
   if [ ! -d "${HELM_CHART_PATH}" ]; then
     error "Helm chart not found at '${HELM_CHART_PATH}'. Please create it first."
@@ -392,20 +446,37 @@ app_deploy() {
   # --- Environment-specific configurations ---
   info "Configuring for '${env}'..."
   case "$env" in
-    staging)
+    debug)
+      # For local KinD cluster
       helm_set_args+=(--set confidential.enabled=false)
       helm_set_args+=(--set seed.replicaCount=1)
       helm_set_args+=(--set worker.replicaCount=1)
-      helm_set_args+=(--set ingress.hosts[0].host="staging.nxcc.example.com")
+      helm_set_args+=(--set ingress.enabled=false)
+      helm_set_args+=(--set worker.service.type=NodePort)
+      helm_set_args+=(--set image.repository="${LOCAL_IMAGE_NAME}")
+      helm_set_args+=(--set image.tag="${LOCAL_IMAGE_TAG}")
+      helm_set_args+=(--set image.pullPolicy=IfNotPresent)
       ;;
-    prod)
-      helm_set_args+=(--set confidential.enabled=true)
-      helm_set_args+=(--set seed.replicaCount=3)
-      helm_set_args+=(--set worker.replicaCount=2)
-      helm_set_args+=(--set ingress.hosts[0].host="prod.nxcc.example.com")
+    staging|prod)
+      # For GKE cluster
+      resolve_gcp_identity
+      helm_set_args+=(--set image.repository="${GCP_AR_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO_NAME}/node")
+      helm_set_args+=(--set image.tag="latest") # Replace with your actual image tag in CI/CD
+
+      if [ "$env" == "staging" ]; then
+        helm_set_args+=(--set confidential.enabled=false)
+        helm_set_args+=(--set seed.replicaCount=1)
+        helm_set_args+=(--set worker.replicaCount=1)
+        helm_set_args+=(--set ingress.hosts[0].host="staging.nxcc.example.com")
+      else # prod
+        helm_set_args+=(--set confidential.enabled=true)
+        helm_set_args+=(--set seed.replicaCount=3)
+        helm_set_args+=(--set worker.replicaCount=1)
+        helm_set_args+=(--set ingress.hosts[0].host="prod.nxcc.example.com")
+      fi
       ;;
     *)
-      error "Invalid environment '${env}' specified for deployment."
+      error "Invalid environment '${env}' specified for deployment. Must be 'debug', 'staging', or 'prod'."
       ;;
   esac
 
@@ -417,24 +488,24 @@ app_deploy() {
     --timeout 5m \
     --wait \
     --namespace "${namespace}" \
-    --set image.repository="${GCP_AR_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO_NAME}/node" \
-    --set image.tag="latest" \
-    "${helm_set_args[@]}" # Replace with your actual image tag in CI/CD
+    "${helm_set_args[@]}"
 
-  success "Application deployment to '${env}' complete. Use 'kubectl get pods -n ${namespace} -l app.kubernetes.io/instance=${helm_release_name}' to check status."
+  success "Application deployment to '${env}' complete."
+  info "Use 'kubectl get all -n ${namespace}' to check status."
 }
 
 ################################################################################
 # Uninstalls the application from a specific environment.
 # Arguments:
-#   $1: The environment to destroy (e.g., 'staging', 'prod').
+#   $1: The environment to destroy ('debug', 'staging', 'prod').
 ################################################################################
-app_destroy() {
+k8s_destroy() {
   local env="$1"
   local helm_release_name="nxcc-node-${env}"
   local namespace="${env}"
 
   info "Starting application uninstall from '${env}' environment..."
+  check_deps helm kubectl
 
   if helm status "${helm_release_name}" --namespace "${namespace}" &>/dev/null; then
     info "Uninstalling Helm release '${helm_release_name}' from namespace '${namespace}'."
@@ -445,94 +516,122 @@ app_destroy() {
   fi
 }
 
+# --- Usage and Main ---
+
 ################################################################################
 # Displays usage information.
 ################################################################################
 usage() {
-  echo "Usage: $0 <command> [args]"
+  echo "Usage: $0 <command> <subcommand> [args]"
   echo
-  echo "Manages GCP and GKE resources for a confidential workload."
+  echo "Manages cloud (GCP) and local (KinD) resources for the nXCC application."
   echo
   echo "Commands:"
-  echo "  cicd-setup          Sets up Service Account, WIF, and Artifact Registry for CI/CD."
-  echo "  cicd-teardown       Tears down all CI/CD resources."
-  echo "  cluster-create      Creates the confidential GKE Autopilot cluster."
-  echo "  cluster-destroy     Deletes the GKE cluster."
-  echo "  app-deploy <env>    Deploys the application to a specific environment (staging|prod)."
-  echo "  app-destroy <env>   Uninstalls the application from a specific environment (staging|prod)."
+  echo "  ci <setup|teardown>"
+  echo "    Manages GCP resources for CI/CD (Service Account, WIF, Artifact Registry)."
+  echo "      setup:    Creates and configures all CI/CD resources."
+  echo "      teardown: Deletes all CI/CD resources."
   echo
-  echo "Identity and Project Configuration:"
-  echo "  The script determines which GCP account and project to use as follows:"
-  echo "  1. Account: Uses the GCP_ACCOUNT env var. If not set, it prompts you to choose"
-  echo "     from your logged-in accounts if you have more than one."
-  echo "  2. Project: Uses the GCP_PROJECT_ID env var. If not set, it infers the project"
-  echo "     from your gcloud configuration for the selected account."
+  echo "  cluster <create|destroy> <env>"
+  echo "    Manages the Kubernetes cluster."
+  echo "      <env>: gke | kind"
+  echo "      create:   Creates the specified cluster."
+  echo "      destroy:  Deletes the specified cluster."
+  echo
+  echo "  k8s <deploy|destroy> <env>"
+  echo "    Manages the application deployment via Helm chart."
+  echo "      <env>: debug | staging | prod"
+  echo "      deploy:   Deploys or upgrades the application to the specified environment."
+  echo "      destroy:  Uninstalls the application from the specified environment."
+  echo
+  echo "Environment Notes:"
+  echo "  - 'debug' environment is intended for the 'kind' cluster."
+  echo "  - 'staging' and 'prod' environments are intended for the 'gke' cluster."
+  echo
+  echo "GCP Identity:"
+  echo "  For 'ci' and 'gke' commands, the script will resolve your GCP identity automatically."
+  echo "  You can override this by setting GCP_ACCOUNT and GCP_PROJECT_ID environment variables."
 }
 
-# --- Main Execution ---
+################################################################################
+# Main execution block.
+################################################################################
 main() {
-  check_deps
+  local command="${1-}"
+  local subcommand="${2-}"
+  local env="${3-}"
 
-  if [[ -z "$1" ]]; then
+  if [[ -z "$command" ]]; then
     usage
     exit 1
   fi
 
-  # Resolve GCP account and project ID before doing anything else.
-  resolve_gcp_identity
+  case "$command" in
+    ci)
+      check_deps gcloud
+      resolve_gcp_identity # CI commands always need GCP identity
+      case "$subcommand" in
+        setup)
+          cicd_setup
+          ;;
+        teardown)
+          read -p "Are you sure you want to delete all CI/CD resources in project ${PROJECT_ID}? [y/N] " -n 1 -r; echo
+          if [[ $REPLY =~ ^[Yy]$ ]]; then cicd_teardown; else info "Teardown cancelled."; fi
+          ;;
+        *)
+          error "Invalid subcommand for 'ci'. Use 'setup' or 'teardown'."
+          ;;
+      esac
+      ;;
 
-  local COMMAND="$1"
-  case "$COMMAND" in
-    cicd-setup)
-      cicd_setup
+    cluster)
+      case "$subcommand" in
+        create)
+          case "$env" in
+            gke) cluster_create_gke ;;
+            kind) cluster_create_kind ;;
+            "") error "Missing environment for 'cluster create'. Use 'gke' or 'kind'." ;;
+            *) error "Invalid environment for 'cluster create'. Use 'gke' or 'kind'." ;;
+          esac
+          ;;
+        destroy)
+          case "$env" in
+            gke)
+              read -p "Are you sure you want to delete the GKE cluster '${GKE_CLUSTER_NAME}'? [y/N] " -n 1 -r; echo
+              if [[ $REPLY =~ ^[Yy]$ ]]; then cluster_destroy_gke; else info "Cluster deletion cancelled."; fi
+              ;;
+            kind)
+              read -p "Are you sure you want to delete the KinD cluster '${KIND_CLUSTER_NAME}'? [y/N] " -n 1 -r; echo
+              if [[ $REPLY =~ ^[Yy]$ ]]; then cluster_destroy_kind; else info "Cluster deletion cancelled."; fi
+              ;;
+            "") error "Missing environment for 'cluster destroy'. Use 'gke' or 'kind'." ;;
+            *) error "Invalid environment for 'cluster destroy'. Use 'gke' or 'kind'." ;;
+          esac
+          ;;
+        *)
+          error "Invalid subcommand for 'cluster'. Use 'create' or 'destroy'."
+          ;;
+      esac
       ;;
-    cicd-teardown)
-      read -p "Are you sure you want to delete all CI/CD resources in project ${PROJECT_ID}? [y/N] " -n 1 -r
-      echo
-      if [[ $REPLY =~ ^[Yy]$ ]]; then
-        cicd_teardown
-      else
-        info "Teardown cancelled."
-      fi
+
+    k8s)
+      case "$subcommand" in
+        deploy)
+          if [[ -z "$env" ]]; then error "Missing environment for 'k8s deploy'. Use 'debug', 'staging', or 'prod'."; fi
+          k8s_deploy "$env"
+          ;;
+        destroy)
+          if [[ -z "$env" ]]; then error "Missing environment for 'k8s destroy'. Use 'debug', 'staging', or 'prod'."; fi
+          local release_to_destroy="nxcc-node-${env}"
+          read -p "Are you sure you want to uninstall the application '${release_to_destroy}' from the '${env}' environment? [y/N] " -n 1 -r; echo
+          if [[ $REPLY =~ ^[Yy]$ ]]; then k8s_destroy "$env"; else info "Application uninstall cancelled."; fi
+          ;;
+        *)
+          error "Invalid subcommand for 'k8s'. Use 'deploy' or 'destroy'."
+          ;;
+      esac
       ;;
-    cluster-create)
-      cluster_create
-      ;;
-    cluster-destroy)
-      read -p "Are you sure you want to delete the GKE cluster '${GKE_CLUSTER_NAME}' in project ${PROJECT_ID}? [y/N] " -n 1 -r
-      echo
-      if [[ $REPLY =~ ^[Yy]$ ]]; then
-        cluster_destroy
-      else
-        info "Cluster deletion cancelled."
-      fi
-      ;;
-    app-deploy)
-      if [[ -z "$2" ]]; then
-        error "Missing environment argument. Usage: $0 app-deploy <staging|prod>"
-      fi
-      if [[ "$2" != "staging" && "$2" != "prod" ]]; then
-        error "Invalid environment '$2'. Must be 'staging' or 'prod'."
-      fi
-      app_deploy "$2"
-      ;;
-    app-destroy)
-      if [[ -z "$2" ]]; then
-        error "Missing environment argument. Usage: $0 app-destroy <staging|prod>"
-      fi
-      if [[ "$2" != "staging" && "$2" != "prod" ]]; then
-        error "Invalid environment '$2'. Must be 'staging' or 'prod'."
-      fi
-      local env_to_destroy="$2"
-      local release_to_destroy="nxcc-node-${env_to_destroy}"
-      read -p "Are you sure you want to uninstall the application '${release_to_destroy}' from the '${env_to_destroy}' environment? [y/N] " -n 1 -r
-      echo
-      if [[ $REPLY =~ ^[Yy]$ ]]; then
-        app_destroy "${env_to_destroy}"
-      else
-        info "Application uninstall cancelled."
-      fi
-      ;;
+
     *)
       usage
       exit 1
