@@ -23,8 +23,6 @@ readonly WIF_PROVIDER_ID="nxcc-git-provider"
 readonly AR_REPO_NAME="nxcc-images"
 # The name of the GKE cluster.
 readonly GKE_CLUSTER_NAME="nxcc"
-# The Helm release name for the application.
-readonly HELM_RELEASE_NAME="nxcc-node"
 # The path to your Helm chart.
 readonly HELM_CHART_PATH="./charts/nxcc-node"
 
@@ -375,40 +373,75 @@ cluster_destroy() {
 }
 
 ################################################################################
-# Deploys the application using Helm.
+# Deploys the application to a specific environment (namespace) using Helm.
+# Arguments:
+#   $1: The environment to deploy to (e.g., 'staging', 'prod').
 ################################################################################
 app_deploy() {
-  info "Starting application deployment with Helm..."
+  local env="$1"
+  local helm_release_name="nxcc-node-${env}"
+  local namespace="${env}"
+  local helm_set_args=()
+
+  info "Starting application deployment to '${env}' environment..."
 
   if [ ! -d "${HELM_CHART_PATH}" ]; then
     error "Helm chart not found at '${HELM_CHART_PATH}'. Please create it first."
   fi
 
-  info "Deploying/upgrading Helm release '${HELM_RELEASE_NAME}' from chart '${HELM_CHART_PATH}'."
-  helm upgrade "${HELM_RELEASE_NAME}" "${HELM_CHART_PATH}" \
+  # --- Environment-specific configurations ---
+  info "Configuring for '${env}'..."
+  case "$env" in
+    staging)
+      helm_set_args+=(--set confidential.enabled=false)
+      helm_set_args+=(--set seed.replicaCount=1)
+      helm_set_args+=(--set worker.replicaCount=1)
+      helm_set_args+=(--set ingress.hosts[0].host="staging.nxcc.example.com")
+      ;;
+    prod)
+      helm_set_args+=(--set confidential.enabled=true)
+      helm_set_args+=(--set seed.replicaCount=3)
+      helm_set_args+=(--set worker.replicaCount=2)
+      helm_set_args+=(--set ingress.hosts[0].host="prod.nxcc.example.com")
+      ;;
+    *)
+      error "Invalid environment '${env}' specified for deployment."
+      ;;
+  esac
+
+  info "Deploying/upgrading Helm release '${helm_release_name}' in namespace '${namespace}'."
+  helm upgrade "${helm_release_name}" "${HELM_CHART_PATH}" \
     --install \
+    --create-namespace \
     --atomic \
     --timeout 5m \
     --wait \
-    --namespace default \
+    --namespace "${namespace}" \
     --set image.repository="${GCP_AR_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO_NAME}/node" \
-    --set image.tag="latest" # Replace with your actual image tag in CI/CD
+    --set image.tag="latest" \
+    "${helm_set_args[@]}" # Replace with your actual image tag in CI/CD
 
-  success "Application deployment complete. Use 'kubectl get pods -l app.kubernetes.io/name=nxcc-node' to check status."
+  success "Application deployment to '${env}' complete. Use 'kubectl get pods -n ${namespace} -l app.kubernetes.io/instance=${helm_release_name}' to check status."
 }
 
 ################################################################################
-# Uninstalls the application using Helm.
+# Uninstalls the application from a specific environment.
+# Arguments:
+#   $1: The environment to destroy (e.g., 'staging', 'prod').
 ################################################################################
 app_destroy() {
-  info "Starting application uninstall..."
+  local env="$1"
+  local helm_release_name="nxcc-node-${env}"
+  local namespace="${env}"
 
-  if helm status "${HELM_RELEASE_NAME}" &>/dev/null; then
-    info "Uninstalling Helm release '${HELM_RELEASE_NAME}'."
-    helm uninstall "${HELM_RELEASE_NAME}"
+  info "Starting application uninstall from '${env}' environment..."
+
+  if helm status "${helm_release_name}" --namespace "${namespace}" &>/dev/null; then
+    info "Uninstalling Helm release '${helm_release_name}' from namespace '${namespace}'."
+    helm uninstall "${helm_release_name}" --namespace "${namespace}"
     success "Helm release uninstalled."
   else
-    warn "Helm release '${HELM_RELEASE_NAME}' not found. Nothing to do."
+    warn "Helm release '${helm_release_name}' in namespace '${namespace}' not found. Nothing to do."
   fi
 }
 
@@ -416,17 +449,17 @@ app_destroy() {
 # Displays usage information.
 ################################################################################
 usage() {
-  echo "Usage: $0 <command>"
+  echo "Usage: $0 <command> [args]"
   echo
   echo "Manages GCP and GKE resources for a confidential workload."
   echo
   echo "Commands:"
-  echo "  cicd-setup        Sets up Service Account, WIF, and Artifact Registry for CI/CD."
-  echo "  cicd-teardown     Tears down all CI/CD resources."
-  echo "  cluster-create    Creates the confidential GKE Autopilot cluster."
-  echo "  cluster-destroy   Deletes the GKE cluster."
-  echo "  app-deploy        Deploys the application to GKE using Helm."
-  echo "  app-destroy       Uninstalls the application from GKE."
+  echo "  cicd-setup          Sets up Service Account, WIF, and Artifact Registry for CI/CD."
+  echo "  cicd-teardown       Tears down all CI/CD resources."
+  echo "  cluster-create      Creates the confidential GKE Autopilot cluster."
+  echo "  cluster-destroy     Deletes the GKE cluster."
+  echo "  app-deploy <env>    Deploys the application to a specific environment (staging|prod)."
+  echo "  app-destroy <env>   Uninstalls the application from a specific environment (staging|prod)."
   echo
   echo "Identity and Project Configuration:"
   echo "  The script determines which GCP account and project to use as follows:"
@@ -475,13 +508,27 @@ main() {
       fi
       ;;
     app-deploy)
-      app_deploy
+      if [[ -z "$2" ]]; then
+        error "Missing environment argument. Usage: $0 app-deploy <staging|prod>"
+      fi
+      if [[ "$2" != "staging" && "$2" != "prod" ]]; then
+        error "Invalid environment '$2'. Must be 'staging' or 'prod'."
+      fi
+      app_deploy "$2"
       ;;
     app-destroy)
-      read -p "Are you sure you want to uninstall the application '${HELM_RELEASE_NAME}'? [y/N] " -n 1 -r
+      if [[ -z "$2" ]]; then
+        error "Missing environment argument. Usage: $0 app-destroy <staging|prod>"
+      fi
+      if [[ "$2" != "staging" && "$2" != "prod" ]]; then
+        error "Invalid environment '$2'. Must be 'staging' or 'prod'."
+      fi
+      local env_to_destroy="$2"
+      local release_to_destroy="nxcc-node-${env_to_destroy}"
+      read -p "Are you sure you want to uninstall the application '${release_to_destroy}' from the '${env_to_destroy}' environment? [y/N] " -n 1 -r
       echo
       if [[ $REPLY =~ ^[Yy]$ ]]; then
-        app_destroy
+        app_destroy "${env_to_destroy}"
       else
         info "Application uninstall cancelled."
       fi
