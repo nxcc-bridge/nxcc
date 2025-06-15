@@ -1,1 +1,7 @@
 @import "tailwindcss";
+
+:root {
+  --sl-color-accent: #eeaa00;
+  --sl-color-accent-low: #664400;
+  --sl-color-accent-high: #ffc533;
+}
