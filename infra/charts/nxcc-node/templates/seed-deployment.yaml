@@ -40,6 +40,7 @@ spec:
             {{- toYaml .Values.seed.resources | nindent 12 }}
       # This is the key to high availability. It tells Kubernetes to spread the seed pods
       # across different physical locations (availability zones).
+      {{- if .Values.seed.topologySpread.enabled }}
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: "topology.kubernetes.io/zone"
@@ -48,3 +49,4 @@ spec:
             matchLabels:
               {{- include "nxcc.selectorLabels" . | nindent 14 }}
               app.kubernetes.io/component: seed
+      {{- end }}

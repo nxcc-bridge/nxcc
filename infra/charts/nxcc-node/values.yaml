@@ -43,6 +43,11 @@ seed:
     # -- The port for the public LoadBalancer service.
     port: 9000
 
+  # -- Configuration for pod topology spread constraints.
+  topologySpread:
+    # -- If true, enable topology spread constraints to distribute seed pods across zones.
+    enabled: true
+
 # -- Configuration for the large worker node.
 # This node handles the main application logic and ingress traffic.
 worker:
@@ -60,6 +65,11 @@ worker:
   httpPort: 6922
   # -- P2P port for libp2p communication.
   p2pPort: 9000
+
+  # -- Service configuration for the worker.
+  service:
+    # -- Kubernetes service type for the worker.
+    type: ClusterIP
 
 # -- Ingress configuration for the worker node.
 ingress:

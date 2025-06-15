@@ -72,7 +72,7 @@ jobs:
           IMAGE_REPO_OVERRIDE: ${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/${{ env.AR_IMAGE_NAME }}
           IMAGE_TAG_OVERRIDE: ${{ steps.vars.outputs.SHORT_SHA }}
           CI: true # Enable non-interactive mode in the script
-          HELM_TIMEOUT: 2m # Short timeout for quick feedback in CI
+          HELM_TIMEOUT: 1m # Short timeout for quick feedback in CI
         run: ./infra/infra.sh k8s deploy debug
 
       - name: Dump KinD debug info on failure

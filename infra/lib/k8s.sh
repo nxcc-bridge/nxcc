@@ -39,6 +39,17 @@ k8s_deploy() {
       helm_set_args+=(--set image.repository="${image_repo}")
       helm_set_args+=(--set image.tag="${image_tag}")
       helm_set_args+=(--set image.pullPolicy=Always)
+
+      # CI (KinD) specific overrides
+      # 1. Disable topology spread as KinD runs on a single node without zone labels.
+      helm_set_args+=(--set seed.topologySpread.enabled=false)
+      # 2. Reduce resource requests/limits to fit within typical CI runner constraints.
+      helm_set_args+=(--set seed.resources.requests.cpu=250m)
+      helm_set_args+=(--set seed.resources.requests.memory=256Mi)
+      helm_set_args+=(--set seed.resources.limits.memory=512Mi)
+      helm_set_args+=(--set worker.resources.requests.cpu=500m)
+      helm_set_args+=(--set worker.resources.requests.memory=512Mi)
+      helm_set_args+=(--set worker.resources.limits.memory=1Gi)
       ;;
     staging|prod)
       # For GKE cluster. Identity must be resolved.

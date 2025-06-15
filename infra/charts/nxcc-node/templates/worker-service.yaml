@@ -6,7 +6,7 @@ metadata:
     {{- include "nxcc.labels" . | nindent 4 }}
     app.kubernetes.io/component: worker
 spec:
-  type: ClusterIP
+  type: {{ .Values.worker.service.type | default "ClusterIP" }}
   ports:
     - port: 80 # The service port can be 80, targeting the container's http port
       targetPort: http
