@@ -67,19 +67,20 @@ check_deps() {
 ################################################################################
 # Resolves the GCP Account and Project ID to use for all subsequent commands.
 # Populates the global GCP_ACCOUNT and PROJECT_ID variables.
-#
-# Account Resolution Logic:
-# 1. Use `GCP_ACCOUNT` env var if set.
-# 2. If multiple gcloud accounts are logged in, prompt the user to select one.
-# 3. If one account is logged in, use it automatically.
-# 4. If no accounts are logged in, trigger the login flow.
-#
-# Project ID Resolution Logic:
-# 1. Use `GCP_PROJECT_ID` env var if set.
-# 2. If not set, infer from the gcloud configuration for the selected account.
-# 3. If it cannot be determined, exit with an error.
 ################################################################################
 resolve_gcp_identity() {
+  # If running in a CI environment, assume auth is handled externally (e.g., WIF).
+  if [[ -n "${CI}" ]]; then
+    info "CI environment detected. Assuming pre-configured GCP identity."
+    PROJECT_ID=$(gcloud config get-value project 2>/dev/null)
+    if [[ -z "${PROJECT_ID}" ]]; then
+      error "GCP Project ID not found in gcloud config. Ensure the 'google-github-actions/auth' step runs first."
+    fi
+    GCP_ACCOUNT="[Service Account via WIF]"
+    success "Using project from CI environment: ${C_YELLOW}${PROJECT_ID}${C_RESET}"
+    return
+  fi
+
   info "Resolving GCP identity..."
 
   # --- Step 1: Resolve GCP Account ---
@@ -87,13 +88,10 @@ resolve_gcp_identity() {
     GCP_ACCOUNT="${GCP_ACCOUNT_OVERRIDE}"
     info "Using account from GCP_ACCOUNT environment variable: ${GCP_ACCOUNT}"
   else
-    # Use a `while read` loop for compatibility with older bash versions (like on macOS)
-    # This safely reads each line of gcloud output into the `accounts` array.
     local accounts=()
     while IFS= read -r line; do
         accounts+=("$line")
     done < <(gcloud auth list --filter=status:ACTIVE --format="value(account)")
-
 
     if [[ ${#accounts[@]} -eq 0 ]]; then
       info "No active GCP account found. Opening browser for authentication..."
@@ -447,31 +445,40 @@ k8s_deploy() {
   info "Configuring for '${env}'..."
   case "$env" in
     debug)
-      # For local KinD cluster
+      # For local KinD cluster. Overridable for CI.
+      local image_repo="${IMAGE_REPO_OVERRIDE:-${LOCAL_IMAGE_NAME}}"
+      local image_tag="${IMAGE_TAG_OVERRIDE:-${LOCAL_IMAGE_TAG}}"
+
       helm_set_args+=(--set confidential.enabled=false)
       helm_set_args+=(--set seed.replicaCount=1)
       helm_set_args+=(--set worker.replicaCount=1)
       helm_set_args+=(--set ingress.enabled=false)
       helm_set_args+=(--set worker.service.type=NodePort)
-      helm_set_args+=(--set image.repository="${LOCAL_IMAGE_NAME}")
-      helm_set_args+=(--set image.tag="${LOCAL_IMAGE_TAG}")
-      helm_set_args+=(--set image.pullPolicy=IfNotPresent)
+      helm_set_args+=(--set image.repository="${image_repo}")
+      helm_set_args+=(--set image.tag="${image_tag}")
+      helm_set_args+=(--set image.pullPolicy=Always)
       ;;
     staging|prod)
-      # For GKE cluster
+      # For GKE cluster. Identity must be resolved.
       resolve_gcp_identity
+
+      # Default to 'latest' for staging, but allow override for prod tags.
+      local image_tag="${IMAGE_TAG_OVERRIDE:-latest}"
+
       helm_set_args+=(--set image.repository="${GCP_AR_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO_NAME}/node")
-      helm_set_args+=(--set image.tag="latest") # Replace with your actual image tag in CI/CD
+      helm_set_args+=(--set image.tag="${image_tag}")
 
       if [ "$env" == "staging" ]; then
         helm_set_args+=(--set confidential.enabled=false)
         helm_set_args+=(--set seed.replicaCount=1)
         helm_set_args+=(--set worker.replicaCount=1)
+        helm_set_args+=(--set ingress.enabled=true)
         helm_set_args+=(--set ingress.hosts[0].host="staging.nxcc.example.com")
       else # prod
         helm_set_args+=(--set confidential.enabled=true)
         helm_set_args+=(--set seed.replicaCount=3)
         helm_set_args+=(--set worker.replicaCount=1)
+        helm_set_args+=(--set ingress.enabled=true)
         helm_set_args+=(--set ingress.hosts[0].host="prod.nxcc.example.com")
       fi
       ;;

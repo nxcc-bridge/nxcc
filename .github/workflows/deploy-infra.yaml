@@ -1,0 +1,149 @@
+name: Deploy Infrastructure
+
+# Trigger this workflow when the Docker build workflow completes successfully
+on:
+  workflow_run:
+    workflows: ["Build and Publish Node Docker Image"]
+    types:
+      - completed
+
+# Environment variables used across jobs
+env:
+  # Configuration flags
+  ENABLE_GKE_STAGING: false # Set to false to disable GKE staging deployments
+
+  # GCP Configuration (matches infra.sh defaults)
+  GCP_LOCATION: europe
+  GCP_GKE_REGION: europe-west1
+  GKE_CLUSTER_NAME: nxcc
+  AR_REPO_NAME: nxcc-images
+  AR_IMAGE_NAME: node
+
+  # Helm Configuration
+  HELM_CHART_PATH: ./charts/nxcc-node
+
+  # Registry for KinD (using GHCR as it's often easier for local/CI clusters)
+  GHCR_REGISTRY: ghcr.io
+
+jobs:
+  # --- Deploy to Dev (KinD) and Staging (GKE) ---
+  # Runs only when the triggering workflow was for the 'main' branch and succeeded
+  deploy-dev-and-staging:
+    name: Deploy to KinD (Dev) and GKE (Staging)
+    runs-on: ubuntu-latest
+    # Only run if the build was successful AND it was on the main branch
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main'
+
+    # Permissions needed for GCP authentication
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Get Short SHA
+        id: vars
+        run: echo "SHORT_SHA=$(echo ${{ github.event.workflow_run.head_sha }} | cut -c1-8)" >> $GITHUB_OUTPUT
+
+      - name: Make script executable
+        run: chmod +x ./infra/infra.sh
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+
+      # --- KinD (Dev) Deployment ---
+
+      - name: Set up KinD cluster
+        uses: helm/kind-action@v1.10.0
+        with:
+          cluster_name: nxcc-debug # The infra.sh script expects this name
+
+      - name: Deploy to KinD (Dev)
+        env:
+          # Override script defaults for the CI 'debug' environment
+          IMAGE_REPO_OVERRIDE: ${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/${{ env.AR_IMAGE_NAME }}
+          IMAGE_TAG_OVERRIDE: ${{ steps.vars.outputs.SHORT_SHA }}
+          CI: true # Enable non-interactive mode in the script
+        run: ./infra/infra.sh k8s deploy debug
+
+      # --- GKE (Staging) Deployment ---
+
+      - name: Authenticate with Google Cloud
+        if: env.ENABLE_GKE_STAGING == 'true'
+        id: auth
+        uses: 'google-github-actions/auth@v2'
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up GKE credentials
+        if: env.ENABLE_GKE_STAGING == 'true'
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.GKE_CLUSTER_NAME }}
+          location: ${{ env.GCP_GKE_REGION }}
+
+      - name: Deploy to GKE (Staging)
+        if: env.ENABLE_GKE_STAGING == 'true'
+        env:
+          # The build workflow pushes 'latest' on main branch pushes
+          IMAGE_TAG_OVERRIDE: latest
+          CI: true # Enable non-interactive mode in the script
+        run: ./infra/infra.sh k8s deploy staging
+
+  # --- Deploy to Production (GKE) ---
+  # Runs only when the triggering workflow was for a release tag (e.g., v1.0.0) and succeeded
+  deploy-production:
+    name: Deploy to GKE (Production)
+    runs-on: ubuntu-latest
+    # Only run if the build was successful AND it was triggered by a tag starting with 'v'
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      startsWith(github.event.workflow_run.head_branch, 'v')
+
+    # Permissions needed for GCP authentication
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Make script executable
+        run: chmod +x ./infra/infra.sh
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+
+      - name: Authenticate with Google Cloud
+        id: auth
+        uses: 'google-github-actions/auth@v2'
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up GKE credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.GKE_CLUSTER_NAME }}
+          location: ${{ env.GCP_GKE_REGION }}
+
+      - name: Deploy to GKE (Production)
+        env:
+          # The tag name is stored in head_branch for tag events
+          IMAGE_TAG_OVERRIDE: ${{ github.event.workflow_run.head_branch }}
+          CI: true # Enable non-interactive mode in the script
+        run: ./infra/infra.sh k8s deploy prod
