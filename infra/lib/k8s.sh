@@ -30,6 +30,12 @@ k8s_deploy() {
       # For local KinD cluster. Overridable for CI.
       local image_repo="${IMAGE_REPO_OVERRIDE:-${LOCAL_IMAGE_NAME}}"
       local image_tag="${IMAGE_TAG_OVERRIDE:-${LOCAL_IMAGE_TAG}}"
+      local full_image="${image_repo}:${image_tag}"
+
+      # For KinD, load the local Docker image directly into the cluster to avoid pull credential issues.
+      info "Loading Docker image '${full_image}' into KinD cluster..."
+      check_deps kind
+      kind load docker-image --name "nxcc-debug" "${full_image}"
 
       helm_set_args+=(--set confidential.enabled=false)
       helm_set_args+=(--set seed.replicaCount=1)
@@ -38,7 +44,8 @@ k8s_deploy() {
       helm_set_args+=(--set worker.service.type=NodePort)
       helm_set_args+=(--set image.repository="${image_repo}")
       helm_set_args+=(--set image.tag="${image_tag}")
-      helm_set_args+=(--set image.pullPolicy=Always)
+      # Use IfNotPresent so Kubernetes uses the pre-loaded image. 'Always' would ignore it.
+      helm_set_args+=(--set image.pullPolicy=IfNotPresent)
 
       # CI (KinD) specific overrides
       # 1. Disable topology spread as KinD runs on a single node without zone labels.
