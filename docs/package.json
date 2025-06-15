@@ -7,7 +7,9 @@
     "start": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "astro": "astro"
+    "astro": "astro",
+    "format": "prettier --write . --cache",
+    "lint": "prettier --check . --cache"
   },
   "dependencies": {
     "@astrojs/starlight": "^0.34.4",
@@ -15,5 +17,9 @@
     "astro": "^5.6.1",
     "sharp": "^0.32.5",
     "tailwindcss": "^4.1.10"
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3",
+    "prettier-plugin-astro": "^0.14.1"
   }
 }
