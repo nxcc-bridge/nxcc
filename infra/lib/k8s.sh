@@ -13,6 +13,8 @@ k8s_deploy() {
   local helm_release_name="nxcc-node-${env}"
   local namespace="${env}"
   local helm_set_args=()
+  # Use HELM_TIMEOUT if set, otherwise default to 5m.
+  local helm_timeout="${HELM_TIMEOUT:-5m}"
 
   info "Starting application deployment to '${env}' environment..."
   check_deps helm kubectl
@@ -67,18 +69,80 @@ k8s_deploy() {
       ;;
   esac
 
-  info "Deploying/upgrading Helm release '${helm_release_name}' in namespace '${namespace}'."
+  info "Deploying/upgrading Helm release '${helm_release_name}' in namespace '${namespace}' with a timeout of ${helm_timeout}."
   helm upgrade "${helm_release_name}" "${HELM_CHART_PATH}" \
     --install \
     --create-namespace \
     --atomic \
-    --timeout 5m \
+    --timeout "${helm_timeout}" \
     --wait \
     --namespace "${namespace}" \
     "${helm_set_args[@]}"
 
   success "Application deployment to '${env}' complete."
   info "Use 'kubectl get all -n ${namespace}' to check status."
+}
+
+################################################################################
+# Dumps diagnostic information from a Kubernetes namespace for debugging.
+# Arguments:
+#   $1: The environment to get info from ('debug', 'staging', 'prod').
+################################################################################
+k8s_dump_debug_info() {
+  local env="$1"
+  local namespace="${env}"
+  local helm_release_name="nxcc-node-${env}"
+
+  info "--- Dumping debug information for environment '${env}' ---"
+
+  # Helper to run a command and print a title, continuing if it fails.
+  run_and_report() {
+    local title="$1"
+    shift
+    info "--- ${title} ---"
+    # Execute command and capture output. Continue on error.
+    if ! output=$("$@" 2>&1); then
+      warn "Command failed: $*"
+      echo "${output}"
+    else
+      echo "${output}"
+    fi
+    echo # Add a newline for readability
+  }
+
+  run_and_report "Helm Status for ${helm_release_name}" \
+    helm status "${helm_release_name}" -n "${namespace}"
+
+  run_and_report "All Resources in Namespace ${namespace}" \
+    kubectl get all -n "${namespace}" -o wide
+
+  run_and_report "Describe Pods in Namespace ${namespace}" \
+    kubectl describe pods -n "${namespace}"
+
+  run_and_report "Events in Namespace ${namespace} (sorted by time)" \
+    kubectl get events -n "${namespace}" --sort-by='.lastTimestamp'
+
+  info "--- Logs from all containers in Namespace ${namespace} ---"
+  local pods
+  # Redirect stderr to /dev/null to avoid error message if no pods are found
+  if ! pods=$(kubectl get pods -n "${namespace}" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); then
+    warn "Could not list pods in namespace ${namespace}."
+    return
+  fi
+
+  if [ -z "$pods" ]; then
+    info "No pods found in namespace ${namespace}."
+    return
+  fi
+
+  for pod in $pods; do
+    run_and_report "Logs for pod: ${pod}" \
+      kubectl logs "${pod}" -n "${namespace}" --all-containers=true --tail=200
+    run_and_report "Logs for previous instance of pod: ${pod}" \
+      kubectl logs "${pod}" -n "${namespace}" --all-containers=true --previous --tail=200
+  done
+
+  success "--- Debug information dump complete. ---"
 }
 
 ################################################################################

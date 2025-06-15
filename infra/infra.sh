@@ -39,11 +39,12 @@ usage() {
   echo "      create:   Creates the specified cluster."
   echo "      destroy:  Deletes the specified cluster."
   echo
-  echo "  k8s <deploy|destroy> <env>"
+  echo "  k8s <deploy|destroy|dump-debug> <env>"
   echo "    Manages the application deployment via Helm chart."
   echo "      <env>: debug | staging | prod"
-  echo "      deploy:   Deploys or upgrades the application to the specified environment."
-  echo "      destroy:  Uninstalls the application from the specified environment."
+  echo "      deploy:      Deploys or upgrades the application to the specified environment."
+  echo "      destroy:     Uninstalls the application from the specified environment."
+  echo "      dump-debug:  Dumps diagnostic information for a failed deployment."
   echo
   echo "Environment Notes:"
   echo "  - 'debug' environment is intended for the 'kind' cluster."
@@ -127,8 +128,12 @@ main() {
           read -p "Are you sure you want to uninstall the application '${release_to_destroy}' from the '${env}' environment? [y/N] " -n 1 -r; echo
           if [[ $REPLY =~ ^[Yy]$ ]]; then k8s_destroy "$env"; else info "Application uninstall cancelled."; fi
           ;;
+        dump-debug)
+          if [[ -z "$env" ]]; then error "Missing environment for 'k8s dump-debug'. Use 'debug', 'staging', or 'prod'."; fi
+          k8s_dump_debug_info "$env"
+          ;;
         *)
-          error "Invalid subcommand for 'k8s'. Use 'deploy' or 'destroy'."
+          error "Invalid subcommand for 'k8s'. Use 'deploy', 'destroy', or 'dump-debug'."
           ;;
       esac
       ;;

@@ -72,7 +72,15 @@ jobs:
           IMAGE_REPO_OVERRIDE: ${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/${{ env.AR_IMAGE_NAME }}
           IMAGE_TAG_OVERRIDE: ${{ steps.vars.outputs.SHORT_SHA }}
           CI: true # Enable non-interactive mode in the script
+          HELM_TIMEOUT: 2m # Short timeout for quick feedback in CI
         run: ./infra/infra.sh k8s deploy debug
+
+      - name: Dump KinD debug info on failure
+        # This step runs only if a previous step in the job has failed.
+        if: failure()
+        run: |
+          echo "::error::Deployment to KinD failed. Dumping debug information."
+          ./infra/infra.sh k8s dump-debug debug
 
       # --- GKE (Staging) Deployment ---
 
