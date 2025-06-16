@@ -20,7 +20,6 @@ tonic = { version = "0.13.1", features = ["transport"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 nxcc-interface = { path = "../interface" }
-tower = "0.5.2"
 hyper-util = "0.1.11"
 ciborium = "0.2.2"
 alloy-primitives = "1.0.0"
@@ -37,7 +36,9 @@ base64 = "0.22.1"
 sha2 = "0.10.9"
 percent-encoding = "2.3.1"
 futures-util = "0.3.31"
-axum = "0.8.4"
+axum = "0.7.5"
+tower-http = { version = "0.5.2", features = ["cors"] }
+tower = "0.5.2"
 
 [dev-dependencies]
 tracing-test = "0.2.5"

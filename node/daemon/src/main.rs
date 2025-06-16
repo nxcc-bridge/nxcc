@@ -113,31 +113,29 @@ async fn main() -> anyhow::Result<()> {
     network.start(shutdown_tx.subscribe()).await?;
 
     let http_mounts = Arc::new(RwLock::new(HashMap::<String, String>::new()));
+    let work_order_orchestrator =
+        crate::services::work_order_orchestrator::WorkOrderOrchestrator::new(
+            enclave_client.clone(),
+            secrets_service.clone(),
+            runner_service.clone(),
+            policy_manager.clone(),
+            gateway_manager.clone(),
+            Arc::new(config.clone()),
+            http_mounts.clone(),
+            daemon_event_tx.clone(),
+            shutdown_rx.resubscribe(),
+        );
 
     {
         let grpc_config = config.grpc.clone();
         let secrets_service_clone = secrets_service.clone();
-        let enclave_client_clone = enclave_client.clone();
-        let http_mounts_clone_for_wo = http_mounts.clone();
-        let work_order_orchestrator =
-            crate::services::work_order_orchestrator::WorkOrderOrchestrator::new(
-                enclave_client.clone(),
-                secrets_service.clone(),
-                runner_service.clone(),
-                policy_manager.clone(),
-                gateway_manager.clone(),
-                Arc::new(config.clone()),
-                http_mounts_clone_for_wo,
-                daemon_event_tx.clone(),
-                shutdown_rx.resubscribe(),
-            );
-
+        let work_order_orchestrator_for_grpc = work_order_orchestrator.clone();
         let enclave_client_for_grpc_server = enclave_client.clone();
         tokio::spawn(async move {
             if let Err(e) = grpc::start_grpc_server(
                 &grpc_config,
                 secrets_service_clone,
-                work_order_orchestrator,
+                work_order_orchestrator_for_grpc,
                 enclave_client_for_grpc_server,
                 shutdown_rx,
             )
@@ -153,12 +151,14 @@ async fn main() -> anyhow::Result<()> {
     let enclave_client_for_http = enclave_client.clone();
     let mut shutdown_rx_for_http = shutdown_tx.subscribe();
     let http_mounts_for_server = http_mounts.clone();
+    let work_order_orchestrator_for_http = work_order_orchestrator.clone();
 
     tokio::spawn(async move {
         if let Err(e) = start_http_server(
             &http_config,
             http_mounts_for_server,
             enclave_client_for_http,
+            work_order_orchestrator_for_http,
             async move {
                 shutdown_rx_for_http.recv().await.ok();
             },

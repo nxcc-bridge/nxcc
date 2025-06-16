@@ -175,7 +175,7 @@ fn default_default_vm_uds_path() -> String {
     "/tmp/nxcc-workerd-vmm.sock".to_string()
 }
 
-/// Configuration for the daemon's HTTP listener for workers.
+/// Configuration for the daemon's HTTP server.
 #[derive(Debug, Clone, Serialize, Deserialize, clap::Args)]
 pub struct HttpConfig {
     /// The base path under which workers will be mounted.
@@ -183,10 +183,25 @@ pub struct HttpConfig {
     #[serde(default = "default_http_base_mount_path")]
     pub base_mount_path: String,
 
-    /// The listen address for the HTTP server
+    /// The listen address for the HTTP server.
     #[clap(long, default_value = "0.0.0.0:6922")]
     #[serde(default = "default_http_listen_addr")]
     pub listen_addr: String,
+
+    /// Enable the public HTTP API (e.g., for submitting work orders).
+    #[clap(long, env = "NXCC_HTTP_API_ENABLED")]
+    #[serde(default)]
+    pub api_enabled: bool,
+
+    /// Allowed origins for CORS on the public HTTP API.
+    /// Use "*" for a wildcard. An empty list disables CORS.
+    #[clap(
+        long,
+        value_delimiter = ',',
+        env = "NXCC_HTTP_API_CORS_ALLOWED_ORIGINS"
+    )]
+    #[serde(default = "default_cors_allowed_origins")]
+    pub api_cors_allowed_origins: Vec<String>,
 }
 
 impl Default for HttpConfig {
@@ -194,6 +209,8 @@ impl Default for HttpConfig {
         Self {
             base_mount_path: default_http_base_mount_path(),
             listen_addr: default_http_listen_addr(),
+            api_enabled: false,
+            api_cors_allowed_origins: default_cors_allowed_origins(),
         }
     }
 }
@@ -203,6 +220,10 @@ fn default_http_base_mount_path() -> String {
 }
 fn default_http_listen_addr() -> String {
     "0.0.0.0:6922".to_string()
+}
+
+fn default_cors_allowed_origins() -> Vec<String> {
+    vec![]
 }
 
 impl Config {
