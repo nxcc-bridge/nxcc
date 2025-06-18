@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use alloy_primitives::{Address, B256, U256};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::proto::{enclave, interface};
 
@@ -477,7 +478,7 @@ pub struct WorkerBundlePointer {
 
 /// Describes a worker (or policy) and its inputs.
 /// This is what is pointed to by the on-chain root of trust where policies are concerned.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WorkerManifest {
     /// An authenticated pointer to a `WorkerBundle`.
     pub bundle: WorkerBundlePointer,
@@ -487,7 +488,7 @@ pub struct WorkerManifest {
     pub identities: Vec<(SecretId, String)>,
     /// Arbitrary data passed by the creator of the worker manifest.
     /// Untrusted from the perspective of the nXCC system.
-    pub userdata: HashMap<String, String>,
+    pub userdata: HashMap<String, Value>,
 }
 
 /// Represents a signature entry in a DSSE envelope.
@@ -612,7 +613,7 @@ pub struct FullPolicyPackage {
 }
 
 /// The inner payload of a `WorkOrder` that gets signed.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WorkOrderPayload {
     /// An arbitrary identifier for this work order.
     /// Useful for debugging and ensuring uniqueness when broadcasting over the p2p network.
@@ -833,5 +834,54 @@ impl From<EventPayload<'_>> for interface::EventPayload {
             },
             EventPayload::_Phantom(_) => panic!("Cannot convert _Phantom EventPayload"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_work_order_payload_deserialization_with_complex_userdata() {
+        let json_str = r#"{
+            "id": "test-wo-123",
+            "worker": {
+                "bundle": {
+                    "source": "data:application/json;base64,e30="
+                },
+                "identities": [],
+                "userdata": {
+                    "config_string": "some-value",
+                    "config_number": 123,
+                    "config_bool": true,
+                    "config_object": {
+                        "nested_key": "nested_value",
+                        "nested_array": [1, "two", false]
+                    }
+                }
+            },
+            "events": [
+                { "handler": "onLaunch", "kind": "launch" },
+                { "handler": "onEvent", "kind": "web3_event", "chain": 1, "address": [], "topics": [] }
+            ]
+        }"#;
+
+        let result: Result<WorkOrderPayload, _> = serde_json::from_str(json_str);
+        assert!(result.is_ok(), "Failed to deserialize: {:?}", result.err());
+
+        let payload = result.unwrap();
+        assert_eq!(payload.id, "test-wo-123");
+        assert_eq!(payload.events.len(), 2);
+
+        let userdata = &payload.worker.userdata;
+        assert_eq!(
+            userdata.get("config_string").unwrap(),
+            &Value::String("some-value".to_string())
+        );
+        assert_eq!(
+            userdata.get("config_number").unwrap(),
+            &Value::Number(123.into())
+        );
+        assert!(userdata.get("config_object").unwrap().is_object());
     }
 }

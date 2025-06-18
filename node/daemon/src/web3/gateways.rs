@@ -66,7 +66,8 @@ impl GatewayManager {
             0 => Ok("mock://gateway.example.com".to_string()),
             1 => Ok("wss://eth.llamarpc.com".to_string()),
             5 => Ok("wss://rpc.ankr.com/eth_goerli".to_string()),
-            1337 | 31337 => Ok("ws://127.0.0.1:8545".to_string()),
+            1337 | 31337 => Ok("ws://127.0.0.1:8545".to_string()), // Ganache/Anvil default
+            1338 => Ok("ws://127.0.0.1:8546".to_string()), // For integration test's second anvil
             11155111 => Ok("wss://rpc.sepolia.org".to_string()),
             // Add more chains as needed
             _ => Err(AppError::Service(format!(

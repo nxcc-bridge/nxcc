@@ -43,7 +43,7 @@ cleanup_node() {
 #   $5 - Daemon binary path
 #   $6 - Enclave binary path
 #   $7 - Workerd VM binary path
-#   $8 - Python identity script path
+#   $8 - HTTP listen address (e.g., "127.0.0.1:6922")
 setup_node() {
 	NODE_NAME="$1"
 	TEST_DIR="$2"
@@ -52,6 +52,7 @@ setup_node() {
 	DAEMON_BIN="$5"
 	ENCLAVE_BIN="$6"
 	WORKERD_VM_BIN="$7"
+	HTTP_LISTEN_ADDR="$8"
 
 	# Create node directory
 	NODE_DIR="$TEST_DIR/$NODE_NAME"
@@ -64,6 +65,7 @@ setup_node() {
 	NODE_DAEMON_SOCK="$SOCK_DIR/d.sock"
 	NODE_ENCLAVE_SOCK="$SOCK_DIR/e.sock"
 	NODE_VM_SOCK="$SOCK_DIR/v.sock"
+	NODE_VM_ID="policy-vm-${NODE_NAME}"
 	NODE_VM_LOG="$NODE_DIR/vm.log" # Added for VM log capture
 	NODE_DAEMON_LOG="$NODE_DIR/daemon.log"
 	NODE_IDENTITY="$NODE_DIR/identity.key"
@@ -100,6 +102,7 @@ setup_node() {
         --identity-path $NODE_IDENTITY \
         --policy-cache-dir $NODE_POLICY_CACHE \
         --listen-addresses /ip4/127.0.0.1/tcp/$NODE_PORT \
+        --listen-addr $HTTP_LISTEN_ADDR \
         --verbose"
 
 	# Add bootstrap peers if provided
@@ -118,6 +121,7 @@ setup_node() {
 	eval "${NODE_NAME}_DAEMON_SOCK=\"$NODE_DAEMON_SOCK\""
 	eval "${NODE_NAME}_ENCLAVE_SOCK=\"$NODE_ENCLAVE_SOCK\""
 	eval "${NODE_NAME}_VM_SOCK=\"$NODE_VM_SOCK\""
+	eval "${NODE_NAME}_VM_ID=\"$NODE_VM_ID\""
 	eval "${NODE_NAME}_VM_LOG=\"$NODE_VM_LOG\""
 	eval "${NODE_NAME}_DAEMON_LOG=\"$NODE_DAEMON_LOG\""
 	eval "${NODE_NAME}_IDENTITY=\"$NODE_IDENTITY\""

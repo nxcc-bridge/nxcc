@@ -184,7 +184,7 @@ pub struct HttpConfig {
     pub base_mount_path: String,
 
     /// The listen address for the HTTP server.
-    #[clap(long, default_value = "0.0.0.0:6922")]
+    #[clap(long, default_value = "127.0.0.1:6922")]
     #[serde(default = "default_http_listen_addr")]
     pub listen_addr: String,
 
@@ -219,7 +219,7 @@ fn default_http_base_mount_path() -> String {
     "/w".to_string()
 }
 fn default_http_listen_addr() -> String {
-    "0.0.0.0:6922".to_string()
+    "127.0.0.1:6922".to_string()
 }
 
 fn default_cors_allowed_origins() -> Vec<String> {

@@ -17,7 +17,8 @@ echo "Test directory: $TEST_DIR"
 JS_WORKER_DIR="$SCRIPT_DIR/js_workers"
 CONTRACTS_DIR="$SCRIPT_DIR/contracts"
 
-ANVIL_PID=""
+ANVIL_PID_1=""
+ANVIL_PID_2=""
 
 # Find binaries (assuming they are built in target/release)
 DAEMON_BIN="$REPO_ROOT/target/$MODE/nxcc-daemon"
@@ -47,8 +48,10 @@ SECRET_IDENTITY_ID_NUM="555"       # Use a simple numeric string for grpcurl
 SECRET_NAME_IN_WORKER="THE_SECRET" # How the secret is named in the worker's env
 
 # Anvil configuration
-ANVIL_RPC_URL="http://127.0.0.1:8545"
-ANVIL_CHAIN_ID=31337                                                                  # Default Anvil chain ID
+ANVIL_RPC_URL_1="http://127.0.0.1:8545"
+ANVIL_CHAIN_ID_1=31337
+ANVIL_RPC_URL_2="http://127.0.0.1:8546"
+ANVIL_CHAIN_ID_2=1338
 DEPLOYER_PK="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"      # Anvil default[0]
 WORKER_SENDER_PK="0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d" # Anvil default[1]
 
@@ -58,31 +61,56 @@ DSSE_WORK_ORDER_PAYLOAD_TYPE="application/vnd.nxcc.workorderpayload.v1+json"
 
 NODE1_NAME="alice"
 NODE2_NAME="bob"
-NODE1_PORT=9001 # For libp2p TCP listening
-NODE2_PORT=9002 # For libp2p TCP listening
+NODE1_P2P_PORT=9001
+NODE2_P2P_PORT=9002
+NODE1_HTTP_PORT=6922
+NODE2_HTTP_PORT=6923
 
 # --- Helper Functions ---
-start_anvil() {
-	echo "Starting Anvil..."
-	anvil --silent &
-	ANVIL_PID=$!
+start_anvils() {
+	echo "Starting Anvil instance 1 (chain $ANVIL_CHAIN_ID_1 on port 8545)..."
+	anvil --port 8545 --chain-id "$ANVIL_CHAIN_ID_1" --silent &
+	ANVIL_PID_1=$!
 	# Wait for anvil to be ready
 	for i in $(seq 1 10); do
-		if cast chain-id --rpc-url "$ANVIL_RPC_URL" >/dev/null 2>&1; then
-			echo "Anvil started. Chain ID: $(cast chain-id --rpc-url "$ANVIL_RPC_URL")"
-			return 0
+		if cast chain-id --rpc-url "$ANVIL_RPC_URL_1" >/dev/null 2>&1; then
+			echo "Anvil 1 started. Chain ID: $(cast chain-id --rpc-url "$ANVIL_RPC_URL_1")"
+			break
 		fi
 		sleep 1
 	done
-	echo "ERROR: Anvil failed to start or respond in time."
-	exit 1
+	if ! cast chain-id --rpc-url "$ANVIL_RPC_URL_1" >/dev/null 2>&1; then
+		echo "ERROR: Anvil 1 failed to start or respond in time."
+		exit 1
+	fi
+
+	echo "Starting Anvil instance 2 (chain $ANVIL_CHAIN_ID_2 on port 8546)..."
+	anvil --port 8546 --chain-id "$ANVIL_CHAIN_ID_2" --silent &
+	ANVIL_PID_2=$!
+	# Wait for anvil to be ready
+	for i in $(seq 1 10); do
+		if cast chain-id --rpc-url "$ANVIL_RPC_URL_2" >/dev/null 2>&1; then
+			echo "Anvil 2 started. Chain ID: $(cast chain-id --rpc-url "$ANVIL_RPC_URL_2")"
+			break
+		fi
+		sleep 1
+	done
+	if ! cast chain-id --rpc-url "$ANVIL_RPC_URL_2" >/dev/null 2>&1; then
+		echo "ERROR: Anvil 2 failed to start or respond in time."
+		exit 1
+	fi
 }
 
-stop_anvil() {
-	if [ -n "$ANVIL_PID" ]; then
-		echo "Stopping Anvil (PID: $ANVIL_PID)..."
-		kill "$ANVIL_PID" 2>/dev/null || true
-		ANVIL_PID=""
+stop_anvils() {
+	if [ -n "$ANVIL_PID_1" ]; then
+		echo "Stopping Anvil 1 (PID: $ANVIL_PID_1)..."
+		kill "$ANVIL_PID_1" 2>/dev/null || true
+		ANVIL_PID_1=""
+	fi
+	if [ -n "$ANVIL_PID_2" ]; then
+		echo "Stopping Anvil 2 (PID: $ANVIL_PID_2)..."
+		kill "$ANVIL_PID_2" 2>/dev/null || true
+		ANVIL_PID_2=""
 	fi
 }
 
@@ -99,7 +127,7 @@ cleanup() {
 	cleanup_node "$NODE1_NAME"
 	cleanup_node "$NODE2_NAME"
 
-	stop_anvil
+	stop_anvils
 
 	# Remove the test directory
 	if [ -d "$TEST_DIR" ]; then
@@ -198,26 +226,26 @@ jq -n \
 # Original Test Workflow (Steps 1-3: Secret Sharing)
 # ==============================================================================
 # --- Node 1 (Alice) Setup ---
-echo "--- Setting up Node 1 (Alice) ---"
-setup_node "$NODE1_NAME" "$TEST_DIR" "$NODE1_PORT" "" \
-	"$DAEMON_BIN" "$ENCLAVE_BIN" "$WORKERD_VM_BIN"
+echo "--- Setting up Node 1 (Alice) on P2P port $NODE1_P2P_PORT and HTTP port $NODE1_HTTP_PORT ---"
+setup_node "$NODE1_NAME" "$TEST_DIR" "$NODE1_P2P_PORT" "" \
+	"$DAEMON_BIN" "$ENCLAVE_BIN" "$WORKERD_VM_BIN" "127.0.0.1:$NODE1_HTTP_PORT"
 
 # Sleep after node setup to ensure everything is ready
 sleep 2
 
 # Attach VM to Enclave via Daemon
-grpcurl_attach_vm "$alice_DAEMON_SOCK" "policy-vm-0" "$alice_VM_SOCK"
+grpcurl_attach_vm "$alice_DAEMON_SOCK" "$alice_VM_ID" "$alice_VM_SOCK"
 
 # --- Node 2 (Bob) Setup ---
-echo "--- Setting up Node 2 (Bob) ---"
-setup_node "$NODE2_NAME" "$TEST_DIR" "$NODE2_PORT" "$alice_MULTIADDR" \
-	"$DAEMON_BIN" "$ENCLAVE_BIN" "$WORKERD_VM_BIN"
+echo "--- Setting up Node 2 (Bob) on P2P port $NODE2_P2P_PORT and HTTP port $NODE2_HTTP_PORT ---"
+setup_node "$NODE2_NAME" "$TEST_DIR" "$NODE2_P2P_PORT" "$alice_MULTIADDR" \
+	"$DAEMON_BIN" "$ENCLAVE_BIN" "$WORKERD_VM_BIN" "127.0.0.1:$NODE2_HTTP_PORT"
 
 # Sleep after node setup to ensure everything is ready
 sleep 1
 
 # Attach VM to Enclave via Daemon
-grpcurl_attach_vm "$bob_DAEMON_SOCK" "policy-vm-0" "$bob_VM_SOCK"
+grpcurl_attach_vm "$bob_DAEMON_SOCK" "$bob_VM_ID" "$bob_VM_SOCK"
 
 # Sleep after VM attachment and before starting the test workflow
 sleep 2
@@ -301,12 +329,12 @@ fi
 # ==============================================================================
 # New Test Workflow (Step 4: Web3 Event Subscription)
 # ==============================================================================
-echo "--- Starting New Web3 Event Subscription Test Workflow ---"
+echo "--- Starting New Cross-Chain Data Movement via Events Test ---"
 
-# 4a. Start Anvil
-start_anvil
+# 4a. Start Anvils
+start_anvils
 
-# 4b. Deploy TestEvents.sol contract
+# 4b. Deploy TestEvents.sol contract to both chains
 echo "Compiling and deploying TestEvents contract..."
 if ! command -v forge >/dev/null 2>&1; then
 	echo "ERROR: forge (foundry) command not found. Please install foundry."
@@ -315,17 +343,28 @@ fi
 (cd "$CONTRACTS_DIR" && forge build --force --via-ir) # Use via-ir for potentially smaller bytecode
 TEST_EVENTS_BYTECODE=$(jq -r .bytecode.object <"$SCRIPT_DIR/out/TestEvents.sol/TestEvents.json")
 TEST_EVENTS_ABI=$(jq .abi <"$SCRIPT_DIR/out/TestEvents.sol/TestEvents.json")
-TEST_EVENTS_ABI_ESCAPED=$(echo "$TEST_EVENTS_ABI" | jq -c . | sed 's/"/\\"/g') # For embedding in JSON string
-
-DEPLOY_OUTPUT=$(cast send --json --rpc-url "$ANVIL_RPC_URL" --private-key "$DEPLOYER_PK" \
+TEST_EVENTS_ABI_STRING=$(jq -c .abi <"$SCRIPT_DIR/out/TestEvents.sol/TestEvents.json")
+echo "Deploying contract to chain 1 ($ANVIL_CHAIN_ID_1)..."
+DEPLOY_OUTPUT_1=$(cast send --json --rpc-url "$ANVIL_RPC_URL_1" --private-key "$DEPLOYER_PK" \
 	--create "$TEST_EVENTS_BYTECODE")
-CONTRACT_ADDRESS=$(echo "$DEPLOY_OUTPUT" | jq -r .contractAddress)
-if [ -z "$CONTRACT_ADDRESS" ] || [ "$CONTRACT_ADDRESS" = "null" ]; then
-	echo "ERROR: Failed to deploy TestEvents contract."
-	echo "$DEPLOY_OUTPUT"
+CONTRACT_ADDRESS_1=$(echo "$DEPLOY_OUTPUT_1" | jq -r .contractAddress)
+if [ -z "$CONTRACT_ADDRESS_1" ] || [ "$CONTRACT_ADDRESS_1" = "null" ]; then
+	echo "ERROR: Failed to deploy TestEvents contract on chain 1."
+	echo "$DEPLOY_OUTPUT_1"
 	exit 1
 fi
-echo "TestEvents contract deployed at: $CONTRACT_ADDRESS"
+echo "TestEvents contract deployed on chain 1 at: $CONTRACT_ADDRESS_1"
+
+echo "Deploying contract to chain 2 ($ANVIL_CHAIN_ID_2)..."
+DEPLOY_OUTPUT_2=$(cast send --json --rpc-url "$ANVIL_RPC_URL_2" --private-key "$DEPLOYER_PK" \
+	--create "$TEST_EVENTS_BYTECODE")
+CONTRACT_ADDRESS_2=$(echo "$DEPLOY_OUTPUT_2" | jq -r .contractAddress)
+if [ -z "$CONTRACT_ADDRESS_2" ] || [ "$CONTRACT_ADDRESS_2" = "null" ]; then
+	echo "ERROR: Failed to deploy TestEvents contract on chain 2."
+	echo "$DEPLOY_OUTPUT_2"
+	exit 1
+fi
+echo "TestEvents contract deployed on chain 2 at: $CONTRACT_ADDRESS_2"
 
 # Prepare Work Order for the event handling worker (using files to avoid argument list too long)
 EVENT_HANDLER_WORKER_JS_CONTENT=$(cat "$EVENT_HANDLER_WORKER_JS_BUNDLE_PATH")
@@ -352,17 +391,20 @@ base64 <"$EVENT_WORKER_BUNDLE_DSSE_FILE" | tr -d '\n' >"$EVENT_WORKER_BUNDLE_DSS
 EVENT_WORKER_MANIFEST_FILE="$TEST_DIR/event_worker_manifest.json"
 jq -n \
 	--rawfile bundle_source_b64 "$EVENT_WORKER_BUNDLE_DSSE_B64_FILE" \
-	--arg rpc_url "$ANVIL_RPC_URL" \
-	--arg contract_addr "$CONTRACT_ADDRESS" \
+	--arg rpc_url_1 "$ANVIL_RPC_URL_1" \
+	--arg contract_addr_1 "$CONTRACT_ADDRESS_1" \
+	--arg rpc_url_2 "$ANVIL_RPC_URL_2" \
+	--arg contract_addr_2 "$CONTRACT_ADDRESS_2" \
 	--arg pk "$WORKER_SENDER_PK" \
+	--arg abi_string "$TEST_EVENTS_ABI_STRING" \
 	"{
         bundle: {source: (\"data:application/json;base64,\" + \$bundle_source_b64), hash: null},
         identities: [],
         userdata: {
-            rpcUrl: \$rpc_url,
-            contractAddress: \$contract_addr,
-            contractAbi: \"$TEST_EVENTS_ABI_ESCAPED\",
-            ethereumPrivateKey: \$pk
+						chain1: { rpcUrl: \$rpc_url_1, contractAddress: \$contract_addr_1 },
+						chain2: { rpcUrl: \$rpc_url_2, contractAddress: \$contract_addr_2 },
+						contractAbi: \$abi_string,
+						ethereumPrivateKey: \$pk
         }
     }" >"$EVENT_WORKER_MANIFEST_FILE"
 
@@ -371,11 +413,14 @@ OTHER_EVENT_SIGNATURE=$(cast sig-event "OtherEvent(uint256)")
 
 EVENT_WORK_ORDER_PAYLOAD_FILE="$TEST_DIR/event_work_order_payload.json"
 jq -n \
-	--arg id "event-work-order-$(date +%s%N)" \
+	--arg id "cross-chain-work-order-$(date +%s%N)" \
 	--slurpfile worker_manifest "$EVENT_WORKER_MANIFEST_FILE" \
-	--argjson chain_id "$ANVIL_CHAIN_ID" \
-	--arg contract_address "$CONTRACT_ADDRESS" \
-	--arg event_sig "$EVENT_VALUE_CHANGED_SIGNATURE" \
+	--argjson chain_id_1 "$ANVIL_CHAIN_ID_1" \
+	--arg contract_address_1 "$CONTRACT_ADDRESS_1" \
+	--arg value_changed_sig "$EVENT_VALUE_CHANGED_SIGNATURE" \
+	--argjson chain_id_2 "$ANVIL_CHAIN_ID_2" \
+	--arg contract_address_2 "$CONTRACT_ADDRESS_2" \
+	--arg other_event_sig "$OTHER_EVENT_SIGNATURE" \
 	'{
  id: $id,
  worker: $worker_manifest[0],
@@ -384,9 +429,16 @@ jq -n \
             {
                 "handler": "valueChanged",
                 "kind": "web3_event",
-                "chain": $chain_id,
-                "address": [$contract_address],
-                "topics": [[$event_sig]]
+                "chain": $chain_id_1,
+                "address": [$contract_address_1],
+                "topics": [[$value_changed_sig]]
+            },
+            {
+                "handler": "otherEvent",
+                "kind": "web3_event",
+                "chain": $chain_id_2,
+                "address": [$contract_address_2],
+                "topics": [[$other_event_sig]]
             }
         ]
     }' >"$EVENT_WORK_ORDER_PAYLOAD_FILE"
@@ -412,36 +464,23 @@ echo "Submitting event-listening work order to Alice and Bob..."
 grpcurl_submit_work_order "$alice_DAEMON_SOCK" "$GRPCURL_SUBMIT_EVENT_WO_PAYLOAD_FILE"
 grpcurl_submit_work_order "$bob_DAEMON_SOCK" "$GRPCURL_SUBMIT_EVENT_WO_PAYLOAD_FILE"
 
-# 4c. Trigger events
-echo "Triggering OtherEvent (should be ignored by workers)..."
-cast send --rpc-url "$ANVIL_RPC_URL" --private-key "$DEPLOYER_PK" "$CONTRACT_ADDRESS" \
-	"triggerOtherEvent(uint256)" 789 >/dev/null
-sleep 2 # Give time for potential (unwanted) processing
+# 4c. Trigger ValueChanged on chain 1, check update on chain 2
+echo "Triggering ValueChanged on chain 1..."
+NEW_VALUE_1=42
+DATA_1="0xdeadbeef"
+cast send --rpc-url "$ANVIL_RPC_URL_1" --private-key "$DEPLOYER_PK" "$CONTRACT_ADDRESS_1" \
+	"triggerEvent(uint256,bytes)" "$NEW_VALUE_1" "$DATA_1" >/dev/null
 
-INITIAL_VALUE_ON_CHAIN=$(cast call --rpc-url "$ANVIL_RPC_URL" "$CONTRACT_ADDRESS" "value()(uint256)")
-if [ "$INITIAL_VALUE_ON_CHAIN" -ne 0 ]; then # Assuming initial value is 0
-	echo "ERROR: Contract value changed after OtherEvent, expected no change. Value: $INITIAL_VALUE_ON_CHAIN"
-	exit 1
-fi
-echo "Contract state unchanged after OtherEvent, as expected."
-
-echo "Triggering ValueChanged event..."
-NEW_VALUE_FOR_EVENT=42
-EVENT_PAYLOAD_DATA_HEX="0xdeadbeefcafe"
-cast send --rpc-url "$ANVIL_RPC_URL" --private-key "$DEPLOYER_PK" "$CONTRACT_ADDRESS" \
-	"triggerEvent(uint256,bytes)" "$NEW_VALUE_FOR_EVENT" "$EVENT_PAYLOAD_DATA_HEX" >/dev/null
-
-# 4d & 4e. Verify contract update
-echo "Polling contract state for update from ValueChanged event..."
+echo "Polling contract on chain 2 for update..."
 CONTRACT_UPDATED_SUCCESSFULLY=false
 for i in $( # Poll for updates
-	seq 1 10
+	seq 1 5
 ); do
-	CURRENT_VALUE=$(cast call --rpc-url "$ANVIL_RPC_URL" "$CONTRACT_ADDRESS" "value()(uint256)")
-	CURRENT_DATA=$(cast call --rpc-url "$ANVIL_RPC_URL" "$CONTRACT_ADDRESS" "eventDataPayload()(bytes)")
+	CURRENT_VALUE=$(cast call --rpc-url "$ANVIL_RPC_URL_2" "$CONTRACT_ADDRESS_2" "value()(uint256)")
+	CURRENT_DATA=$(cast call --rpc-url "$ANVIL_RPC_URL_2" "$CONTRACT_ADDRESS_2" "eventDataPayload()(bytes)")
 
-	if [ "$CURRENT_VALUE" -eq "$NEW_VALUE_FOR_EVENT" ] && [ "$CURRENT_DATA" = "$EVENT_PAYLOAD_DATA_HEX" ]; then
-		echo "SUCCESS (Event Test): Contract state updated as expected."
+	if [ "$CURRENT_VALUE" -eq "$NEW_VALUE_1" ] && [ "$CURRENT_DATA" = "$DATA_1" ]; then
+		echo "SUCCESS (Cross-Chain Test Part 1): Contract on chain 2 updated as expected."
 		CONTRACT_UPDATED_SUCCESSFULLY=true
 		break
 	fi
@@ -450,9 +489,48 @@ for i in $( # Poll for updates
 done
 
 if [ "$CONTRACT_UPDATED_SUCCESSFULLY" != "true" ]; then
-	echo "ERROR (Event Test): Contract state not updated as expected after timeout."
-	echo "Expected value: $NEW_VALUE_FOR_EVENT, Got: $CURRENT_VALUE"
-	echo "Expected data: $EVENT_PAYLOAD_DATA_HEX, Got: $CURRENT_DATA"
+	echo "ERROR (Cross-Chain Test Part 1): Contract on chain 2 not updated as expected after timeout."
+	echo "Expected value: $NEW_VALUE_1, Got: $CURRENT_VALUE"
+	echo "Expected data: $DATA_1, Got: $CURRENT_DATA"
+	echo "Alice daemon log:"
+	cat "$alice_DAEMON_LOG" || true
+	echo "Alice VM log:"
+	cat "$alice_VM_LOG" || true
+	echo "Bob daemon log:"
+	cat "$bob_DAEMON_LOG" || true
+	echo "Bob VM log:"
+	cat "$bob_VM_LOG" || true
+	exit 1
+fi
+
+# 4d. Trigger OtherEvent on chain 2, check update on chain 1
+echo "Triggering OtherEvent on chain 2..."
+NEW_VALUE_2=99
+DATA_2="0x" # The worker should submit empty bytes for OtherEvent
+cast send --rpc-url "$ANVIL_RPC_URL_2" --private-key "$DEPLOYER_PK" "$CONTRACT_ADDRESS_2" \
+	"triggerOtherEvent(uint256)" "$NEW_VALUE_2" >/dev/null
+
+echo "Polling contract on chain 1 for update..."
+CONTRACT_UPDATED_SUCCESSFULLY=false
+for i in $( # Poll for updates
+	seq 1 10
+); do
+	CURRENT_VALUE=$(cast call --rpc-url "$ANVIL_RPC_URL_1" "$CONTRACT_ADDRESS_1" "value()(uint256)")
+	CURRENT_DATA=$(cast call --rpc-url "$ANVIL_RPC_URL_1" "$CONTRACT_ADDRESS_1" "eventDataPayload()(bytes)")
+
+	if [ "$CURRENT_VALUE" -eq "$NEW_VALUE_2" ] && [ "$CURRENT_DATA" = "$DATA_2" ]; then
+		echo "SUCCESS (Cross-Chain Test Part 2): Contract on chain 1 updated as expected."
+		CONTRACT_UPDATED_SUCCESSFULLY=true
+		break
+	fi
+	printf "."
+	sleep 1
+done
+
+if [ "$CONTRACT_UPDATED_SUCCESSFULLY" != "true" ]; then
+	echo "ERROR (Cross-Chain Test Part 2): Contract on chain 1 not updated as expected after timeout."
+	echo "Expected value: $NEW_VALUE_2, Got: $CURRENT_VALUE"
+	echo "Expected data: $DATA_2, Got: $CURRENT_DATA"
 	echo "Alice daemon log:"
 	cat "$alice_DAEMON_LOG" || true
 	echo "Alice VM log:"
@@ -559,7 +637,7 @@ HTTP_STATUS_CODE=$(curl -s -w "%{http_code}" -X POST \
 	-H "Content-Type: text/plain" \
 	-H "X-Custom-Test-Header: custom-value" \
 	-d "$HTTP_REQUEST_BODY" \
-	"http://127.0.0.1:6922/w/${HTTP_ECHO_WORK_ORDER_ID}/test/path?queryArg=testVal" \
+	"http://127.0.0.1:${NODE1_HTTP_PORT}/w/${HTTP_ECHO_WORK_ORDER_ID}/test/path?queryArg=testVal" \
 	-o "$HTTP_RESPONSE_FILE")
 
 echo "HTTP Echo Worker Response Status Code: $HTTP_STATUS_CODE"

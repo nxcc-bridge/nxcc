@@ -134,6 +134,8 @@ impl WorkOrderOrchestrator {
             })?;
 
         // 3. Deserialize WorkOrderPayload
+        // The `userdata` field in the manifest can contain nested JSON, so we deserialize
+        // into a struct that uses `serde_json::Value`.
         let wo_payload: WorkOrderPayload = serde_json::from_slice(&payload_bytes)
             .map_err(|e| AppError::Service(format!("Failed to parse WorkOrderPayload: {}", e)))?;
         info!("Received work order: {}", wo_payload.id);
