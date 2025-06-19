@@ -5,6 +5,7 @@ members = [
     "enclave",
     "vm/base",
     "vm/workerd",
+    "chainlist",
 ]
 resolver = "3"
 
