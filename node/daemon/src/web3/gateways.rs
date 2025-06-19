@@ -68,6 +68,8 @@ impl GatewayManager {
             5 => Ok("wss://rpc.ankr.com/eth_goerli".to_string()),
             1337 | 31337 => Ok("ws://127.0.0.1:8545".to_string()), // Ganache/Anvil default
             1338 => Ok("ws://127.0.0.1:8546".to_string()), // For integration test's second anvil
+            43113 => Ok("wss://avalanche-fuji.drpc.org".to_string()),
+            43114 => Ok("wss://0xrpc.io/avax".to_string()),
             11155111 => Ok("wss://rpc.sepolia.org".to_string()),
             // Add more chains as needed
             _ => Err(AppError::Service(format!(
