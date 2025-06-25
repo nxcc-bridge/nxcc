@@ -15,6 +15,11 @@ type View = 'explorer' | 'deploy';
 const WORKSPACE_STORAGE_KEY = 'remix-ide-clone-workspace';
 
 const projects = ref<Project[]>([]);
+const activeProjectId = ref<string | null>(null);
+const activeProject = computed(() => {
+  return projects.value.find((p) => p.id === activeProjectId.value) ?? null;
+});
+
 const activeView = ref<View>('explorer');
 const openFiles = ref<CodeFile[]>([]);
 const activeFileId = ref<string | null>(null);
@@ -27,10 +32,12 @@ const bottomPaneSize = computed(() => (isBottomPanelOpen.value ? 30 : 0));
 
 onMounted(() => {
   const savedWorkspace = localStorage.getItem(WORKSPACE_STORAGE_KEY);
-  if (savedWorkspace) {
-    projects.value = JSON.parse(savedWorkspace);
-  } else {
-    projects.value = JSON.parse(JSON.stringify(projectTemplates));
+  projects.value = savedWorkspace
+    ? JSON.parse(savedWorkspace)
+    : JSON.parse(JSON.stringify(projectTemplates));
+
+  if (projects.value.length > 0) {
+    activeProjectId.value = projects.value[0].id;
   }
 });
 
@@ -60,7 +67,10 @@ function handleFileClose(fileId: string) {
   openFiles.value.splice(index, 1);
 
   if (activeFileId.value === fileId) {
-    activeFileId.value = openFiles.value[index - 1]?.id ?? null;
+    activeFileId.value =
+      openFiles.value[index]?.id ??
+      openFiles.value[index - 1]?.id ??
+      null;
   }
 }
 
@@ -71,28 +81,38 @@ function handleFileContentUpdate({
   fileId: string;
   content: string;
 }) {
-  for (const project of projects.value) {
-    const file = project.files.find((f) => f.id === fileId);
-    if (file) {
-      if (file.content !== content) {
-        file.content = content;
-        if (!file.isModified) {
-          file.isModified = true;
-        }
-      }
-      return;
+  if (!activeProject.value) return;
+  const file = activeProject.value.files.find((f) => f.id === fileId);
+  if (file && file.content !== content) {
+    file.content = content;
+    if (!file.isModified) {
+      file.isModified = true;
     }
   }
 }
 
 function handleFileSave(fileId: string) {
-  for (const project of projects.value) {
-    const file = project.files.find((f) => f.id === fileId);
-    if (file && file.isModified) {
+  if (!activeProject.value) return;
+  const file = activeProject.value.files.find((f) => f.id === fileId);
+  if (file && file.isModified) {
+    file.isModified = false;
+    saveWorkspace();
+  }
+}
+
+function saveAllModifiedFiles() {
+  if (!activeProject.value) return;
+
+  let wasModified = false;
+  for (const file of activeProject.value.files) {
+    if (file.isModified) {
       file.isModified = false;
-      saveWorkspace();
-      return;
+      wasModified = true;
     }
+  }
+
+  if (wasModified) {
+    saveWorkspace();
   }
 }
 
@@ -105,6 +125,19 @@ function handleResetWorkspace() {
     localStorage.removeItem(WORKSPACE_STORAGE_KEY);
     window.location.reload();
   }
+}
+
+function switchProject(newProjectId: string) {
+  if (newProjectId === activeProjectId.value) {
+    return;
+  }
+
+  saveAllModifiedFiles();
+
+  openFiles.value = [];
+  activeFileId.value = null;
+
+  activeProjectId.value = newProjectId;
 }
 
 function handleDeploy(project: Project) {
@@ -137,6 +170,69 @@ function handleDeploy(project: Project) {
   }
 }
 
+function handleCreateProject() {
+  const name = prompt('Enter new project name:');
+  if (!name) return;
+
+  const newProjectId = `proj-user-${Date.now()}`;
+  const slugName = name.toLowerCase().replace(/\s+/g, '-');
+
+  const newProject: Project = {
+    id: newProjectId,
+    name: name,
+    files: [
+      {
+        id: `${newProjectId}-app`,
+        name: 'app.js',
+        language: 'javascript',
+        content: `/**
+ * A new app.
+ */
+function main() {
+  console.log("Hello from your new secure app: ${name}!");
+}
+
+main();
+`,
+      },
+      {
+        id: `${newProjectId}-policy`,
+        name: 'policy.json',
+        language: 'json',
+        content: JSON.stringify(
+          {
+            description: 'A default policy for a new project.',
+            permissions: {
+              filesystem: { access: 'none' },
+              network: { allow: [] },
+              compute: {
+                cpuCores: { max: 1 },
+                memory: { max: '256MB' },
+              },
+            },
+          },
+          null,
+          2
+        ),
+      },
+      {
+        id: `${newProjectId}-manifest`,
+        name: 'manifest.json',
+        language: 'json',
+        content: JSON.stringify(
+          { name: slugName, entrypoint: 'app.js', version: '1.0.0' },
+          null,
+          2
+        ),
+      },
+    ],
+  };
+
+  projects.value.push(newProject);
+  saveWorkspace();
+  switchProject(newProjectId);
+}
+
 function handleStartTour() {
   alert('The interactive guided tour is coming soon!');
 }
@@ -155,9 +251,12 @@ function handleStartTour() {
         <SidePanel
           :active-view="activeView"
           :projects="projects"
+          :active-project-id="activeProjectId"
           @open-file="handleFileOpen"
           @deploy="handleDeploy"
           @reset-workspace="handleResetWorkspace"
+          @switch-project="switchProject"
+          @create-project="handleCreateProject"
         />
       </Pane>
       <Pane :size="80" class="h-full">
