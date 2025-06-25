@@ -1,20 +1,20 @@
 <script setup lang="ts">
-import FileExplorer from './FileExplorer.vue';
-import DeployPanel from './DeployPanel.vue';
-import type { Project, CodeFile } from './types';
+import FileExplorer from "./FileExplorer.vue";
+import DeployPanel from "./DeployPanel.vue";
+import type { Project, CodeFile } from "./types";
 
 defineProps<{
-  activeView: 'explorer' | 'deploy';
+  activeView: "explorer" | "deploy";
   projects: Project[];
   activeProjectId: string | null;
 }>();
 
 defineEmits<{
-  (e: 'open-file', file: CodeFile): void;
-  (e: 'deploy', project: Project): void;
-  (e: 'reset-workspace'): void;
-  (e: 'switch-project', projectId: string): void;
-  (e: 'create-project'): void;
+  (e: "open-file", file: CodeFile): void;
+  (e: "deploy", project: Project): void;
+  (e: "reset-workspace"): void;
+  (e: "switch-project", projectId: string): void;
+  (e: "create-project"): void;
 }>();
 </script>
 

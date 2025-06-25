@@ -1,20 +1,20 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, onUnmounted } from 'vue';
-import { EditorView, keymap } from '@codemirror/view';
-import { EditorState } from '@codemirror/state';
-import { defaultKeymap, indentWithTab } from '@codemirror/commands';
-import { javascript } from '@codemirror/lang-javascript';
-import { json } from '@codemirror/lang-json';
-import { basicSetup } from 'codemirror';
+import { ref, onMounted, watch, onUnmounted } from "vue";
+import { EditorView, keymap } from "@codemirror/view";
+import { EditorState } from "@codemirror/state";
+import { defaultKeymap, indentWithTab } from "@codemirror/commands";
+import { javascript } from "@codemirror/lang-javascript";
+import { json } from "@codemirror/lang-json";
+import { basicSetup } from "codemirror";
 
 const props = defineProps<{
   modelValue: string;
-  language: 'javascript' | 'json';
+  language: "javascript" | "json";
 }>();
 
 const emit = defineEmits<{
-  (e: 'update:modelValue', value: string): void;
-  (e: 'save'): void;
+  (e: "update:modelValue", value: string): void;
+  (e: "save"): void;
 }>();
 
 const editorEl = ref<HTMLDivElement>();
@@ -34,39 +34,39 @@ onMounted(() => {
         ...defaultKeymap,
         indentWithTab,
         {
-          key: 'Mod-s',
+          key: "Mod-s",
           preventDefault: true,
           run: () => {
-            emit('save');
+            emit("save");
             return true;
           },
         },
       ]),
       languageConf[props.language](),
       EditorView.theme({
-        '&': {
-          color: '#cbd5e1' /* slate-300 */,
-          backgroundColor: '#0f172a' /* slate-900 */,
-          height: '100%',
+        "&": {
+          color: "#cbd5e1" /* slate-300 */,
+          backgroundColor: "#0f172a" /* slate-900 */,
+          height: "100%",
         },
-        '.cm-content': {
-          caretColor: '#fbbf24' /* amber-400 */,
+        ".cm-content": {
+          caretColor: "#fbbf24" /* amber-400 */,
         },
-        '&.cm-focused .cm-cursor': {
-          borderLeftColor: '#fbbf24' /* amber-400 */,
+        "&.cm-focused .cm-cursor": {
+          borderLeftColor: "#fbbf24" /* amber-400 */,
         },
-        '&.cm-focused .cm-selectionBackground, ::selection': {
-          backgroundColor: '#475569' /* slate-600 */,
+        "&.cm-focused .cm-selectionBackground, ::selection": {
+          backgroundColor: "#475569" /* slate-600 */,
         },
-        '.cm-gutters': {
-          backgroundColor: '#0f172a' /* slate-900 */,
-          color: '#64748b' /* slate-500 */,
-          border: 'none',
+        ".cm-gutters": {
+          backgroundColor: "#0f172a" /* slate-900 */,
+          color: "#64748b" /* slate-500 */,
+          border: "none",
         },
       }),
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
-          emit('update:modelValue', update.state.doc.toString());
+          emit("update:modelValue", update.state.doc.toString());
         }
       }),
     ],
@@ -86,7 +86,7 @@ watch(
         changes: { from: 0, to: view.state.doc.length, insert: newValue },
       });
     }
-  }
+  },
 );
 
 onUnmounted(() => {

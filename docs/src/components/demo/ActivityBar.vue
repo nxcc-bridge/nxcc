@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { Files, Rocket, Wand2 } from 'lucide-vue-next';
+import { Files, Rocket, Wand2 } from "lucide-vue-next";
 
 defineProps<{
-  activeView: 'explorer' | 'deploy';
+  activeView: "explorer" | "deploy";
 }>();
 
 const emit = defineEmits<{
-  (e: 'update:activeView', view: 'explorer' | 'deploy'): void;
-  (e: 'start-tour'): void;
+  (e: "update:activeView", view: "explorer" | "deploy"): void;
+  (e: "start-tour"): void;
 }>();
 </script>
 

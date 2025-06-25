@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue';
-import { X } from 'lucide-vue-next';
-import CodeMirrorEditor from './CodeMirrorEditor.vue';
-import type { CodeFile } from './types';
+import { computed, watch } from "vue";
+import { X } from "lucide-vue-next";
+import CodeMirrorEditor from "./CodeMirrorEditor.vue";
+import type { CodeFile } from "./types";
 
 const props = defineProps<{
   openFiles: CodeFile[];
@@ -10,10 +10,13 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (e: 'update:activeFileId', id: string | null): void;
-  (e: 'close-file', id: string): void;
-  (e: 'update:file-content', payload: { fileId: string; content: string }): void;
-  (e: 'save-file', id: string): void;
+  (e: "update:activeFileId", id: string | null): void;
+  (e: "close-file", id: string): void;
+  (
+    e: "update:file-content",
+    payload: { fileId: string; content: string },
+  ): void;
+  (e: "save-file", id: string): void;
 }>();
 
 const activeFile = computed(() => {
@@ -36,7 +39,7 @@ const activeFile = computed(() => {
               : 'text-slate-300 hover:bg-slate-700'
           "
         >
-          <span>{{ file.name }}{{ file.isModified ? '*' : '' }}</span>
+          <span>{{ file.name }}{{ file.isModified ? "*" : "" }}</span>
           <X
             :size="16"
             @click.stop="emit('close-file', file.id)"

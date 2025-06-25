@@ -1,34 +1,32 @@
 <script setup lang="ts">
-import { ref } from 'vue';
-import type { Project } from './types';
+import { ref } from "vue";
+import type { Project } from "./types";
 
 const props = defineProps<{
   projects: Project[];
 }>();
 
 const emit = defineEmits<{
-  (e: 'deploy', project: Project): void;
+  (e: "deploy", project: Project): void;
 }>();
 
 const selectedProjectId = ref<string>(
-  props.projects.length > 0 ? props.projects[0].id : ''
+  props.projects.length > 0 ? props.projects[0].id : "",
 );
 
 function handleDeploy() {
   const projectToDeploy = props.projects.find(
-    (p) => p.id === selectedProjectId.value
+    (p) => p.id === selectedProjectId.value,
   );
   if (projectToDeploy) {
-    emit('deploy', projectToDeploy);
+    emit("deploy", projectToDeploy);
   }
 }
 </script>
 
 <template>
   <div class="p-4 text-slate-300">
-    <h3
-      class="text-sm font-bold uppercase text-slate-500 mb-4 tracking-wider"
-    >
+    <h3 class="text-sm font-bold uppercase text-slate-500 mb-4 tracking-wider">
       Run & Deploy
     </h3>
     <div class="space-y-4">

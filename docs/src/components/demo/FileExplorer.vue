@@ -1,13 +1,7 @@
 <script setup lang="ts">
-import { computed } from 'vue';
-import {
-  File,
-  FileJson,
-  FileCode2,
-  RotateCcw,
-  Plus,
-} from 'lucide-vue-next';
-import type { Project, CodeFile } from './types';
+import { computed } from "vue";
+import { File, FileJson, FileCode2, RotateCcw, Plus } from "lucide-vue-next";
+import type { Project, CodeFile } from "./types";
 
 const props = defineProps<{
   projects: Project[];
@@ -15,25 +9,25 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (e: 'open-file', file: CodeFile): void;
-  (e: 'reset-workspace'): void;
-  (e: 'switch-project', projectId: string): void;
-  (e: 'create-project'): void;
+  (e: "open-file", file: CodeFile): void;
+  (e: "reset-workspace"): void;
+  (e: "switch-project", projectId: string): void;
+  (e: "create-project"): void;
 }>();
 
 const activeProject = computed(() =>
-  props.projects.find((p) => p.id === props.activeProjectId)
+  props.projects.find((p) => p.id === props.activeProjectId),
 );
 
-function getFileIcon(lang: CodeFile['language']) {
-  if (lang === 'json') return FileJson;
-  if (lang === 'javascript') return FileCode2;
+function getFileIcon(lang: CodeFile["language"]) {
+  if (lang === "json") return FileJson;
+  if (lang === "javascript") return FileCode2;
   return File;
 }
 
 function handleProjectChange(event: Event) {
   const target = event.target as HTMLSelectElement;
-  emit('switch-project', target.value);
+  emit("switch-project", target.value);
 }
 </script>
 

@@ -1,7 +1,7 @@
 export interface CodeFile {
   id: string;
   name: string;
-  language: 'javascript' | 'json';
+  language: "javascript" | "json";
   content: string;
   isModified?: boolean;
 }

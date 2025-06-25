@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref } from "vue";
 
 defineProps<{
   deploymentLogs: string[];
 }>();
 
-type Tab = 'deploy' | 'app' | 'events';
-const activeTab = ref<Tab>('deploy');
+type Tab = "deploy" | "app" | "events";
+const activeTab = ref<Tab>("deploy");
 </script>
 
 <template>
