@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
 import { Splitpanes, Pane } from 'splitpanes';
 import 'splitpanes/dist/splitpanes.css';
 
@@ -12,6 +12,9 @@ import { projects as projectTemplates } from './project-templates';
 
 type View = 'explorer' | 'deploy';
 
+const WORKSPACE_STORAGE_KEY = 'remix-ide-clone-workspace';
+
+const projects = ref<Project[]>([]);
 const activeView = ref<View>('explorer');
 const openFiles = ref<CodeFile[]>([]);
 const activeFileId = ref<string | null>(null);
@@ -22,9 +25,21 @@ const deploymentLogs = ref<string[]>([]);
 const editorPaneSize = computed(() => (isBottomPanelOpen.value ? 70 : 100));
 const bottomPaneSize = computed(() => (isBottomPanelOpen.value ? 30 : 0));
 
+onMounted(() => {
+  const savedWorkspace = localStorage.getItem(WORKSPACE_STORAGE_KEY);
+  if (savedWorkspace) {
+    projects.value = JSON.parse(savedWorkspace);
+  } else {
+    projects.value = JSON.parse(JSON.stringify(projectTemplates));
+  }
+});
+
+function saveWorkspace() {
+  localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(projects.value));
+}
+
 watch(isBottomPanelOpen, (isOpen) => {
   if (!isOpen) {
-    // Give the pane time to slide away before clearing logs
     setTimeout(() => {
       deploymentLogs.value = [];
     }, 300);
@@ -46,6 +61,49 @@ function handleFileClose(fileId: string) {
 
   if (activeFileId.value === fileId) {
     activeFileId.value = openFiles.value[index - 1]?.id ?? null;
+  }
+}
+
+function handleFileContentUpdate({
+  fileId,
+  content,
+}: {
+  fileId: string;
+  content: string;
+}) {
+  for (const project of projects.value) {
+    const file = project.files.find((f) => f.id === fileId);
+    if (file) {
+      if (file.content !== content) {
+        file.content = content;
+        if (!file.isModified) {
+          file.isModified = true;
+        }
+      }
+      return;
+    }
+  }
+}
+
+function handleFileSave(fileId: string) {
+  for (const project of projects.value) {
+    const file = project.files.find((f) => f.id === fileId);
+    if (file && file.isModified) {
+      file.isModified = false;
+      saveWorkspace();
+      return;
+    }
+  }
+}
+
+function handleResetWorkspace() {
+  if (
+    confirm(
+      'Are you sure you want to reset the workspace? All your changes will be lost.'
+    )
+  ) {
+    localStorage.removeItem(WORKSPACE_STORAGE_KEY);
+    window.location.reload();
   }
 }
 
@@ -79,7 +137,6 @@ function handleDeploy(project: Project) {
   }
 }
 
-// TODO: Implement Shepherd.js tour
 function handleStartTour() {
   alert('The interactive guided tour is coming soon!');
 }
@@ -97,9 +154,10 @@ function handleStartTour() {
       <Pane :size="20" :min-size="15" class="h-full">
         <SidePanel
           :active-view="activeView"
-          :projects="projectTemplates"
+          :projects="projects"
           @open-file="handleFileOpen"
           @deploy="handleDeploy"
+          @reset-workspace="handleResetWorkspace"
         />
       </Pane>
       <Pane :size="80" class="h-full">
@@ -119,6 +177,8 @@ function handleStartTour() {
               :active-file-id="activeFileId"
               @update:active-file-id="activeFileId = $event"
               @close-file="handleFileClose"
+              @update:file-content="handleFileContentUpdate"
+              @save-file="handleFileSave"
             />
           </Pane>
           <Pane :size="bottomPaneSize" class="h-full">

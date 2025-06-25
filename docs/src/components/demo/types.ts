@@ -3,6 +3,7 @@ export interface CodeFile {
   name: string;
   language: 'javascript' | 'json';
   content: string;
+  isModified?: boolean;
 }
 
 export interface Project {

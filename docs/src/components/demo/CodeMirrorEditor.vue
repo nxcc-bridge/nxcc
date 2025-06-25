@@ -12,6 +12,11 @@ const props = defineProps<{
   language: 'javascript' | 'json';
 }>();
 
+const emit = defineEmits<{
+  (e: 'update:modelValue', value: string): void;
+  (e: 'save'): void;
+}>();
+
 const editorEl = ref<HTMLDivElement>();
 let view: EditorView;
 
@@ -25,7 +30,18 @@ onMounted(() => {
     doc: props.modelValue,
     extensions: [
       basicSetup,
-      keymap.of([...defaultKeymap, indentWithTab]),
+      keymap.of([
+        ...defaultKeymap,
+        indentWithTab,
+        {
+          key: 'Mod-s',
+          preventDefault: true,
+          run: () => {
+            emit('save');
+            return true;
+          },
+        },
+      ]),
       languageConf[props.language](),
       EditorView.theme({
         '&': {
@@ -47,6 +63,11 @@ onMounted(() => {
           color: '#64748b' /* slate-500 */,
           border: 'none',
         },
+      }),
+      EditorView.updateListener.of((update) => {
+        if (update.docChanged) {
+          emit('update:modelValue', update.state.doc.toString());
+        }
       }),
     ],
   });

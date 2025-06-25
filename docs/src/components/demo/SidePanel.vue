@@ -11,6 +11,7 @@ defineProps<{
 defineEmits<{
   (e: 'open-file', file: CodeFile, project: Project): void;
   (e: 'deploy', project: Project): void;
+  (e: 'reset-workspace'): void;
 }>();
 </script>
 
@@ -20,6 +21,7 @@ defineEmits<{
       v-if="activeView === 'explorer'"
       :projects="projects"
       @open-file="(file, project) => $emit('open-file', file, project)"
+      @reset-workspace="$emit('reset-workspace')"
     />
     <DeployPanel
       v-else-if="activeView === 'deploy'"

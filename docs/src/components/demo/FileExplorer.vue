@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import { Folder, FolderOpen, File, FileJson, FileCode2 } from 'lucide-vue-next';
+import {
+  Folder,
+  FolderOpen,
+  File,
+  FileJson,
+  FileCode2,
+  RotateCcw,
+} from 'lucide-vue-next';
 import type { Project, CodeFile } from './types';
 
 defineProps<{
@@ -9,6 +16,7 @@ defineProps<{
 
 const emit = defineEmits<{
   (e: 'open-file', file: CodeFile, project: Project): void;
+  (e: 'reset-workspace'): void;
 }>();
 
 const openFolders = ref<Record<string, boolean>>({});
@@ -25,12 +33,19 @@ function getFileIcon(lang: CodeFile['language']) {
 </script>
 
 <template>
-  <div class="p-2 text-slate-300">
-    <h3
-      class="text-sm font-bold uppercase text-slate-500 px-2 mb-2 tracking-wider"
-    >
-      Explorer
-    </h3>
+  <div class="p-2 text-slate-300 flex flex-col h-full">
+    <div class="flex justify-between items-center px-2 mb-2">
+      <h3 class="text-sm font-bold uppercase text-slate-500 tracking-wider">
+        Explorer
+      </h3>
+      <button
+        @click="$emit('reset-workspace')"
+        class="p-1 rounded-md text-slate-400 hover:bg-slate-700 hover:text-amber-400"
+        title="Reset Workspace to Original Templates"
+      >
+        <RotateCcw :size="16" />
+      </button>
+    </div>
     <ul>
       <li v-for="project in projects" :key="project.id" class="text-sm">
         <div
@@ -54,9 +69,13 @@ function getFileIcon(lang: CodeFile['language']) {
             <component
               :is="getFileIcon(file.language)"
               :size="16"
-              class="text-slate-400"
+              :class="
+                file.isModified ? 'text-amber-400' : 'text-slate-400'
+              "
             />
-            <span>{{ file.name }}</span>
+            <span :class="{ 'text-amber-400': file.isModified }">{{
+              file.name
+            }}</span>
           </li>
         </ul>
       </li>
