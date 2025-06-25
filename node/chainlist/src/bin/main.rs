@@ -3,27 +3,69 @@ use std::{
     fs,
     path::Path,
     sync::Arc,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types::BlockNumberOrTag;
+use clap::Parser;
 use futures::stream::{self, StreamExt};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use nxcc_chainlist::types::{Chain, RpcEndpoints, SourceChain};
+// We only need SourceChain from the crate now, as we define Chain and RpcEndpoints locally.
+use nxcc_chainlist::types::SourceChain;
 use reqwest::Client;
+use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tracing::info;
 use url::Url;
 
 const CHAINS_URL: &str = "https://chainlist.org/rpcs.json";
 const CONCURRENCY_LIMIT: usize = 100;
-const RPC_TIMEOUT: Duration = Duration::from_secs(20);
-const OUTPUT_PATH: &str = "src/chains.json";
+const RPC_TIMEOUT: Duration = Duration::from_secs(10);
+const OUTPUT_DIR: &str = "chains";
 
 const BLOCK_TIME_SAMPLE_SIZE: u64 = 20;
 const BLOCK_FETCH_CONCURRENCY: usize = 10;
-const CHAIN_PROCESSING_CONCURRENCY: usize = 25;
+
+// --- New Struct Definitions ---
+// These are defined locally to add the `last_updated` field to the Chain struct.
+
+/// Represents the RPC endpoints for a chain, categorized by protocol.
+#[derive(Serialize, Deserialize, Debug, Default, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RpcEndpoints {
+    pub https: Vec<String>,
+    pub wss: Vec<String>,
+}
+
+/// Represents a single chain with its metadata and curated RPC endpoints.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Chain {
+    pub name: String,
+    pub chain_id: u64,
+    pub rpcs: RpcEndpoints,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub average_block_time_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub block_time_variance_ms: Option<f64>,
+    /// Unix timestamp of when this chain's data was last updated.
+    pub last_updated: u64,
+}
+
+/// A utility to generate a curated list of reliable and performant RPC endpoints for various chains.
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    /// Optional path to a local rpcs.json file.
+    /// If not provided, it will be downloaded from chainlist.org.
+    #[arg(long, short = 'f')]
+    file: Option<String>,
+
+    /// Skip checking chains that have been updated within this many hours.
+    #[arg(long, default_value = "24")]
+    freshness_hours: u64,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Protocol {
@@ -33,16 +75,12 @@ enum Protocol {
 
 #[derive(Debug)]
 struct RpcTask {
-    chain_id: u64,
-    chain_name: String,
     url: Url,
     tracking: Option<String>,
 }
 
 #[derive(Clone, Debug)]
 struct RpcTestResult {
-    chain_id: u64,
-    chain_name: String,
     url: Url,
     protocol: Protocol,
     block_number: Option<u64>,
@@ -58,21 +96,129 @@ struct ScoredRpc {
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
+    // Before running, you will need to add `clap` and `serde` to your Cargo.toml:
+    // `cargo add clap --features derive`
+    // `cargo add serde --features derive`
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
+
+    // Parse command-line arguments
+    let cli = Cli::parse();
+    let freshness_duration = Duration::from_secs(cli.freshness_hours * 3600);
 
     let start_time = Instant::now();
     info!("Starting chainlist generation...");
 
     let client = Client::builder().timeout(Duration::from_secs(60)).build()?;
 
-    let source_chains = fetch_source_chains(&client).await?;
-    let tasks = prepare_rpc_tasks(source_chains);
-    let results = execute_rpc_tests(tasks).await;
-    let final_chains = process_results(results).await?;
+    // 1. Extract all chains available.
+    // If a file path is provided, use it. Otherwise, download from the URL.
+    let source_chains: Vec<SourceChain> = if let Some(path_str) = cli.file {
+        info!("Reading chain data from local file: {}", path_str);
+        let path = Path::new(&path_str);
+        if !path.exists() {
+            return Err(eyre::eyre!(
+                "Provided file path does not exist: {}",
+                path_str
+            ));
+        }
+        let content = fs::read_to_string(path)?;
+        serde_json::from_str(&content)?
+    } else {
+        fetch_source_chains(&client).await?
+    };
 
-    write_output(&final_chains)?;
+    let mut chains_by_id: HashMap<u64, Vec<SourceChain>> = HashMap::new();
+    for chain in source_chains {
+        chains_by_id.entry(chain.chain_id).or_default().push(chain);
+    }
+    // sort them
+    let mut sorted_chain_ids: Vec<u64> = chains_by_id.keys().cloned().collect();
+    sorted_chain_ids.sort();
+
+    // Prepare output directory
+    fs::create_dir_all(OUTPUT_DIR)?;
+    info!("Output will be written to the '{}' directory.", OUTPUT_DIR);
+
+    let m = MultiProgress::new();
+    let main_pb_style = ProgressStyle::default_bar()
+        .template("{spinner:.green} [{elapsed_precise}] Chains: {pos}/{len} | {wide_msg}")
+        .unwrap()
+        .progress_chars("#>-");
+    let main_pb = m.add(ProgressBar::new(sorted_chain_ids.len() as u64));
+    main_pb.set_style(main_pb_style);
+
+    // 2. for each chain
+    for &chain_id in &sorted_chain_ids {
+        // --- NEW LOGIC: Check for existing, fresh file ---
+        let chain_file_path_str = format!("{}/{}.json", OUTPUT_DIR, chain_id);
+        let chain_file_path = Path::new(&chain_file_path_str);
+
+        if chain_file_path.exists() {
+            if let Ok(content) = fs::read_to_string(chain_file_path) {
+                if let Ok(existing_chain) = serde_json::from_str::<Chain>(&content) {
+                    let now_ts = SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)?
+                        .as_secs();
+                    let age =
+                        Duration::from_secs(now_ts.saturating_sub(existing_chain.last_updated));
+
+                    if age < freshness_duration {
+                        info!(
+                            "Chain {} ({}) is fresh (updated {:?} ago). Skipping.",
+                            chain_id, existing_chain.name, age
+                        );
+                        main_pb.inc(1);
+                        continue;
+                    }
+                }
+            }
+        }
+        // --- End of new logic ---
+
+        let sources = chains_by_id.get(&chain_id).unwrap();
+        let chain_name = &sources[0].name;
+        main_pb.set_message(format!("Chain {} ({})", chain_id, chain_name));
+
+        // 2a. test all of its RPCs with maximum concurrency
+        let tasks = prepare_rpc_tasks_for_chain(sources);
+        if tasks.is_empty() {
+            info!(
+                "Chain {} ({}) has no valid RPC URLs to test. Skipping.",
+                chain_id, chain_name
+            );
+            main_pb.inc(1);
+            continue;
+        }
+
+        let rpc_pb = m.add(ProgressBar::new(tasks.len() as u64));
+        let rpc_pb_style = ProgressStyle::default_bar()
+            .template("  └─ RPCs for {msg}: [{bar:30.cyan/blue}] {pos}/{len}")
+            .unwrap()
+            .progress_chars("#>-");
+        rpc_pb.set_style(rpc_pb_style);
+        rpc_pb.set_message(format!("{}", chain_id));
+
+        let results = execute_rpc_tests(tasks, rpc_pb.clone()).await;
+        rpc_pb.finish_and_clear();
+
+        // 2b. test the block time and block time variance
+        if let Some(chain) =
+            process_single_chain_results(chain_id, chain_name.clone(), results).await
+        {
+            // 2c. write out the valid RPCs to a file
+            write_chain_to_file(&chain)?;
+        } else {
+            info!(
+                "No valid RPCs found for chain {} ({}) after processing.",
+                chain_id, chain_name
+            );
+        }
+        main_pb.inc(1);
+    }
+
+    main_pb.finish_with_message("All chains processed.");
 
     info!(
         "Chainlist generation finished in {:.2?}.",
@@ -87,12 +233,12 @@ async fn fetch_source_chains(client: &Client) -> eyre::Result<Vec<SourceChain>> 
     Ok(chains)
 }
 
-fn prepare_rpc_tasks(source_chains: Vec<SourceChain>) -> Vec<RpcTask> {
+fn prepare_rpc_tasks_for_chain(source_chains: &[SourceChain]) -> Vec<RpcTask> {
     let mut tasks = Vec::new();
     let mut seen_urls = HashSet::new();
 
     for chain in source_chains {
-        for rpc in chain.rpc {
+        for rpc in &chain.rpc {
             if rpc.url.contains("${") || !(rpc.url.starts_with("http") || rpc.url.starts_with("ws"))
             {
                 continue;
@@ -118,7 +264,6 @@ fn prepare_rpc_tasks(source_chains: Vec<SourceChain>) -> Vec<RpcTask> {
             }
         }
     }
-    info!("Prepared {} unique RPC URLs to test.", tasks.len());
     tasks
 }
 
@@ -133,19 +278,7 @@ fn http_to_ws_url(url: &Url) -> Option<Url> {
     Some(ws_url)
 }
 
-async fn execute_rpc_tests(tasks: Vec<RpcTask>) -> Vec<RpcTestResult> {
-    let m = MultiProgress::new();
-    let pb_style = ProgressStyle::default_bar()
-        .template(
-            "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({percent}%) \
-             {msg}",
-        )
-        .unwrap()
-        .progress_chars("#>-");
-    let pb = m.add(ProgressBar::new(tasks.len() as u64));
-    pb.set_style(pb_style);
-    pb.set_message("Testing RPCs...");
-
+async fn execute_rpc_tests(tasks: Vec<RpcTask>, pb: ProgressBar) -> Vec<RpcTestResult> {
     let results = Arc::new(Mutex::new(Vec::new()));
 
     stream::iter(tasks)
@@ -168,8 +301,6 @@ async fn execute_rpc_tests(tasks: Vec<RpcTask>) -> Vec<RpcTestResult> {
                     _ => return,
                 };
                 results_clone.lock().await.push(RpcTestResult {
-                    chain_id: task.chain_id,
-                    chain_name: task.chain_name,
                     url: task.url,
                     protocol,
                     block_number,
@@ -180,73 +311,136 @@ async fn execute_rpc_tests(tasks: Vec<RpcTask>) -> Vec<RpcTestResult> {
         })
         .await;
 
-    pb.finish_with_message("All RPCs tested.");
     Arc::try_unwrap(results)
         .expect("Mutex still has multiple owners")
         .into_inner()
 }
 
 async fn test_rpc(url: &Url) -> eyre::Result<u64> {
-    let provider = match url.scheme() {
-        "http" | "https" => ProviderBuilder::new().connect_http(url.clone()),
-        "ws" | "wss" => {
-            let fut =
-                ProviderBuilder::new().connect_ws(alloy_provider::WsConnect::new(url.clone()));
-            tokio::time::timeout(RPC_TIMEOUT, fut).await??
+    let result: Result<u64, eyre::Report> = (async {
+        // Build the provider. This step can fail if the WS connection times out.
+        let provider = match url.scheme() {
+            "http" | "https" => ProviderBuilder::new().connect_http(url.clone()),
+            "ws" | "wss" => {
+                let connect_fut =
+                    ProviderBuilder::new().connect_ws(alloy_provider::WsConnect::new(url.clone()));
+                // The WS connection itself needs a timeout.
+                tokio::time::timeout(RPC_TIMEOUT, connect_fut)
+                    .await
+                    .map_err(|_| eyre::eyre!("WSS connection timed out"))??
+            }
+            _ => return Err(eyre::eyre!("Unsupported scheme: {}", url.scheme())),
+        };
+
+        // Make the RPC call. This future is what we want to time out.
+        let rpc_call_fut = provider.get_block_number();
+        let block_number = tokio::time::timeout(RPC_TIMEOUT, rpc_call_fut)
+            .await
+            .map_err(|_| eyre::eyre!("RPC call timed out"))??;
+
+        Ok(block_number)
+    })
+    .await;
+
+    match result {
+        Ok(block_number) => Ok(block_number),
+        Err(e) => {
+            let error_string = format!("{:?}", e).to_lowercase();
+            if error_string.contains("429") || error_string.contains("too many requests") {
+                // This is a "successful" failure (we know the RPC is alive but rate limited)
+                tracing::debug!(
+                    "RPC {} is rate-limiting (429), counting as low-quality success.",
+                    url
+                );
+                Ok(1)
+            } else {
+                // This is a hard failure, log it with full details.
+                tracing::warn!("RPC test failed for {url}:\n{e:#}");
+                Err(e)
+            }
         }
-        _ => return Err(eyre::eyre!("Unsupported scheme")),
-    };
-
-    let fut = provider.get_block_number();
-    let block_number = tokio::time::timeout(RPC_TIMEOUT, fut).await??;
-
-    Ok(block_number)
+    }
 }
 
+/// Iterates through successful RPCs for a chain, from best to worst,
+/// attempting to calculate block time stats. This is more resilient than
+/// relying on a single RPC.
 async fn calculate_block_time_stats_for_chain(
     chain_id: u64,
     successful_rpcs: &[(RpcTestResult, u64)],
 ) -> (Option<u64>, Option<f64>) {
-    let best_rpc = match successful_rpcs.iter().max_by_key(|(_, block)| *block) {
-        Some((r, _)) => r,
-        None => return (None, None),
-    };
-
-    let (avg, var) = match best_rpc.protocol {
-        Protocol::Https => {
-            let provider = ProviderBuilder::new().connect_http(best_rpc.url.clone());
-            try_calculate_stats(&provider).await
-        }
-        Protocol::Wss => {
-            let ws_fut = ProviderBuilder::new()
-                .connect_ws(alloy_provider::WsConnect::new(best_rpc.url.clone()));
-            match tokio::time::timeout(RPC_TIMEOUT, ws_fut).await {
-                Ok(Ok(provider)) => try_calculate_stats(&provider).await,
-                Ok(Err(e)) => {
-                    tracing::debug!(
-                        "Failed to create WSS provider for chain {}: {}",
-                        chain_id,
-                        e
-                    );
-                    (None, None)
-                }
-                Err(_) => {
-                    tracing::debug!("WSS provider connection timed out for chain {}", chain_id);
-                    (None, None)
-                }
-            }
-        }
-    };
-
-    if avg.is_some() {
-        info!(
-            "Calculated block time for chain {} (avg: {} ms)",
-            chain_id,
-            avg.unwrap()
-        );
+    if successful_rpcs.is_empty() {
+        return (None, None);
     }
 
-    (avg, var)
+    // Sort RPCs by block number, descending, to try the best ones first.
+    let mut sorted_rpcs = successful_rpcs.to_vec();
+    sorted_rpcs.sort_by_key(|(_, block)| std::cmp::Reverse(*block));
+
+    for (rpc_result, _) in &sorted_rpcs {
+        tracing::debug!(
+            "Attempting block time calculation for chain {} with RPC: {}",
+            chain_id,
+            rpc_result.url
+        );
+
+        // Create a provider. This can fail for WSS due to connection issues or timeouts.
+        let provider = match rpc_result.protocol {
+            Protocol::Https => ProviderBuilder::new().connect_http(rpc_result.url.clone()),
+            Protocol::Wss => {
+                let fut = ProviderBuilder::new()
+                    .connect_ws(alloy_provider::WsConnect::new(rpc_result.url.clone()));
+                match tokio::time::timeout(RPC_TIMEOUT, fut).await {
+                    Ok(Ok(provider)) => provider,
+                    Ok(Err(e)) => {
+                        tracing::debug!(
+                            "Failed to create WSS provider for chain {} with RPC {}: {}. Trying \
+                             next.",
+                            chain_id,
+                            rpc_result.url,
+                            e
+                        );
+                        continue;
+                    }
+                    Err(_) => {
+                        tracing::debug!(
+                            "WSS provider connection timed out for chain {} with RPC {}. Trying \
+                             next.",
+                            chain_id,
+                            rpc_result.url
+                        );
+                        continue;
+                    }
+                }
+            }
+        };
+
+        // Try to calculate stats with the connected provider.
+        match try_calculate_stats(&provider).await {
+            (Some(avg), Some(var)) => {
+                info!(
+                    "Successfully calculated block time for chain {} using {}: avg {} ms",
+                    chain_id, rpc_result.url, avg
+                );
+                return (Some(avg), Some(var)); // Success, we're done for this chain.
+            }
+            _ => {
+                // This attempt failed, loop will try the next RPC.
+                tracing::debug!(
+                    "Block time stat calculation failed for chain {} with RPC {}. Trying next.",
+                    chain_id,
+                    rpc_result.url
+                );
+            }
+        }
+    }
+
+    // If we've looped through all successful RPCs and none worked for stat calculation.
+    tracing::warn!(
+        "Could not calculate block time for chain {}: all candidate RPCs failed the test.",
+        chain_id
+    );
+    (None, None)
 }
 
 async fn try_calculate_stats<P: Provider + Send + Sync>(
@@ -328,135 +522,105 @@ async fn calculate_block_time_stats<P: Provider>(provider: &P) -> eyre::Result<(
     Ok((average_ms, variance_ms))
 }
 
-async fn process_results(results: Vec<RpcTestResult>) -> eyre::Result<Vec<Chain>> {
-    info!("Processing {} test results...", results.len());
-    let mut chains_by_id: HashMap<u64, (String, Vec<RpcTestResult>)> = HashMap::new();
-    for res in results {
-        chains_by_id
-            .entry(res.chain_id)
-            .or_insert_with(|| (res.chain_name.clone(), Vec::new()))
-            .1
-            .push(res);
+async fn process_single_chain_results(
+    chain_id: u64,
+    name: String,
+    results: Vec<RpcTestResult>,
+) -> Option<Chain> {
+    let successful_results: Vec<_> = results
+        .into_iter()
+        .filter_map(|r| r.block_number.map(|block| (r, block)))
+        .collect();
+
+    if successful_results.is_empty() {
+        tracing::debug!("Chain {} ({}) has no successful RPCs.", chain_id, name);
+        return None;
     }
 
-    let mut final_chains = Vec::new();
-    let mut chain_stream = stream::iter(chains_by_id)
-        .map(|(chain_id, (name, results))| async move {
-            let successful_results: Vec<_> = results
-                .into_iter()
-                .filter_map(|r| r.block_number.map(|block| (r, block)))
-                .collect();
+    // Use the max block from the initial pass as the single source of truth.
+    let (_best_rpc, max_block_in_pass) =
+        successful_results.iter().max_by_key(|(_, block)| *block)?;
 
-            if successful_results.is_empty() {
-                tracing::warn!(
-                    "Dropping chain {} ({}): No successful RPCs.",
-                    chain_id,
-                    name
-                );
-                return None;
-            }
+    let (average_block_time_ms, block_time_variance_ms) =
+        calculate_block_time_stats_for_chain(chain_id, &successful_results).await;
 
-            let (best_rpc_from_initial_pass, initial_max_block) = successful_results
-                .iter()
-                .max_by_key(|(_, block)| *block)
-                .unwrap();
-
-            let definitive_latest_block = match test_rpc(&best_rpc_from_initial_pass.url).await {
-                Ok(block) => block,
-                Err(e) => {
-                    tracing::warn!(
-                        "Could not get definitive latest block for chain {}: {}. Falling back to \
-                         initial max block.",
-                        chain_id,
-                        e
-                    );
-                    *initial_max_block
-                }
+    let mut scored_rpcs: Vec<ScoredRpc> = successful_results
+        .iter()
+        .map(|(r, block)| {
+            // Score against the max block from the initial pass.
+            let up_to_date_score = if *block >= max_block_in_pass.saturating_sub(5) {
+                1000.0
+            } else {
+                0.0
             };
 
-            let (average_block_time_ms, block_time_variance_ms) =
-                calculate_block_time_stats_for_chain(chain_id, &successful_results).await;
+            let privacy_score = match r.tracking.as_deref() {
+                Some("none") => 3.0,
+                Some("limited") => 2.0,
+                Some("unspecified") | None => 1.0,
+                Some("yes") => 0.0,
+                _ => 0.0,
+            };
 
-            let mut scored_rpcs: Vec<ScoredRpc> = successful_results
-                .into_iter()
-                .map(|(r, block)| {
-                    let up_to_date_score = if block >= definitive_latest_block.saturating_sub(5) {
-                        1000.0
-                    } else {
-                        0.0
-                    };
-
-                    let privacy_score = match r.tracking.as_deref() {
-                        Some("none") => 3.0,
-                        Some("limited") => 2.0,
-                        Some("unspecified") | None => 1.0,
-                        Some("yes") => 0.0,
-                        _ => 0.0,
-                    };
-
-                    let score = up_to_date_score + privacy_score;
-                    ScoredRpc {
-                        url: r.url.to_string(),
-                        protocol: r.protocol,
-                        score,
-                    }
-                })
-                .filter(|r| r.score > 0.0)
-                .collect();
-
-            scored_rpcs.sort_by(|a, b| {
-                b.score
-                    .partial_cmp(&a.score)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-                    .then_with(|| a.url.cmp(&b.url))
-            });
-
-            let mut rpcs = RpcEndpoints::default();
-            for rpc in scored_rpcs {
-                match rpc.protocol {
-                    Protocol::Https => rpcs.https.push(rpc.url),
-                    Protocol::Wss => rpcs.wss.push(rpc.url),
-                }
-            }
-
-            if !rpcs.is_empty() {
-                Some(Chain {
-                    chain_id,
-                    name,
-                    rpcs,
-                    average_block_time_ms,
-                    block_time_variance_ms,
-                })
-            } else {
-                tracing::warn!(
-                    "Dropping chain {} ({}): No RPCs passed the scoring filter.",
-                    chain_id,
-                    name
-                );
-                None
+            let score = up_to_date_score + privacy_score;
+            ScoredRpc {
+                url: r.url.to_string(),
+                protocol: r.protocol,
+                score,
             }
         })
-        .buffer_unordered(CHAIN_PROCESSING_CONCURRENCY);
+        .filter(|r| {
+            if r.score <= 0.0 {
+                tracing::debug!(
+                    "Filtering out url {} for chain {} due to low score",
+                    r.url,
+                    chain_id
+                );
+            }
+            r.score > 0.0
+        })
+        .collect();
 
-    while let Some(Some(chain)) = chain_stream.next().await {
-        final_chains.push(chain);
+    if scored_rpcs.is_empty() {
+        return None;
     }
 
-    final_chains.sort_by_key(|c| c.chain_id);
-    info!(
-        "Final list contains {} chains with valid RPCs.",
-        final_chains.len()
-    );
-    Ok(final_chains)
+    scored_rpcs.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.url.cmp(&b.url))
+    });
+
+    let mut rpcs = RpcEndpoints::default();
+    for rpc in scored_rpcs {
+        match rpc.protocol {
+            Protocol::Https => rpcs.https.push(rpc.url),
+            Protocol::Wss => rpcs.wss.push(rpc.url),
+        }
+    }
+
+    // Get the current Unix timestamp to mark when this data was generated.
+    let last_updated = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .expect("Time went backwards, unable to get current timestamp.")
+        .as_secs();
+
+    Some(Chain {
+        chain_id,
+        name,
+        rpcs,
+        average_block_time_ms,
+        block_time_variance_ms,
+        last_updated,
+    })
 }
 
-fn write_output(chains: &[Chain]) -> eyre::Result<()> {
-    info!("Writing output to {}", OUTPUT_PATH);
-    let output_path = Path::new(OUTPUT_PATH);
-    if let Some(parent) = output_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let json_str = serde_json::to_string_pretty(chains)?;
+fn write_chain_to_file(chain: &Chain) -> eyre::Result<()> {
+    let path_str = format!("{}/{}.json", OUTPUT_DIR, chain.chain_id);
+    let output_path = Path::new(&path_str);
+
+    let json_str = serde_json::to_string_pretty(chain)?;
     fs::write(output_path, json_str)?;
     Ok(())
 }
