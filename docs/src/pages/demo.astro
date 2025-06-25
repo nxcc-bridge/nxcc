@@ -1,0 +1,10 @@
+---
+import Layout from "../layouts/Layout.astro";
+import DemoApp from "../components/demo/DemoApp.vue";
+---
+
+<Layout title="Demo | nXCC">
+  <div id="demo-app" class="h-full">
+    <DemoApp client:only="vue" />
+  </div>
+</Layout>
