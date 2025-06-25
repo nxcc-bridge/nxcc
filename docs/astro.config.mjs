@@ -4,6 +4,8 @@ import starlight from "@astrojs/starlight";
 
 import tailwindcss from "@tailwindcss/vite";
 
+import vue from "@astrojs/vue";
+
 // https://astro.build/config
 export default defineConfig({
   integrations: [
@@ -31,6 +33,7 @@ export default defineConfig({
       ],
       customCss: ["./src/styles/global.css"],
     }),
+    vue(),
   ],
 
   vite: {
