@@ -48,7 +48,7 @@ function getNodeIcon(node: FileTreeNode) {
 </script>
 
 <template>
-  <li :style="{ paddingLeft: `${level * 1.25}rem` }">
+  <li :style="{ paddingLeft: `${level * 1.0}rem` }">
     <div
       @click="
         node.type === 'folder'
@@ -58,11 +58,12 @@ function getNodeIcon(node: FileTreeNode) {
       class="flex items-center gap-1.5 p-1 rounded-md cursor-pointer hover:bg-slate-700 select-none"
     >
       <template v-if="node.type === 'folder'">
-        <ChevronDown v-if="isExpanded" :size="16" class="text-slate-400 shrink-0" />
+        <ChevronDown
+          v-if="isExpanded"
+          :size="16"
+          class="text-slate-400 shrink-0"
+        />
         <ChevronRight v-else :size="16" class="text-slate-400 shrink-0" />
-      </template>
-      <template v-else>
-        <span class="w-4 inline-block shrink-0"></span>
       </template>
 
       <component
@@ -79,8 +80,7 @@ function getNodeIcon(node: FileTreeNode) {
       <span
         class="truncate"
         :class="{
-          'text-amber-400':
-            node.fileObject?.isModified && node.type === 'file',
+          'text-amber-400': node.fileObject?.isModified && node.type === 'file',
         }"
         :title="node.name"
       >

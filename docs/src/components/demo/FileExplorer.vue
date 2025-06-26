@@ -2,9 +2,7 @@
 import { computed, ref } from "vue";
 import { RotateCcw, Plus } from "lucide-vue-next";
 import type { Project, CodeFile } from "./types";
-import FileExplorerNode, {
-  type FileTreeNode,
-} from "./FileExplorerNode.vue";
+import FileExplorerNode, { type FileTreeNode } from "./FileExplorerNode.vue";
 
 const props = defineProps<{
   projects: Project[];
@@ -59,7 +57,9 @@ const fileTree = computed((): FileTreeNode[] => {
     });
   }
 
-  function convertAndSortChildren(nodeChildrenMap: Record<string, any>): FileTreeNode[] {
+  function convertAndSortChildren(
+    nodeChildrenMap: Record<string, any>,
+  ): FileTreeNode[] {
     return Object.values(nodeChildrenMap)
       .map((child: any) => {
         if (child.type === "folder" && child.children) {

@@ -39,7 +39,8 @@ const activeFile = computed(() => {
               : 'text-slate-300 hover:bg-slate-700'
           "
         >
-          <span>{{ file.name.split("/").pop()
+          <span
+            >{{ file.name.split("/").pop()
             }}{{ file.isModified ? "*" : "" }}</span
           >
           <X

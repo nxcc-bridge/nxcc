@@ -158,19 +158,10 @@ function handleDeploy(project: Project) {
   setTimeout(() => addLog("Compiling application..."), 1000);
   setTimeout(() => addLog("Validating policy..."), 1500);
 
-  if (project.id === "proj-sec-fail") {
-    setTimeout(() => addLog("❌ Policy validation FAILED."), 2000);
-    setTimeout(
-      () => addLog("Error: App does not declare required network permissions."),
-      2100,
-    );
-    setTimeout(() => addLog("Deployment aborted."), 2500);
-  } else {
-    setTimeout(() => addLog("✅ Policy validation PASSED."), 2000);
-    setTimeout(() => addLog("Deploying to secure node..."), 2500);
-    setTimeout(() => addLog("🚀 Deployment successful!"), 3000);
-    setTimeout(() => addLog("Application is now running."), 3500);
-  }
+  setTimeout(() => addLog("✅ Policy validation PASSED. (Simulated)"), 2000);
+  setTimeout(() => addLog("Deploying to secure node..."), 2500);
+  setTimeout(() => addLog("🚀 Deployment successful!"), 3000);
+  setTimeout(() => addLog("Application is now running."), 3500);
 }
 
 function handleCreateProject() {

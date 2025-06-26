@@ -1,5 +1,6 @@
-import type { Project } from "./types";
+import type { Project, CodeFile } from "./types";
 
+// Original content snippets and helper functions
 const simpleAppJs = `/**
  * A simple app that logs a message on startup.
  */
@@ -60,7 +61,8 @@ function createPolicyJsContent(policyObject: object): string {
   return `export default ${JSON.stringify(policyObject, null, 2)};`;
 }
 
-export const projects: Project[] = [
+// Data for the original default projects
+const originalProjectTemplates: Project[] = [
   {
     id: "proj-sec-work",
     name: "1-Security-Demo-Working-Policy",
@@ -276,5 +278,64 @@ export const projects: Project[] = [
         ),
       },
     ],
+  },
+];
+
+export const DEMO_PROJECT_ID = "proj-demo";
+const DEMO_PROJECT_NAME = "Demo";
+
+const demoFileConfigurations = [
+  {
+    projectSourceId: "proj-sec-work",
+    type: "policies",
+    demoSubfolder: "secure",
+  },
+  {
+    projectSourceId: "proj-sec-fail",
+    type: "policies",
+    demoSubfolder: "failing",
+  },
+  {
+    projectSourceId: "proj-token-bridge",
+    type: "workers",
+    demoSubfolder: "bridge",
+  },
+  {
+    projectSourceId: "proj-ai-bridge",
+    type: "workers",
+    demoSubfolder: "ai",
+  },
+];
+
+const allDemoFiles: CodeFile[] = [];
+
+for (const config of demoFileConfigurations) {
+  const sourceProject = originalProjectTemplates.find(
+    (p) => p.id === config.projectSourceId,
+  );
+  if (!sourceProject) {
+    continue;
+  }
+
+  sourceProject.files.forEach((file) => {
+    const originalPathParts = file.name.split("/");
+    const originalFileTypeFolder = originalPathParts[0]; // "workers" or "policies"
+    const fileName = originalPathParts.slice(2).join("/"); // e.g. "worker.js" or "manifest.json"
+
+    if (originalFileTypeFolder === config.type) {
+      allDemoFiles.push({
+        ...file,
+        id: `demo-${file.id}`,
+        name: `${config.type}/${config.demoSubfolder}/${fileName}`,
+      });
+    }
+  });
+}
+
+export const projects: Project[] = [
+  {
+    id: DEMO_PROJECT_ID,
+    name: DEMO_PROJECT_NAME,
+    files: allDemoFiles,
   },
 ];
