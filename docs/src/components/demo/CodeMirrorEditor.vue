@@ -6,6 +6,7 @@ import { defaultKeymap, indentWithTab } from "@codemirror/commands";
 import { javascript } from "@codemirror/lang-javascript";
 import { json } from "@codemirror/lang-json";
 import { basicSetup } from "codemirror";
+import { oneDark } from "@codemirror/theme-one-dark";
 
 const props = defineProps<{
   modelValue: string;
@@ -43,27 +44,7 @@ onMounted(() => {
         },
       ]),
       languageConf[props.language](),
-      EditorView.theme({
-        "&": {
-          color: "#cbd5e1" /* slate-300 */,
-          backgroundColor: "#0f172a" /* slate-900 */,
-          height: "100%",
-        },
-        ".cm-content": {
-          caretColor: "#fbbf24" /* amber-400 */,
-        },
-        "&.cm-focused .cm-cursor": {
-          borderLeftColor: "#fbbf24" /* amber-400 */,
-        },
-        "&.cm-focused .cm-selectionBackground, ::selection": {
-          backgroundColor: "#475569" /* slate-600 */,
-        },
-        ".cm-gutters": {
-          backgroundColor: "#0f172a" /* slate-900 */,
-          color: "#64748b" /* slate-500 */,
-          border: "none",
-        },
-      }),
+      oneDark,
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
           emit("update:modelValue", update.state.doc.toString());

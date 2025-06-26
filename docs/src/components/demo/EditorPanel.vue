@@ -25,7 +25,7 @@ const activeFile = computed(() => {
 </script>
 
 <template>
-  <div class="flex flex-col h-full bg-slate-900">
+  <div class="flex flex-col h-full bg-[#282c34]">
     <div class="flex-shrink-0 bg-slate-800 border-b border-slate-700">
       <div v-if="openFiles.length > 0" class="flex items-center">
         <button
