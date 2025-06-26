@@ -185,26 +185,40 @@ function handleCreateProject() {
     name: name,
     files: [
       {
-        id: `${newProjectId}-app`,
-        name: "app.js",
+        id: `${newProjectId}-worker`,
+        name: `workers/${slugName}/worker.js`,
         language: "javascript",
         content: `/**
  * A new app.
  */
 function main() {
-  console.log("Hello from your new secure app: ${name}!");
+  console.log("Hello from your new secure worker: ${name}!");
 }
 
 main();
 `,
       },
       {
-        id: `${newProjectId}-policy`,
-        name: "policy.json",
+        id: `${newProjectId}-worker-manifest`,
+        name: `workers/${slugName}/manifest.json`,
         language: "json",
         content: JSON.stringify(
           {
-            description: "A default policy for a new project.",
+            name: slugName,
+            entrypoint: "worker.js",
+            version: "1.0.0",
+          },
+          null,
+          2,
+        ),
+      },
+      {
+        id: `${newProjectId}-policy`,
+        name: `policies/${slugName}/policy.js`,
+        language: "javascript",
+        content: `export default ${JSON.stringify(
+          {
+            description: "A default policy for your new project: ${name}.",
             permissions: {
               filesystem: { access: "none" },
               network: { allow: [] },
@@ -216,14 +230,18 @@ main();
           },
           null,
           2,
-        ),
+        )};`,
       },
       {
-        id: `${newProjectId}-manifest`,
-        name: "manifest.json",
+        id: `${newProjectId}-policy-manifest`,
+        name: `policies/${slugName}/manifest.json`,
         language: "json",
         content: JSON.stringify(
-          { name: slugName, entrypoint: "app.js", version: "1.0.0" },
+          {
+            name: `${slugName}-policy`,
+            entrypoint: "policy.js",
+            type: "policy",
+          },
           null,
           2,
         ),

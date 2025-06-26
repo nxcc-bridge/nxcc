@@ -39,7 +39,9 @@ const activeFile = computed(() => {
               : 'text-slate-300 hover:bg-slate-700'
           "
         >
-          <span>{{ file.name }}{{ file.isModified ? "*" : "" }}</span>
+          <span>{{ file.name.split("/").pop()
+            }}{{ file.isModified ? "*" : "" }}</span
+          >
           <X
             :size="16"
             @click.stop="emit('close-file', file.id)"
