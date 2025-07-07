@@ -10,7 +10,7 @@ import { oneDark } from "@codemirror/theme-one-dark";
 
 const props = defineProps<{
   modelValue: string;
-  language: "javascript" | "json";
+  language: "javascript" | "json" | "solidity";
 }>();
 
 const emit = defineEmits<{
@@ -24,6 +24,7 @@ let view: EditorView;
 const languageConf = {
   javascript: () => javascript(),
   json: () => json(),
+  solidity: () => javascript(), // Use JS highlighting for solidity
 };
 
 onMounted(() => {

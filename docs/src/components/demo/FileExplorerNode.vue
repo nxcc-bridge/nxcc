@@ -42,7 +42,11 @@ function getNodeIcon(node: FileTreeNode) {
   }
   // File icon logic
   if (node.fileObject?.language === "json") return FileJson;
-  if (node.fileObject?.language === "javascript") return FileCode2;
+  if (
+    node.fileObject?.language === "javascript" ||
+    node.fileObject?.language === "solidity"
+  )
+    return FileCode2;
   return FileIcon;
 }
 </script>
