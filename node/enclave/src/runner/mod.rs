@@ -134,6 +134,17 @@ impl VmClient {
             VmClient::Mock(client) => client.invoke_http(worker_id, request).await,
         }
     }
+
+    pub async fn probe_worker(
+        &mut self,
+        worker_id: String,
+    ) -> Result<(nxcc_interface::proto::vm::WorkerStatus, String), ClientError> {
+        match self {
+            VmClient::Real(client) => client.probe_worker(worker_id).await,
+            #[cfg(test)]
+            VmClient::Mock(client) => client.probe_worker(worker_id).await,
+        }
+    }
 }
 
 // Create a convenient From implementation for VmServiceClient to make client creation more ergonomic
@@ -638,6 +649,34 @@ impl RunnerService {
                 );
                 RunnerError::VmConnection(e)
             })
+    }
+
+    pub async fn check_worker_status(
+        &self,
+        worker_id: String,
+    ) -> Result<(nxcc_interface::proto::vm::WorkerStatus, String), RunnerError> {
+        info!("Checking status for worker '{}'", worker_id);
+
+        let vm_id = {
+            let worker_map_guard = self.worker_map.read().await;
+            worker_map_guard
+                .get(&worker_id)
+                .cloned()
+                .ok_or_else(|| RunnerError::WorkerNotFound(worker_id.clone()))?
+        };
+
+        let mut vms_guard = self.vms.write().await;
+        let client = vms_guard
+            .get_mut(&vm_id)
+            .ok_or_else(|| RunnerError::VmNotAttached(vm_id.clone()))?;
+
+        client.probe_worker(worker_id.clone()).await.map_err(|e| {
+            error!(
+                "Probe worker failed for worker '{}' in VM '{}': {}",
+                worker_id, vm_id, e
+            );
+            RunnerError::VmConnection(e)
+        })
     }
 }
 

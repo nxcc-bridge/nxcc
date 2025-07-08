@@ -1,11 +1,11 @@
 use hyper_util::rt::TokioIo;
 use nxcc_interface::{
     proto::enclave::{
-        AttachVmRequest, CheckSecretsRequest,
+        AttachVmRequest, CheckSecretsRequest, CheckWorkerStatusRequest,
         DeliverBatchEventsRequest as ProtoDeliverBatchEventsRequest, DetachVmRequest,
         ExecutePolicyRequest as ProtoExecutePolicyRequest,
         ExecutePolicyResponse as ProtoExecutePolicyResponse, GenerateSecretsRequest,
-        GetReportRequest, GetSecretsRequest,
+        GetReportRequest, GetSecretsRequest, GetSecretsResponse,
         InvokeHttpWorkerRequest as ProtoInvokeHttpWorkerRequest,
         InvokeHttpWorkerResponse as ProtoInvokeHttpWorkerResponse, PutSecretsRequest,
         PutSecretsResponse, RunWorkerRequest, SecretsBundle as ProtoSecretsBundle,
@@ -292,5 +292,26 @@ impl EnclaveClient {
         resp.into_inner()
             .response
             .ok_or_else(|| "Enclave returned no HttpResponse".to_string())
+    }
+
+    pub async fn check_worker_status(
+        &self,
+        worker_id: String,
+    ) -> Result<(nxcc_interface::proto::vm::WorkerStatus, String), String> {
+        let req = CheckWorkerStatusRequest { worker_id };
+        let mut client = self.runner();
+        let resp = client
+            .check_worker_status(req)
+            .await
+            .map_err(|e| e.to_string())?
+            .into_inner();
+        let status =
+            nxcc_interface::proto::vm::WorkerStatus::try_from(resp.status).map_err(|_| {
+                format!(
+                    "Invalid worker status enum value from enclave: {}",
+                    resp.status
+                )
+            })?;
+        Ok((status, resp.status_message))
     }
 }

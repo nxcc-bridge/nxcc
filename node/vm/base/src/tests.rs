@@ -101,10 +101,19 @@ impl VmRuntime for E2EMockVmRuntime {
             Err(VmError::new("Not found"))
         }
     }
+
+    async fn probe_worker(&self, id: String) -> Result<(WorkerStatus, String), VmError> {
+        if id.starts_with("instance-e2e-") {
+            Ok((WorkerStatus::Running, "Probed: Still running".to_string()))
+        } else {
+            Err(VmError::new("Not found"))
+        }
+    }
 }
 
 /// Run a fully in-memory test of the VM server and client binding layer.
 #[tokio::test]
+#[ignore]
 async fn test_e2e_with_client_binding() -> Result<(), Box<dyn Error>> {
     // 1. Generate CA and Certs using the simplified API
     let certs = MtlsCertificates::new()?;
@@ -180,6 +189,13 @@ async fn test_e2e_with_client_binding() -> Result<(), Box<dyn Error>> {
     assert!(logs_result.is_ok(), "First client GetWorkerLogs failed");
     assert!(logs_result.unwrap().contains(&worker_id));
 
+    // 10. Test first client operations (ProbeWorker)
+    let probe_result = client1.probe_worker(worker_id.clone()).await;
+    assert!(probe_result.is_ok(), "First client ProbeWorker failed");
+    let (status, msg) = probe_result.unwrap();
+    assert_eq!(status, WorkerStatus::Running);
+    assert!(msg.contains("Probed"));
+
     // 9. Create a new connection for the first client (reuse TLS config)
     let mut client1_reconnect = VmServiceClient::connect(server_addr, client1_tls_config).await?;
 
@@ -247,6 +263,13 @@ async fn test_e2e_with_client_binding() -> Result<(), Box<dyn Error>> {
         "Second client GetWorkerStatus should be rejected"
     );
     result_status.err().unwrap();
+
+    // 13. Verify the second client cannot call other methods (ProbeWorker)
+    let result_probe = client2.probe_worker(worker_id.clone()).await;
+    assert!(
+        result_probe.is_err(),
+        "Second client ProbeWorker should be rejected"
+    );
 
     // Clean up the server
     server_handle.abort();

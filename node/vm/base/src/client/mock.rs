@@ -573,4 +573,17 @@ impl VmClient for MockVmServiceClient {
             ))))
         }
     }
+
+    async fn probe_worker(&mut self, id: String) -> Result<(WorkerStatus, String), ClientError> {
+        self.check_failure()?;
+        let workers = self.workers.lock().unwrap();
+        if let Some(worker) = workers.get(&id) {
+            Ok((worker.status, format!("Mock status: {:?}", worker.status)))
+        } else {
+            Err(ClientError::Grpc(Status::not_found(format!(
+                "Worker '{}' not found",
+                id
+            ))))
+        }
+    }
 }

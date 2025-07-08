@@ -184,6 +184,47 @@ impl WorkerdVmm {
         // by the caller of invoke_http, as the full HttpResponse is returned.
         // The daemon will decide what to do based on the status code.
     }
+
+    async fn probe_worker_internal(
+        &self,
+        id: &str,
+    ) -> Result<(WorkerStatus, String), WorkerdVmError> {
+        let worker_lock = {
+            let workers_map = self.workers.lock().await;
+            workers_map
+                .get(id)
+                .cloned()
+                .ok_or_else(|| WorkerdVmError::WorkerNotFound(id.to_string()))?
+        };
+
+        let mut worker = worker_lock.lock().await;
+
+        if let Ok(Some(exit_status)) = worker.process.try_wait() {
+            let msg = format!("Process exited with status: {}", exit_status);
+            error!(instance_id = ?id, "{}", msg);
+            if worker.status != WorkerStatus::Stopped {
+                worker.status = WorkerStatus::Error;
+            }
+            return Ok((worker.status, msg));
+        }
+
+        match tokio::net::UnixStream::connect(&worker.uds_path).await {
+            Ok(_) => {
+                if worker.status == WorkerStatus::Starting {
+                    worker.status = WorkerStatus::Running;
+                }
+                Ok((worker.status, "UDS socket connectable".to_string()))
+            }
+            Err(e) => {
+                let msg = format!("UDS socket not connectable: {}", e);
+                warn!(instance_id = ?id, "{}", msg);
+                if worker.status != WorkerStatus::Starting {
+                    worker.status = WorkerStatus::Error;
+                }
+                Ok((worker.status, msg))
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -646,6 +687,10 @@ impl VmRuntime for WorkerdVmm {
         // Grab a clone of the logs
         let logs_content = worker.logs.lock().await.clone();
         Ok(logs_content)
+    }
+
+    async fn probe_worker(&self, id: String) -> Result<(WorkerStatus, String), VmError> {
+        self.probe_worker_internal(&id).await.map_err(|e| e.into())
     }
 }
 

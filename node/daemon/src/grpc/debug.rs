@@ -1,21 +1,30 @@
 use std::{collections::HashMap, sync::Arc};
 
 use nxcc_interface::{
-    proto::daemon::{AttachVmRequest, AttachVmResponse, debug_server::Debug},
+    proto::daemon::{
+        AttachVmRequest, AttachVmResponse, CheckWorkerStatusRequest, CheckWorkerStatusResponse,
+        debug_server::Debug,
+    },
     types::{AttestationReport, EnvReport, SecretId, SecretsBox},
 };
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, info};
 
-use crate::grpc::enclave_client::EnclaveClient;
+use crate::{
+    grpc::enclave_client::EnclaveClient, services::work_order_orchestrator::WorkOrderOrchestrator,
+};
 
 pub struct DebugGrpc {
     enclave_client: EnclaveClient,
+    orchestrator: Arc<WorkOrderOrchestrator>,
 }
 
 impl DebugGrpc {
-    pub fn new(enclave_client: EnclaveClient) -> Self {
-        Self { enclave_client }
+    pub fn new(enclave_client: EnclaveClient, orchestrator: Arc<WorkOrderOrchestrator>) -> Self {
+        Self {
+            enclave_client,
+            orchestrator,
+        }
     }
 }
 

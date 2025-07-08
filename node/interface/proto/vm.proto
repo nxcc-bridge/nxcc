@@ -45,6 +45,9 @@ service Vm {
 
   /// Sends an HTTP request to a specific worker instance.
   rpc InvokeHttp(InvokeHttpRequest) returns (InvokeHttpResponse);
+
+  /// Actively probes a worker to check its liveness.
+  rpc ProbeWorker(ProbeWorkerRequest) returns (ProbeWorkerResponse);
 }
 
 
@@ -249,4 +252,16 @@ message GetWorkerLogsResponse {
   bool success = 2;
   /// Optional error message if log retrieval failed (e.g., instance not found, logging disabled).
   string error_message = 3;
+}
+
+// --- ProbeWorker Messages ---
+
+message ProbeWorkerRequest {
+  string id = 1;
+}
+
+message ProbeWorkerResponse {
+  WorkerStatus status = 1;
+  // A descriptive message about the probe result.
+  string status_message = 2;
 }

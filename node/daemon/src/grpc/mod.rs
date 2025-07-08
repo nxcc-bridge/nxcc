@@ -38,9 +38,13 @@ pub async fn start_grpc_server(
             let incoming = listener.incoming();
 
             Server::builder()
-                .add_service(DebugServer::new(DebugGrpc::new(enclave_client.clone())))
+                .add_service(DebugServer::new(DebugGrpc::new(
+                    enclave_client.clone(),
+                    work_order_orchestrator.clone(),
+                )))
                 .add_service(WorkOrderServer::new(WorkOrderGrpcService::new(
                     work_order_orchestrator,
+                    enclave_client.clone(),
                 )))
                 .serve_with_incoming_shutdown(incoming, async {
                     let _ = shutdown.recv().await;
@@ -87,9 +91,14 @@ pub async fn start_grpc_server(
                 let uds_listener = UnixListener::bind(uds_path)
                     .map_err(|e| AppError::Service(format!("Failed to bind UDS: {}", e)))?;
                 let incoming = UnixListenerStream::new(uds_listener);
-                let svc = DebugServer::new(DebugGrpc::new(enclave_client.clone()));
-                let wo_svc =
-                    WorkOrderServer::new(WorkOrderGrpcService::new(work_order_orchestrator));
+                let svc = DebugServer::new(DebugGrpc::new(
+                    enclave_client.clone(),
+                    work_order_orchestrator.clone(),
+                ));
+                let wo_svc = WorkOrderServer::new(WorkOrderGrpcService::new(
+                    work_order_orchestrator,
+                    enclave_client.clone(),
+                ));
 
                 Server::builder()
                     .add_service(svc)
@@ -118,9 +127,13 @@ pub async fn start_grpc_server(
                 .map_err(|e| AppError::Service(format!("Invalid TCP address: {}", e)))?;
             info!("Starting gRPC server on TCP at {}", addr);
             Server::builder()
-                .add_service(DebugServer::new(DebugGrpc::new(enclave_client.clone())))
+                .add_service(DebugServer::new(DebugGrpc::new(
+                    enclave_client.clone(),
+                    work_order_orchestrator.clone(),
+                )))
                 .add_service(WorkOrderServer::new(WorkOrderGrpcService::new(
                     work_order_orchestrator,
+                    enclave_client.clone(),
                 )))
                 .serve_with_shutdown(addr, async {
                     let _ = shutdown.recv().await;

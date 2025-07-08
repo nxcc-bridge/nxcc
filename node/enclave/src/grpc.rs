@@ -4,11 +4,12 @@ use nxcc_interface::{
     proto::{
         enclave::{
             AttachVmRequest, AttachVmResponse, CheckSecretsRequest, CheckSecretsResponse,
-            DeliverBatchEventsRequest, DeliverBatchEventsResponse, DetachVmRequest,
-            ExecutePolicyRequest, ExecutePolicyResponse, GenerateSecretsRequest, GetReportRequest,
-            GetSecretsRequest, GetSecretsResponse, InvokeHttpWorkerRequest,
-            InvokeHttpWorkerResponse, PutSecretsRequest, PutSecretsResponse, RunWorkerRequest,
-            RunWorkerResponse, SecretStatus, TerminateWorkerRequest,
+            CheckWorkerStatusRequest, CheckWorkerStatusResponse, DeliverBatchEventsRequest,
+            DeliverBatchEventsResponse, DetachVmRequest, ExecutePolicyRequest,
+            ExecutePolicyResponse, GenerateSecretsRequest, GetReportRequest, GetSecretsRequest,
+            GetSecretsResponse, InvokeHttpWorkerRequest, InvokeHttpWorkerResponse,
+            PutSecretsRequest, PutSecretsResponse, RunWorkerRequest, RunWorkerResponse,
+            SecretStatus, TerminateWorkerRequest,
             runner_server::{Runner, RunnerServer},
             secrets_server::{Secrets as SecretsServerTrait, SecretsServer},
         },
@@ -402,6 +403,24 @@ impl Runner for EnclaveRunnerGrpcService {
         {
             Ok(http_response_proto) => Ok(Response::new(InvokeHttpWorkerResponse {
                 response: Some(http_response_proto),
+            })),
+            Err(e) => Err(map_runner_error(e)),
+        }
+    }
+
+    async fn check_worker_status(
+        &self,
+        request: Request<CheckWorkerStatusRequest>,
+    ) -> Result<Response<CheckWorkerStatusResponse>, Status> {
+        let req = request.into_inner();
+        debug!(
+            "gRPC CheckWorkerStatus request for worker_id '{}'",
+            req.worker_id
+        );
+        match self.runner.check_worker_status(req.worker_id).await {
+            Ok((status, status_message)) => Ok(Response::new(CheckWorkerStatusResponse {
+                status: status.into(),
+                status_message,
             })),
             Err(e) => Err(map_runner_error(e)),
         }

@@ -31,11 +31,11 @@ use crate::{
     web3::{gateways::GatewayManager, listener::start_web3_event_listener},
 };
 
-struct ActiveWorkOrder {
+pub struct ActiveWorkOrder {
     payload: WorkOrderPayload,
-    enclave_worker_id: String, // Should be set once worker is running
-    dsse_hash_b64url: String,  // The unique ID for this work order instance
-                               // status: WorkOrderStatus, // Future enhancement
+    pub enclave_worker_id: String, // Should be set once worker is running
+    dsse_hash_b64url: String,      // The unique ID for this work order instance
+                                   // status: WorkOrderStatus, // Future enhancement
 }
 
 /// Manages the lifecycle of work orders, including running workers and setting up event listeners.
@@ -45,8 +45,8 @@ pub struct WorkOrderOrchestrator {
     runner_service: Arc<super::runner::RunnerService>, // Added runner_service
     policy_manager: Arc<PolicyManager>,
     gateway_manager: Arc<GatewayManager>,
-    config: Arc<Config>,
-    active_work_orders: RwLock<HashMap<String, ActiveWorkOrder>>,
+    pub config: Arc<Config>,
+    pub active_work_orders: RwLock<HashMap<String, ActiveWorkOrder>>,
     /// Maps mount path segment (hash of work order) to enclave_worker_id for HTTP routing.
     http_mounts: Arc<RwLock<HashMap<String, String>>>,
     daemon_event_tx: tokio::sync::mpsc::Sender<nxcc_interface::proto::enclave::EventDelivery>,

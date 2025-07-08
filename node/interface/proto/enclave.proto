@@ -96,6 +96,9 @@ service Runner {
 
   /// Invokes a worker with an HTTP request.
   rpc InvokeHttpWorker (InvokeHttpWorkerRequest) returns (InvokeHttpWorkerResponse);
+
+  /// Actively probes a worker to check its liveness.
+  rpc CheckWorkerStatus (CheckWorkerStatusRequest) returns (CheckWorkerStatusResponse);
 }
 
 // --- AttachVm Messages ---
@@ -209,4 +212,17 @@ message InvokeHttpWorkerRequest {
 
 message InvokeHttpWorkerResponse {
   vm.HttpResponse response = 1;
+}
+
+// --- CheckWorkerStatus Messages ---
+
+message CheckWorkerStatusRequest {
+  string worker_id = 1;
+}
+
+message CheckWorkerStatusResponse {
+  // The status of the worker as determined by an active probe.
+  vm.WorkerStatus status = 1;
+  // A descriptive message about the status.
+  string status_message = 2;
 }

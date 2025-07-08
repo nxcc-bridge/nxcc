@@ -9,8 +9,8 @@ use std::{
 use nxcc_interface::proto::vm::{
     GetAttestationRequest, GetWorkerLogsRequest, GetWorkerStatusRequest, Header as ProtoHeader,
     HttpRequest as ProtoHttpRequest, HttpResponse as ProtoHttpResponse, InvokeHttpRequest,
-    InvokeHttpResponse, InvokeWorkerRequest, ListRunningWorkersRequest, StartWorkerRequest,
-    StopWorkerRequest, TrustedConfig, UntrustedConfig, WorkerStatus,
+    InvokeHttpResponse, InvokeWorkerRequest, ListRunningWorkersRequest, ProbeWorkerRequest,
+    StartWorkerRequest, StopWorkerRequest, TrustedConfig, UntrustedConfig, WorkerStatus,
 };
 
 use super::*;
@@ -25,6 +25,7 @@ struct MockVmRuntime {
     list_workers_count: AtomicUsize,
     get_logs_count: AtomicUsize,
     invoke_http_count: AtomicUsize,
+    probe_worker_count: AtomicUsize,
     force_attestation_error: AtomicBool,
     workers: Mutex<HashMap<String, WorkerStatus>>, // Simulate worker state
 }
@@ -124,6 +125,15 @@ impl VmRuntime for MockVmRuntime {
             return Err(VmError::new(format!("Worker instance not found: {}", id)));
         }
         Ok(format!("Log entry 1 for {}\nLog entry 2 for {}", id, id))
+    }
+
+    async fn probe_worker(&self, id: String) -> Result<(WorkerStatus, String), VmError> {
+        self.probe_worker_count.fetch_add(1, Ordering::SeqCst);
+        let workers = self.workers.lock().unwrap();
+        workers
+            .get(&id)
+            .map(|status| (*status, format!("Mock status is {:?}", status)))
+            .ok_or_else(|| VmError::new(format!("Worker instance not found: {}", id)))
     }
 }
 
@@ -305,6 +315,44 @@ async fn test_vm_service_grpc_status_list_logs() {
     assert!(response.success);
     assert!(response.logs.contains("Log entry 1 for instance-abc"));
     assert_eq!(runtime.get_logs_count.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn test_vm_service_grpc_probe_worker() {
+    let runtime = Arc::new(MockVmRuntime::default());
+    runtime
+        .workers
+        .lock()
+        .unwrap()
+        .insert("probe-worker-1".to_string(), WorkerStatus::Running);
+    let service = VmServiceGrpc::new(runtime.clone());
+
+    // Test happy path
+    let request = Request::new(ProbeWorkerRequest {
+        id: "probe-worker-1".to_string(),
+    });
+    let response = service.probe_worker(request).await.unwrap().into_inner();
+    assert_eq!(
+        WorkerStatus::try_from(response.status).unwrap(),
+        WorkerStatus::Running
+    );
+    assert!(response.status_message.contains("Running"));
+    assert_eq!(runtime.probe_worker_count.load(Ordering::SeqCst), 1);
+
+    // Test error path (not found)
+    let request = Request::new(ProbeWorkerRequest {
+        id: "non-existent".to_string(),
+    });
+    let result = service.probe_worker(request).await;
+    assert!(result.is_err());
+    let status = result.err().unwrap();
+    assert_eq!(status.code(), tonic::Code::Internal);
+    assert!(
+        status
+            .message()
+            .contains("Failed to probe worker: Worker instance not found")
+    );
+    assert_eq!(runtime.probe_worker_count.load(Ordering::SeqCst), 2);
 }
 
 #[tokio::test]

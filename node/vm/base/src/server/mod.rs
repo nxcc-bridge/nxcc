@@ -92,6 +92,12 @@ pub trait VmRuntime: Send + Sync + 'static {
 
     /// Retrieves debug logs from a specific worker instance.
     async fn get_worker_logs(&self, id: String) -> Result<String, VmError>;
+
+    /// Actively probes a worker to check its liveness.
+    async fn probe_worker(
+        &self,
+        id: String,
+    ) -> Result<(nxcc_interface::proto::vm::WorkerStatus, String), VmError>;
 }
 
 use nxcc_interface::proto::vm::{
@@ -99,7 +105,8 @@ use nxcc_interface::proto::vm::{
     GetWorkerStatusRequest, GetWorkerStatusResponse, HttpRequest as ProtoHttpRequest,
     HttpResponse as ProtoHttpResponse, InvokeHttpRequest, InvokeHttpResponse, InvokeWorkerRequest,
     InvokeWorkerResponse, ListRunningWorkersRequest, ListRunningWorkersResponse,
-    StartWorkerRequest, StartWorkerResponse, StopWorkerRequest, StopWorkerResponse, WorkerStatus,
+    ProbeWorkerRequest, ProbeWorkerResponse, StartWorkerRequest, StartWorkerResponse,
+    StopWorkerRequest, StopWorkerResponse, WorkerStatus,
     vm_server::{Vm, VmServer},
 };
 
@@ -356,6 +363,29 @@ impl<T: VmRuntime> Vm for VmServiceGrpc<T> {
                     success: false,
                     error_message: e.to_string(),
                 }))
+            }
+        }
+    }
+
+    async fn probe_worker(
+        &self,
+        request: Request<ProbeWorkerRequest>,
+    ) -> Result<Response<ProbeWorkerResponse>, Status> {
+        let req = request.into_inner();
+        debug!("gRPC ProbeWorker request for id '{}'", req.id);
+
+        match self.runtime.probe_worker(req.id.clone()).await {
+            Ok((status, status_message)) => {
+                debug!("Successfully probed worker {}", req.id);
+                Ok(Response::new(ProbeWorkerResponse {
+                    status: status.into(),
+                    status_message,
+                }))
+            }
+            Err(e) => {
+                error!("Failed to probe worker for id {}: {}", req.id, e);
+                // This is an internal error, as the runtime failed.
+                Err(Status::internal(format!("Failed to probe worker: {}", e)))
             }
         }
     }

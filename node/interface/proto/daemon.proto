@@ -30,9 +30,22 @@ message AttachVmResponse {
   bool success = 1;
 }
 
+message CheckWorkerStatusRequest {
+  string work_order_id = 1; // The hash of the work order DSSE envelope
+}
+
+message CheckWorkerStatusResponse {
+  bool found = 1;
+  bool is_running = 2;
+  string status_message = 3; // e.g., "Running", "Process exited", "UDS not connectable"
+  string worker_id = 4;      // The internal enclave worker ID
+  string vm_id = 5;          // The VM it's running on
+}
+
 // Work Order service for submitting work orders to the daemon.
 service WorkOrder {
   rpc SubmitWorkOrder (SubmitWorkOrderRequest) returns (SubmitWorkOrderResponse);
+  rpc CheckWorkerStatus (CheckWorkerStatusRequest) returns (CheckWorkerStatusResponse);
 }
 
 message SubmitWorkOrderRequest {

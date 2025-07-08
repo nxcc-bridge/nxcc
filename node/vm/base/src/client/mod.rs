@@ -10,8 +10,8 @@ use nxcc_interface::{
     proto::vm::{
         GetAttestationRequest, GetWorkerLogsRequest, GetWorkerStatusRequest,
         HttpRequest as ProtoHttpRequest, HttpResponse as ProtoHttpResponse, InvokeHttpRequest,
-        InvokeHttpResponse, InvokeWorkerRequest, ListRunningWorkersRequest, StartWorkerRequest,
-        StopWorkerRequest, TrustedConfig, UntrustedConfig, WorkerStatus,
+        InvokeHttpResponse, InvokeWorkerRequest, ListRunningWorkersRequest, ProbeWorkerRequest,
+        StartWorkerRequest, StopWorkerRequest, TrustedConfig, UntrustedConfig, WorkerStatus,
     },
     types::AttestationReport,
 };
@@ -101,6 +101,12 @@ pub trait VmClient {
         &mut self,
         id: String,
     ) -> impl Future<Output = Result<String, ClientError>> + Send;
+
+    /// Actively probes a worker to check its liveness.
+    fn probe_worker(
+        &mut self,
+        id: String,
+    ) -> impl Future<Output = Result<(WorkerStatus, String), ClientError>> + Send;
 }
 
 /// Client for communicating with a VM service
@@ -143,7 +149,7 @@ impl VmServiceClient {
             .connect_with_connector(tower::service_fn(move |_: Uri| {
                 let path = path_str.clone();
                 async move {
-                    let stream = UnixStream::connect(&path).await?;
+                    let stream = UnixStream::connect(path).await?;
                     Ok::<_, std::io::Error>(TokioIo::new(stream))
                 }
             }))
@@ -319,5 +325,16 @@ impl VmClient for VmServiceClient {
                 response.error_message.clone(),
             )))
         }
+    }
+
+    async fn probe_worker(&mut self, id: String) -> Result<(WorkerStatus, String), ClientError> {
+        let request = ProbeWorkerRequest { id };
+
+        let response = self.inner.probe_worker(request).await?.into_inner();
+
+        let status = WorkerStatus::try_from(response.status)
+            .map_err(|_| ClientError::Grpc(Status::internal("Invalid worker status received")))?;
+
+        Ok((status, response.status_message))
     }
 }
