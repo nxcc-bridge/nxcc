@@ -109,13 +109,13 @@ pub async fn deploy_test_events_contract(
     }
     #[derive(serde::Deserialize)]
     struct SolBytecodeOutput {
-        #[serde(with = "hex::serde")]
-        object: Vec<u8>,
+        object: String,
     }
 
     let bytecode = serde_json::from_slice::<SolCompiledOutput>(TEST_EVENTS_JSON)?
         .bytecode
         .object;
+    let bytecode = hex::decode(&bytecode[2..])?;
 
     let provider = Arc::new(
         ProviderBuilder::new()
@@ -123,7 +123,6 @@ pub async fn deploy_test_events_contract(
             .erased(),
     );
     let address = alloy_contract::CallBuilder::new_raw_deploy(&provider, bytecode.into())
-        .legacy()
         .deploy()
         .await?;
     let contract = TestEvents::TestEventsInstance::new(address, provider.clone());
