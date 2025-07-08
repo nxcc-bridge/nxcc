@@ -88,7 +88,7 @@ setup() {
   fi
 
   info "Starting Anvil container..."
-  docker run -d --rm --name anvil-bench -p 8545:8545 --network "$DOCKER_NETWORK" --network-alias anvil ghcr.io/foundry-rs/foundry:latest anvil --host 0.0.0.0 >/dev/null
+  docker run -d --rm --name anvil-bench -p 8545:8545 --network "$DOCKER_NETWORK" --network-alias anvil -e ANVIL_IP_ADDR=0.0.0.0  ghcr.io/foundry-rs/foundry:latest anvil >/dev/null
 }
 
 run_benchmarks() {
@@ -112,11 +112,11 @@ run_benchmarks() {
   #   --anvil-rpc-url "http://localhost:8545" \
   #   io
 
-  restart_node
-  "$BENCH_DIR/target/release/benchmarks" \
-    --node-grpc-addr "http://localhost:50051" \
-    --anvil-rpc-url "http://localhost:8545" \
-    realistic
+  # restart_node
+  # "$BENCH_DIR/target/release/benchmarks" \
+  #   --node-grpc-addr "http://localhost:50051" \
+  #   --anvil-rpc-url "http://localhost:8545" \
+  #   realistic
 
   restart_node
   "$BENCH_DIR/target/release/benchmarks" \

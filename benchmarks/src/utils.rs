@@ -117,8 +117,12 @@ pub async fn deploy_test_events_contract(
         .object;
     let bytecode = hex::decode(&bytecode[2..])?;
 
+    let pk: alloy_signer_local::PrivateKeySigner =
+        "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80".parse()?;
     let provider = Arc::new(
         ProviderBuilder::new()
+            .with_simple_nonce_management()
+            .wallet(pk)
             .connect_http(anvil_url.parse()?)
             .erased(),
     );

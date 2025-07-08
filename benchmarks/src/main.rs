@@ -351,6 +351,7 @@ async fn run_web3_throughput_benchmark(
             .await?;
         event_count += 1;
         bar.set_message(format!("Emitted {} events", event_count));
+        // TODO: make this actually measure throughput
     }
 
     let elapsed = start_time.elapsed();
