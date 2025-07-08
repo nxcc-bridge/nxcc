@@ -13,19 +13,23 @@ pub mod workerd_capnp {
 use std::{error::Error, sync::Arc};
 
 use nxcc_vm_base::{run_server, server::ServerConfig};
-use tracing::Level;
-use tracing_subscriber::FmtSubscriber;
+use tracing::{Level, info};
+use tracing_subscriber::{EnvFilter, fmt::Subscriber};
 use vmm::WorkerdVmm;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let config = config::Config::load().expect("Config load failed");
 
-    // Initialize tracing subscriber
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::DEBUG) // Adjust log level as needed
-        .with_env_filter("nxcc_workerd_vm=debug,nxcc_vm_base=debug,info") // Example filter
-        .finish();
+    let log_level = if config.base.verbose {
+        Level::DEBUG
+    } else {
+        Level::INFO
+    };
+    let base_filter = format!("nxcc_workerd_vm={0},nxcc_vm_base={0}", log_level);
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(base_filter));
+    let subscriber = Subscriber::builder().with_env_filter(env_filter).finish();
     tracing::subscriber::set_global_default(subscriber).expect("Setting default subscriber failed");
 
     tracing::info!("Starting Workerd VMM with configuration: {:?}", config);
