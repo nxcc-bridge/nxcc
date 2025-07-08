@@ -1,5 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
+use alloy_primitives::Address;
 use alloy_provider::{DynProvider, Provider, ProviderBuilder};
 use alloy_sol_types::{sol, SolEvent as _};
 use anyhow::{Context, Result};
@@ -138,10 +139,11 @@ pub fn create_cross_chain_work_order(
     chain1_url: &str,
     chain2_url: &str,
     contract_abi: &str,
+    contract_address: &Address,
 ) -> Result<DsseEnvelope> {
     let userdata = serde_json::json!({
-        "chain1": { "rpcUrl": chain1_url },
-        "chain2": { "rpcUrl": chain2_url },
+        "chain1": { "rpcUrl": chain1_url, "contractAddress": contract_address.to_string() },
+        "chain2": { "rpcUrl": chain2_url, "contractAddress": contract_address.to_string() },
         "contractAbi": contract_abi,
         "ethereumPrivateKey": "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
     });
@@ -150,7 +152,7 @@ pub fn create_cross_chain_work_order(
         handler: "valueChanged".to_string(),
         kind: WorkerEventKind::Web3Event(Web3Event {
             chain: 31337,
-            address: vec![],
+            address: vec![contract_address.clone()],
             topics: vec![vec![TestEvents::ValueChanged::SIGNATURE_HASH]],
         }),
     };

@@ -48,12 +48,16 @@ restart_node() {
     --name nxcc-bench-node \
     --cpus="$CPUS" \
     --memory="$MEMORY" \
+    --cap-add SYS_NICE \
+    --cap-add SYS_TIME \
+    --ulimit rtprio=99 \
+    --ulimit rttime=-1 \
     --network "$DOCKER_NETWORK" \
     --network-alias nxcc-node \
     -p 50051:50051 \
     -p 9000:9000 \
     -p 6922:6922 \
-    -e NXCC_ALL_VERBOSE=true \
+    -e NXCC_ALL_VERBOSE=false \
     -e DAEMON_GRPC_TARGET_ADDR="0.0.0.0:50051" \
     -e DAEMON_P2P_LISTEN_ADDR="/ip4/0.0.0.0/tcp/9000" \
     "$NODE_IMAGE" >/dev/null
@@ -94,28 +98,28 @@ setup() {
 run_benchmarks() {
   info "--- Running benchmarks ---"
 
-  restart_node
-  "$BENCH_DIR/target/release/benchmarks" idle
+  # restart_node
+  # "$BENCH_DIR/target/release/benchmarks" idle
+
+  # restart_node
+  # "$BENCH_DIR/target/release/benchmarks" cpu
+
+  # restart_node
+  # "$BENCH_DIR/target/release/benchmarks" io
+
+  # restart_node
+  # "$BENCH_DIR/target/release/benchmarks" realistic
+
+  # restart_node
+  # "$BENCH_DIR/target/release/benchmarks" web3-throughput
 
   restart_node
-  "$BENCH_DIR/target/release/benchmarks" cpu
-
-  restart_node
-  "$BENCH_DIR/target/release/benchmarks" io
-
-  restart_node
-  "$BENCH_DIR/target/release/benchmarks" realistic
-
-  restart_node
-  "$BENCH_DIR/target/release/benchmarks" web3-throughput
-
-  restart_node
-  "$BENCH_DIR/target/debug/benchmarks" web3-latency
+  "$BENCH_DIR/target/release/benchmarks" web3-latency
 }
 
 teardown() {
   info "--- Tearing down benchmark environment ---"
-  docker logs nxcc-bench-node >&2 || true
+  # docker logs nxcc-bench-node >&2 || true
   docker stop nxcc-bench-node >/dev/null 2>&1 || true
   docker stop anvil-bench >/dev/null 2>&1 || true
   if docker network inspect "$DOCKER_NETWORK" >/dev/null 2>&1; then

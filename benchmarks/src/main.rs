@@ -333,8 +333,12 @@ async fn run_web3_throughput_benchmark(
     let (_provider, contract, contract_abi) = utils::deploy_test_events_contract(anvil_url).await?;
 
     bar.set_message("Starting web3 event worker...");
-    let work_order =
-        utils::create_cross_chain_work_order(worker_anvil_url, worker_anvil_url, &contract_abi)?;
+    let work_order = utils::create_cross_chain_work_order(
+        worker_anvil_url,
+        worker_anvil_url,
+        &contract_abi,
+        contract.address(),
+    )?;
     let request = utils::create_submit_request(work_order)?;
 
     match client.submit_work_order(request).await {
@@ -396,8 +400,12 @@ async fn run_web3_latency_benchmark(
     let (_provider, contract, contract_abi) = utils::deploy_test_events_contract(anvil_url).await?;
 
     setup_bar.set_message("Starting web3 event worker...");
-    let work_order =
-        utils::create_cross_chain_work_order(worker_anvil_url, worker_anvil_url, &contract_abi)?;
+    let work_order = utils::create_cross_chain_work_order(
+        worker_anvil_url,
+        worker_anvil_url,
+        &contract_abi,
+        contract.address(),
+    )?;
     let request = utils::create_submit_request(work_order)?;
 
     match client.submit_work_order(request).await {
@@ -416,7 +424,7 @@ async fn run_web3_latency_benchmark(
     setup_bar.finish_and_clear();
 
     let mut histogram = hdrhistogram::Histogram::<u64>::new(3)?;
-    let num_events = 100;
+    let num_events = 10000;
 
     let bar = ProgressBar::new(num_events);
     bar.set_style(
