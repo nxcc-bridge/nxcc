@@ -1,3 +1,9 @@
 [profile.default]
 src = "contracts"
 out = "out"
+
+[profile.release]
+optimizer = true
+optimizer_runs = 4294967295
+via_ir = true
+evm_version = "paris"

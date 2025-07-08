@@ -94,41 +94,23 @@ setup() {
 run_benchmarks() {
   info "--- Running benchmarks ---"
 
-  # restart_node
-  # "$BENCH_DIR/target/release/benchmarks" \
-  #   --node-grpc-addr "http://localhost:50051" \
-  #   --anvil-rpc-url "http://localhost:8545" \
-  #   idle
-
-  # restart_node
-  # "$BENCH_DIR/target/release/benchmarks" \
-  #   --node-grpc-addr "http://localhost:50051" \
-  #   --anvil-rpc-url "http://localhost:8545" \
-  #   cpu
-
-  # restart_node
-  # "$BENCH_DIR/target/release/benchmarks" \
-  #   --node-grpc-addr "http://localhost:50051" \
-  #   --anvil-rpc-url "http://localhost:8545" \
-  #   io
-
-  # restart_node
-  # "$BENCH_DIR/target/release/benchmarks" \
-  #   --node-grpc-addr "http://localhost:50051" \
-  #   --anvil-rpc-url "http://localhost:8545" \
-  #   realistic
+  restart_node
+  "$BENCH_DIR/target/release/benchmarks" idle
 
   restart_node
-  "$BENCH_DIR/target/release/benchmarks" \
-    --node-grpc-addr "http://localhost:50051" \
-    --anvil-rpc-url "http://localhost:8545" \
-    web3-throughput
+  "$BENCH_DIR/target/release/benchmarks" cpu
 
   restart_node
-  "$BENCH_DIR/target/release/benchmarks" \
-    --node-grpc-addr "http://localhost:50051" \
-    --anvil-rpc-url "http://localhost:8545" \
-    web3-latency
+  "$BENCH_DIR/target/release/benchmarks" io
+
+  restart_node
+  "$BENCH_DIR/target/release/benchmarks" realistic
+
+  restart_node
+  "$BENCH_DIR/target/release/benchmarks" web3-throughput
+
+  restart_node
+  "$BENCH_DIR/target/debug/benchmarks" web3-latency
 }
 
 teardown() {

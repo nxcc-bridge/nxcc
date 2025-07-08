@@ -133,12 +133,9 @@ pub fn build_config(
             let mut network_builder = internet_service_builder.init_network();
 
             // Allow public internet access only (prevents SSRF attacks)
-            let mut allow_list = network_builder
-                .reborrow()
-                .init_allow(if cfg!(debug_assertions) { 2 } else { 1 });
+            let mut allow_list = network_builder.reborrow().init_allow(2);
             allow_list.set(0, "public");
-            #[cfg(debug_assertions)]
-            allow_list.set(1, "local");
+            allow_list.set(1, "private");
 
             // Configure TLS to trust browser certificate authorities
             let mut tls_options = network_builder.reborrow().init_tls_options();

@@ -19,6 +19,8 @@ struct Args {
     node_grpc_addr: String,
     #[arg(long, default_value = "http://localhost:8545")]
     anvil_rpc_url: String,
+    #[arg(long, default_value = "http://anvil:8545")]
+    worker_anvil_rpc_url: String,
     #[command(subcommand)]
     command: Benchmark,
 }
@@ -67,11 +69,21 @@ async fn main() -> Result<()> {
         }
         Benchmark::Web3Throughput => {
             println!("--- Running Web3 Event Throughput Benchmark ---");
-            run_web3_throughput_benchmark(client.clone(), &args.anvil_rpc_url).await?;
+            run_web3_throughput_benchmark(
+                client.clone(),
+                &args.anvil_rpc_url,
+                &args.worker_anvil_rpc_url,
+            )
+            .await?;
         }
         Benchmark::Web3Latency => {
             println!("--- Running Web3 Event Latency Benchmark ---");
-            run_web3_latency_benchmark(client.clone(), &args.anvil_rpc_url).await?;
+            run_web3_latency_benchmark(
+                client.clone(),
+                &args.anvil_rpc_url,
+                &args.worker_anvil_rpc_url,
+            )
+            .await?;
         }
     }
 
@@ -308,6 +320,7 @@ async fn run_active_benchmark_scenario(
 async fn run_web3_throughput_benchmark(
     mut client: WorkOrderClient<Channel>,
     anvil_url: &str,
+    worker_anvil_url: &str,
 ) -> Result<()> {
     let bar = ProgressBar::new_spinner();
     bar.set_style(
@@ -320,7 +333,8 @@ async fn run_web3_throughput_benchmark(
     let (_provider, contract, contract_abi) = utils::deploy_test_events_contract(anvil_url).await?;
 
     bar.set_message("Starting web3 event worker...");
-    let work_order = utils::create_cross_chain_work_order(anvil_url, anvil_url, &contract_abi)?;
+    let work_order =
+        utils::create_cross_chain_work_order(worker_anvil_url, worker_anvil_url, &contract_abi)?;
     let request = utils::create_submit_request(work_order)?;
 
     match client.submit_work_order(request).await {
@@ -369,6 +383,7 @@ async fn run_web3_throughput_benchmark(
 async fn run_web3_latency_benchmark(
     mut client: WorkOrderClient<Channel>,
     anvil_url: &str,
+    worker_anvil_url: &str,
 ) -> Result<()> {
     let setup_bar = ProgressBar::new_spinner();
     setup_bar.set_style(
@@ -381,7 +396,8 @@ async fn run_web3_latency_benchmark(
     let (_provider, contract, contract_abi) = utils::deploy_test_events_contract(anvil_url).await?;
 
     setup_bar.set_message("Starting web3 event worker...");
-    let work_order = utils::create_cross_chain_work_order(anvil_url, anvil_url, &contract_abi)?;
+    let work_order =
+        utils::create_cross_chain_work_order(worker_anvil_url, worker_anvil_url, &contract_abi)?;
     let request = utils::create_submit_request(work_order)?;
 
     match client.submit_work_order(request).await {

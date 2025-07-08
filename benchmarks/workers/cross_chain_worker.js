@@ -2,7 +2,6 @@ import {
   createPublicClient,
   http,
   createWalletClient,
-  parseAbi,
   decodeEventLog,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
@@ -73,7 +72,7 @@ export default {
     ) {
       return new Response("Missing or incomplete userdata", { status: 500 });
     }
-    USER_CONFIG.contractAbi = parseAbi(USER_CONFIG.contractAbi);
+    USER_CONFIG.contractAbi = JSON.parse(USER_CONFIG.contractAbi);
 
     const vmInvocationPayload = await request.json();
     const handler = handlers[vmInvocationPayload.handler];
