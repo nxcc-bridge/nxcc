@@ -1,11 +1,15 @@
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicI32, Ordering},
+    },
     time::{Duration, Instant},
 };
 
-use async_trait::async_trait; // Already present
+use async_trait::async_trait;
+use dashmap::DashMap;
 use http_body_util::BodyExt;
 use hyper::{
     Method, Request, Response as HyperResponse, StatusCode,
@@ -15,16 +19,15 @@ use hyper::{
 };
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
 use hyperlocal::UnixConnector;
-use nxcc_interface::types::EventPayload; // For deserializing VmEventInvocation
 use nxcc_interface::{
     proto::vm::{
         Header as ProtoHeader, HttpRequest as ProtoHttpRequest, HttpResponse as ProtoHttpResponse,
         TrustedConfig, UntrustedConfig, WorkerStatus,
     },
-    types::AttestationReport,
+    types::{AttestationReport, EventPayload},
 };
 use nxcc_vm_base::server::{VmError, VmRuntime};
-use serde::Deserialize; // For VmEventInvocation
+use serde::Deserialize;
 use tempfile::TempDir;
 use tokio::{
     fs::File,
@@ -47,16 +50,20 @@ use crate::{
 struct VmEventInvocationRequest<'a> {
     handler: String,
     #[serde(borrow)]
-    event_payload: EventPayload<'a>, // Assuming EventPayload can be deserialized with lifetime if needed, or owned
+    event_payload: EventPayload<'a>,
 }
 
 /// Holds information about a single worker process.
+/// The structure is designed to minimize locking.
+/// - `status` is atomic for lock-free reads.
+/// - `process` is behind a Mutex because `Child` methods require `&mut self`.
+/// - Other fields are immutable after creation and can be read freely.
 #[derive(Debug)]
-struct WorkerInfo {
+struct WorkerData {
     instance_id: String,
-    process: Child,
+    process: Mutex<Child>,
     pid: u32,
-    status: WorkerStatus,
+    status: AtomicI32,
     uds_path: PathBuf,
     config_path: PathBuf,
     temp_dir: Arc<TempDir>,
@@ -64,16 +71,30 @@ struct WorkerInfo {
     logs: Arc<Mutex<String>>,
 }
 
+impl WorkerData {
+    fn get_status(&self) -> WorkerStatus {
+        let status_val = self.status.load(Ordering::SeqCst);
+        // Gracefully handle if the value is somehow not a valid enum variant.
+        WorkerStatus::try_from(status_val).unwrap_or(WorkerStatus::Unspecified)
+    }
+
+    fn set_status(&self, new_status: WorkerStatus) {
+        self.status.store(new_status as i32, Ordering::SeqCst);
+    }
+}
+
 #[derive(Clone)]
 pub struct WorkerdVmm {
-    workers: Arc<Mutex<HashMap<String, Arc<Mutex<WorkerInfo>>>>>,
+    // Use a highly concurrent DashMap instead of a Mutex-guarded HashMap.
+    // This allows simultaneous access to different workers.
+    workers: Arc<DashMap<String, Arc<WorkerData>>>,
     config: WorkerdConfig,
 }
 
 impl WorkerdVmm {
     pub fn new(config: WorkerdConfig) -> Self {
         WorkerdVmm {
-            workers: Arc::new(Mutex::new(HashMap::new())),
+            workers: Arc::new(DashMap::new()),
             config,
         }
     }
@@ -109,7 +130,7 @@ impl WorkerdVmm {
     /// Makes an HTTP invocation via a Unix-domain socket.
     async fn invoke_via_uds(
         &self,
-        instance_id: &str, // <-- New parameter
+        instance_id: &str,
         uds_path: &Path,
         proto_http_request: ProtoHttpRequest,
     ) -> Result<ProtoHttpResponse, WorkerdVmError> {
@@ -179,49 +200,42 @@ impl WorkerdVmm {
             headers: proto_response_headers,
             body: response_body_bytes.to_vec(),
         })
-
-        // The original error handling for non-OK status is now implicitly handled
-        // by the caller of invoke_http, as the full HttpResponse is returned.
-        // The daemon will decide what to do based on the status code.
     }
 
     async fn probe_worker_internal(
         &self,
         id: &str,
     ) -> Result<(WorkerStatus, String), WorkerdVmError> {
-        let worker_lock = {
-            let workers_map = self.workers.lock().await;
-            workers_map
-                .get(id)
-                .cloned()
-                .ok_or_else(|| WorkerdVmError::WorkerNotFound(id.to_string()))?
-        };
+        let worker = self
+            .workers
+            .get(id)
+            .ok_or_else(|| WorkerdVmError::WorkerNotFound(id.to_string()))?
+            .clone();
 
-        let mut worker = worker_lock.lock().await;
-
-        if let Ok(Some(exit_status)) = worker.process.try_wait() {
+        // Lock only the process to check its exit status
+        if let Ok(Some(exit_status)) = worker.process.lock().await.try_wait() {
             let msg = format!("Process exited with status: {}", exit_status);
             error!(instance_id = ?id, "{}", msg);
-            if worker.status != WorkerStatus::Stopped {
-                worker.status = WorkerStatus::Error;
+            if worker.get_status() != WorkerStatus::Stopped {
+                worker.set_status(WorkerStatus::Error);
             }
-            return Ok((worker.status, msg));
+            return Ok((worker.get_status(), msg));
         }
 
         match tokio::net::UnixStream::connect(&worker.uds_path).await {
             Ok(_) => {
-                if worker.status == WorkerStatus::Starting {
-                    worker.status = WorkerStatus::Running;
+                if worker.get_status() == WorkerStatus::Starting {
+                    worker.set_status(WorkerStatus::Running);
                 }
-                Ok((worker.status, "UDS socket connectable".to_string()))
+                Ok((worker.get_status(), "UDS socket connectable".to_string()))
             }
             Err(e) => {
                 let msg = format!("UDS socket not connectable: {}", e);
                 warn!(instance_id = ?id, "{}", msg);
-                if worker.status != WorkerStatus::Starting {
-                    worker.status = WorkerStatus::Error;
+                if worker.get_status() != WorkerStatus::Starting {
+                    worker.set_status(WorkerStatus::Error);
                 }
-                Ok((worker.status, msg))
+                Ok((worker.get_status(), msg))
             }
         }
     }
@@ -264,11 +278,10 @@ impl VmRuntime for WorkerdVmm {
             &untrusted_config,
             &trusted_config,
             &uds_path,
-            "main",          // Default service name for the socket
-            "invoke_socket", // Name of the socket binding in config
+            "main",
+            "invoke_socket",
         )?;
 
-        // Write the config
         {
             let mut file = File::create(&config_path)
                 .await
@@ -281,7 +294,6 @@ impl VmRuntime for WorkerdVmm {
                 .map_err(WorkerdVmError::ConfigFileWriteFailed)?;
         }
 
-        // Sanity check for the workerd binary
         if Command::new(&self.config.binary_path)
             .arg("--version")
             .output()
@@ -314,172 +326,123 @@ impl VmRuntime for WorkerdVmm {
         let child_pid = child_process.id().unwrap_or(0);
         info!(instance_id = ?instance_id, pid = ?child_pid, "Workerd process spawned.");
 
-        // Capture logs from stdout/stderr in background tasks
         let logs_arc = Arc::new(Mutex::new(String::new()));
         if let Some(stdout) = child_process.stdout.take() {
-            let id_clone = instance_id.clone();
-            let logs_clone = logs_arc.clone();
-            tokio::spawn(async move {
-                let reader = BufReader::new(stdout);
-                WorkerdVmm::log_stream(reader, id_clone, "stdout", logs_clone).await;
-            });
+            tokio::spawn(WorkerdVmm::log_stream(
+                BufReader::new(stdout),
+                instance_id.clone(),
+                "stdout",
+                logs_arc.clone(),
+            ));
         }
         if let Some(stderr) = child_process.stderr.take() {
-            let id_clone = instance_id.clone();
-            let logs_clone = logs_arc.clone();
-            tokio::spawn(async move {
-                let reader = BufReader::new(stderr);
-                WorkerdVmm::log_stream(reader, id_clone, "stderr", logs_clone).await;
-            });
+            tokio::spawn(WorkerdVmm::log_stream(
+                BufReader::new(stderr),
+                instance_id.clone(),
+                "stderr",
+                logs_arc.clone(),
+            ));
         }
 
-        // Insert the worker in "Starting" status into the map
-        let worker_info = WorkerInfo {
+        let worker_data = Arc::new(WorkerData {
             instance_id: instance_id.clone(),
-            process: child_process,
+            process: Mutex::new(child_process),
             pid: child_pid,
-            status: WorkerStatus::Starting,
+            status: AtomicI32::new(WorkerStatus::Starting as i32),
             uds_path: uds_path.clone(),
             config_path,
             temp_dir: temp_dir_handle,
             code_type,
             logs: logs_arc.clone(),
-        };
-        {
-            let mut workers_map = self.workers.lock().await;
-            workers_map.insert(instance_id.clone(), Arc::new(Mutex::new(worker_info)));
-        }
+        });
+        // Insert into the DashMap without a global lock.
+        self.workers.insert(instance_id.clone(), worker_data);
 
-        // Poll for UDS readiness, or time out
         let start_time = Instant::now();
         let startup_timeout = Duration::from_secs(self.config.startup_timeout_secs);
         let uds_check_interval = Duration::from_millis(self.config.uds_check_interval_ms);
         loop {
-            // Check if the process exited prematurely
-            {
-                let workers_map = self.workers.lock().await;
-                if let Some(worker_lock) = workers_map.get(&instance_id) {
-                    let mut worker = worker_lock.lock().await;
-                    // Check if the process handle still exists and try_wait
-                    match worker.process.try_wait() {
-                        Ok(Some(exit_status)) => {
-                            // Process exited!
-                            worker.status = WorkerStatus::Error; // Or determine based on exit_status
-                            let logs_content = worker.logs.lock().await.clone();
-                            error!(
-                                instance_id = ?instance_id,
-                                ?exit_status,
-                                "Workerd process exited prematurely during startup check. Logs:\n{}",
-                                logs_content
-                            );
-                            return Err(WorkerdVmError::StartupFailedPrematureExit {
-                                instance_id: instance_id.clone(),
-                                final_status: worker.status, // Use the updated status
-                                logs: logs_content,
-                            }
-                            .into());
+            if let Some(worker) = self.workers.get(&instance_id) {
+                // Lock only the process to check its status.
+                let mut process = worker.process.lock().await;
+                if let Ok(Some(exit_status)) = process.try_wait() {
+                    worker.set_status(WorkerStatus::Error);
+                    let logs_content = worker.logs.lock().await.clone();
+                    error!(
+                        instance_id = ?instance_id,
+                        ?exit_status,
+                        "Workerd process exited prematurely during startup check. Logs:\n{}",
+                        logs_content
+                    );
+                    return Err(WorkerdVmError::StartupFailedPrematureExit {
+                        instance_id: instance_id.clone(),
+                        final_status: worker.get_status(),
+                        logs: logs_content,
+                    }
+                    .into());
+                }
+            } else {
+                return Err(WorkerdVmError::Internal(format!(
+                    "Worker {} disappeared from map during startup",
+                    instance_id
+                ))
+                .into());
+            }
+
+            if tokio::net::UnixStream::connect(&uds_path).await.is_ok() {
+                sleep(Duration::from_millis(100)).await;
+
+                if let Some(worker) = self.workers.get(&instance_id) {
+                    let mut process = worker.process.lock().await;
+                    if let Ok(Some(exit_status)) = process.try_wait() {
+                        worker.set_status(WorkerStatus::Error);
+                        let logs_content = worker.logs.lock().await.clone();
+                        error!(
+                            instance_id = ?instance_id,
+                            ?exit_status,
+                            "Workerd process exited just before marking as Running. Logs:\n{}",
+                            logs_content
+                        );
+                        return Err(WorkerdVmError::StartupFailedPrematureExit {
+                            instance_id: instance_id.clone(),
+                            final_status: worker.get_status(),
+                            logs: logs_content,
                         }
-                        Ok(None) => {
-                            // Still running, continue check
-                        }
-                        Err(e) => {
-                            // Error checking status, log it but might proceed cautiously
-                            warn!(instance_id = ?instance_id, "Error checking workerd process status during startup: {}", e);
-                        }
+                        .into());
+                    }
+                    if worker.get_status() == WorkerStatus::Starting {
+                        worker.set_status(WorkerStatus::Running);
+                        info!(instance_id = ?instance_id, "UDS ready, worker is now Running.");
                     }
                 } else {
-                    // Worker somehow removed from map during startup? Should not happen.
                     return Err(WorkerdVmError::Internal(format!(
-                        "Worker {} disappeared from map during startup",
+                        "Worker {} disappeared from map just before marking Running",
                         instance_id
                     ))
                     .into());
                 }
-            }
-
-            match tokio::net::UnixStream::connect(&uds_path).await {
-                Ok(_) => {
-                    // Socket file exists and is connectable.
-                    sleep(Duration::from_millis(100)).await; // Adjust duration if needed (50-200ms range)
-
-                    // Re-check process status one last time before declaring success
-                    // (Optional but safer: prevents declaring success if it crashed *during* the sleep)
-                    {
-                        let workers_map = self.workers.lock().await;
-                        if let Some(worker_lock) = workers_map.get(&instance_id) {
-                            let mut worker = worker_lock.lock().await;
-                            if let Ok(Some(exit_status)) = worker.process.try_wait() {
-                                worker.status = WorkerStatus::Error;
-                                let logs_content = worker.logs.lock().await.clone();
-                                error!(
-                                    instance_id = ?instance_id,
-                                    ?exit_status,
-                                    "Workerd process exited just before marking as Running. Logs:\n{}",
-                                    logs_content
-                                );
-                                return Err(WorkerdVmError::StartupFailedPrematureExit {
-                                    instance_id: instance_id.clone(),
-                                    final_status: worker.status,
-                                    logs: logs_content,
-                                }
-                                .into());
-                            }
-                            // If still running or error checking status, proceed to mark Running
-                            if worker.status == WorkerStatus::Starting {
-                                worker.status = WorkerStatus::Running;
-                                info!(instance_id = ?instance_id, "UDS ready, worker is now Running.");
-                            }
-                        } else {
-                            // Should not happen
-                            return Err(WorkerdVmError::Internal(format!(
-                                "Worker {} disappeared from map just before marking Running",
-                                instance_id
-                            ))
-                            .into());
-                        }
-                    }
-                    return Ok(instance_id);
-                }
-                Err(e) => {
-                    // Log unexpected errors, but connection refused/not found are expected during startup
-                    if e.kind() != std::io::ErrorKind::NotFound
-                        && e.kind() != std::io::ErrorKind::ConnectionRefused
-                    {
-                        warn!(
-                            ?instance_id,
-                            uds=%uds_path.display(),
-                            "Unexpected error checking UDS: {}. Will retry.", e
-                        );
-                    }
-                    // No need to sleep here, the main loop sleep handles polling interval
-                }
+                return Ok(instance_id);
             }
 
             if start_time.elapsed() > startup_timeout {
-                // Timed out waiting for UDS. Mark the worker as Error and kill it.
-                let workers_map = self.workers.lock().await;
-                if let Some(worker_lock) = workers_map.get(&instance_id) {
-                    let mut worker = worker_lock.lock().await;
-                    // Check if it exited on its own before we kill it
-                    let final_status = match worker.process.try_wait() {
+                if let Some(worker) = self.workers.get(&instance_id) {
+                    let mut process = worker.process.lock().await;
+                    let final_status = match process.try_wait() {
                         Ok(Some(status)) => {
                             error!(instance_id=?worker.instance_id, ?status, "Workerd exited on its own before startup timeout.");
-                            WorkerStatus::Error // Mark as error if it exited
+                            WorkerStatus::Error
                         }
-                        _ => WorkerStatus::Error, // Still mark as Error due to timeout
+                        _ => WorkerStatus::Error,
                     };
 
-                    if worker.status == WorkerStatus::Starting {
-                        worker.status = final_status; // Use determined status
+                    if worker.get_status() == WorkerStatus::Starting {
+                        worker.set_status(final_status);
                         warn!(
                             instance_id = ?worker.instance_id,
                             timeout = ?startup_timeout,
                             "Timeout waiting for UDS. Killing process (if running)."
                         );
-                        // Use kill() directly on the Child object, no need for pid lookup
-                        if let Err(e) = worker.process.kill().await {
-                            // Log error if kill fails, but proceed with timeout error
-                            // Ignore InvalidInput error which means process already exited
+                        if let Err(e) = process.kill().await {
                             if e.kind() != std::io::ErrorKind::InvalidInput {
                                 error!(instance_id = ?worker.instance_id, "Error killing process on startup timeout: {}", e);
                             }
@@ -493,7 +456,6 @@ impl VmRuntime for WorkerdVmm {
                     }
                     .into());
                 }
-                // If it's not in the map for some reason, just fail
                 return Err(WorkerdVmError::StartupTimeout {
                     instance_id,
                     timeout: startup_timeout,
@@ -507,18 +469,17 @@ impl VmRuntime for WorkerdVmm {
     }
 
     async fn stop_worker(&self, id: String) -> Result<(), VmError> {
-        let worker_lock = {
-            let workers_map = self.workers.lock().await;
-            workers_map.get(&id).cloned()
-        }
-        .ok_or_else(|| WorkerdVmError::WorkerNotFound(id.clone()))?;
+        let worker = self
+            .workers
+            .get(&id)
+            .ok_or_else(|| WorkerdVmError::WorkerNotFound(id.clone()))?
+            .clone();
 
-        let mut worker = worker_lock.lock().await;
-        match worker.status {
+        match worker.get_status() {
             WorkerStatus::Starting | WorkerStatus::Running => {
                 info!(instance_id = ?id, "Stopping worker.");
-                if let Err(e) = worker.process.kill().await {
-                    // If the process is already gone, that's not a fatal error
+                // Lock only the process to kill it.
+                if let Err(e) = worker.process.lock().await.kill().await {
                     if e.kind() != std::io::ErrorKind::InvalidInput {
                         error!(?id, "Failed to kill worker process: {}", e);
                         return Err(WorkerdVmError::Internal(format!(
@@ -528,19 +489,16 @@ impl VmRuntime for WorkerdVmm {
                         .into());
                     }
                 }
-                // Mark as Stopped
-                worker.status = WorkerStatus::Stopped;
+                worker.set_status(WorkerStatus::Stopped);
                 Ok(())
             }
             WorkerStatus::Stopped | WorkerStatus::Error => {
-                // Already terminal, do nothing
                 debug!(
                     instance_id = ?id,
-                    "stop_worker called but worker is already in {:?} state, ignoring.", worker.status
+                    "stop_worker called but worker is already in {:?} state, ignoring.", worker.get_status()
                 );
                 Ok(())
             }
-            // We won't remove Unspecified from the proto, but treat it similarly as an error
             WorkerStatus::Unspecified => {
                 error!(
                     ?id,
@@ -558,44 +516,36 @@ impl VmRuntime for WorkerdVmm {
         handler_name: String,
         payload: Vec<u8>,
     ) -> Result<Vec<u8>, VmError> {
-        let worker_lock = {
-            let workers = self.workers.lock().await;
-            workers.get(&id).cloned()
+        // --- HOT PATH OPTIMIZATION ---
+        // 1. Get worker from DashMap (fast, concurrent)
+        let worker = self
+            .workers
+            .get(&id)
+            .ok_or_else(|| WorkerdVmError::WorkerNotFound(id.clone()))?
+            .clone(); // Clone the Arc, releasing the map's read guard
+
+        // 2. Check status with a lock-free atomic read
+        let status = worker.get_status();
+        if status != WorkerStatus::Running {
+            error!(
+                instance_id = ?id,
+                "Attempted to invoke worker in non-running state: {:?}", status
+            );
+            return Err(WorkerdVmError::WorkerNotRunnable(status).into());
         }
-        .ok_or_else(|| WorkerdVmError::WorkerNotFound(id.clone()))?;
 
-        // Check status and get UDS path
-        let uds_path = {
-            let worker = worker_lock.lock().await;
-            if worker.status != WorkerStatus::Running {
-                error!(
-                    instance_id = ?id,
-                    "Attempted to invoke worker in non-running state: {:?}", worker.status
-                );
-                return Err(WorkerdVmError::WorkerNotRunnable(worker.status).into());
-            }
-            worker.uds_path.clone()
-        };
-
-        // The `payload` here is the one constructed by `RunnerService`, which is
-        // `VmEventInvocation` serialized to JSON (or whatever RunnerService chose for events),
-        // or the direct policy context payload.
-        // The `handler_name` parameter to *this* function (`WorkerdVmm::invoke_worker`)
-        // is the one extracted by `RunnerService` from `VmEventInvocation.handler` for events,
-        // or a fixed name like "_policy" for policy execution.
-
-        // The actual bytes to send to the worker's HTTP endpoint are in `payload`.
-        // The `handler_name` is used to construct the HTTP path.
+        // 3. Get immutable data without a lock
+        let uds_path = worker.uds_path.clone();
+        // --- End of shared state access for invocation setup ---
 
         let http_handler_path = if handler_name.starts_with('/') {
-            handler_name.clone()
+            handler_name
         } else {
             format!("/{}", handler_name)
         };
 
         debug!(instance_id = ?id, %http_handler_path, "Invoking worker via UDS");
 
-        // For invoke_worker, we still use the old path, assuming it's a POST with octet-stream
         let proto_http_request = ProtoHttpRequest {
             method: "POST".to_string(),
             uri: http_handler_path,
@@ -612,7 +562,7 @@ impl VmRuntime for WorkerdVmm {
                 error!(instance_id = ?id, "Invocation via UDS failed: {}", e);
                 e.into()
             })
-            .map(|resp| resp.body) // Return only the body for invoke_worker
+            .map(|resp| resp.body)
     }
 
     async fn invoke_http(
@@ -620,23 +570,23 @@ impl VmRuntime for WorkerdVmm {
         id: String,
         request: ProtoHttpRequest,
     ) -> Result<ProtoHttpResponse, VmError> {
-        let worker_lock = {
-            let workers = self.workers.lock().await;
-            workers.get(&id).cloned()
-        }
-        .ok_or_else(|| WorkerdVmError::WorkerNotFound(id.clone()))?;
+        // --- HOT PATH OPTIMIZATION (same as invoke_worker) ---
+        let worker = self
+            .workers
+            .get(&id)
+            .ok_or_else(|| WorkerdVmError::WorkerNotFound(id.clone()))?
+            .clone();
 
-        let uds_path = {
-            let worker = worker_lock.lock().await;
-            if worker.status != WorkerStatus::Running {
-                error!(
-                    instance_id = ?id,
-                    "Attempted to HTTP invoke worker in non-running state: {:?}", worker.status
-                );
-                return Err(WorkerdVmError::WorkerNotRunnable(worker.status).into());
-            }
-            worker.uds_path.clone()
-        };
+        let status = worker.get_status();
+        if status != WorkerStatus::Running {
+            error!(
+                instance_id = ?id,
+                "Attempted to HTTP invoke worker in non-running state: {:?}", status
+            );
+            return Err(WorkerdVmError::WorkerNotRunnable(status).into());
+        }
+
+        let uds_path = worker.uds_path.clone();
 
         debug!(instance_id = ?id, uri = %request.uri, "Invoking worker HTTP endpoint via UDS");
 
@@ -649,42 +599,36 @@ impl VmRuntime for WorkerdVmm {
     }
 
     async fn get_attestation(&self, _user_data: Vec<u8>) -> Result<AttestationReport, VmError> {
-        // Not supported in this sample
         Err(WorkerdVmError::AttestationNotSupported.into())
     }
 
     async fn get_worker_status(&self, id: String) -> Result<WorkerStatus, VmError> {
-        let worker_lock = {
-            let workers = self.workers.lock().await;
-            workers.get(&id).cloned()
-        }
-        .ok_or_else(|| WorkerdVmError::WorkerNotFound(id))?;
-
-        let worker = worker_lock.lock().await;
-        Ok(worker.status)
+        // Lock-free status check
+        let worker = self
+            .workers
+            .get(&id)
+            .ok_or_else(|| WorkerdVmError::WorkerNotFound(id))?;
+        Ok(worker.get_status())
     }
 
     async fn list_running_workers(&self) -> Result<Vec<String>, VmError> {
-        let workers_map = self.workers.lock().await;
-        let mut running_ids = Vec::with_capacity(workers_map.len());
-        for (id, worker_lock) in workers_map.iter() {
-            let worker = worker_lock.lock().await;
-            if worker.status == WorkerStatus::Running {
-                running_ids.push(id.clone());
-            }
-        }
+        // Iterate over the map without a global lock and perform lock-free status checks.
+        let running_ids = self
+            .workers
+            .iter()
+            .filter(|entry| entry.value().get_status() == WorkerStatus::Running)
+            .map(|entry| entry.key().clone())
+            .collect();
         Ok(running_ids)
     }
 
     async fn get_worker_logs(&self, id: String) -> Result<String, VmError> {
-        let worker_lock = {
-            let workers = self.workers.lock().await;
-            workers.get(&id).cloned()
-        }
-        .ok_or_else(|| WorkerdVmError::WorkerNotFound(id))?;
+        let worker = self
+            .workers
+            .get(&id)
+            .ok_or_else(|| WorkerdVmError::WorkerNotFound(id))?;
 
-        let worker = worker_lock.lock().await;
-        // Grab a clone of the logs
+        // The log buffer itself still needs a lock, but this is not on the hot path.
         let logs_content = worker.logs.lock().await.clone();
         Ok(logs_content)
     }

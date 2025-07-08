@@ -4317,6 +4317,7 @@ dependencies = [
  "capnp-rpc",
  "capnpc",
  "clap",
+ "dashmap",
  "figment",
  "futures",
  "hex",

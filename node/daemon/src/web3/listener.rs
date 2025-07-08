@@ -98,7 +98,7 @@ pub async fn start_web3_event_listener(
                         log_option = log_stream.next() => {
                             match log_option {
                                 Some(log) => {
-                                    info!("Received log for work_order_id: {}: {:?}", work_order_id, log);
+                                    debug!("Received log for work_order_id: {}: {:?}", work_order_id, log);
                                     let rust_web3_log = RustWeb3Log::from(log);
                                     let event_payload_proto = nxcc_interface::proto::interface::EventPayload {
                                         payload: Some(nxcc_interface::proto::interface::event_payload::Payload::Web3Log(rust_web3_log.into())),

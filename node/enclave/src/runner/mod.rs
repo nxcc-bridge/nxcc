@@ -578,7 +578,7 @@ impl RunnerService {
         &self,
         events: Vec<(String, String, EventPayload<'static>)>, // (worker_id, handler_name, event_payload)
     ) -> Result<(), RunnerError> {
-        info!("Received batch of {} events for delivery.", events.len());
+        debug!("Received batch of {} events for delivery.", events.len());
         for (worker_id, handler_name, event_payload) in events {
             // 1. Verification (stub)
             debug!(
