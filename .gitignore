@@ -1,0 +1,6 @@
+target/
+node/target/
+node/chainlist/dist/
+benchmarks/target/
+benchmarks/workers/dist/
+benchmarks/workers/node_modules/

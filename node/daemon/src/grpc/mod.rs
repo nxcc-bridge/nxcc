@@ -111,6 +111,23 @@ pub async fn start_grpc_server(
                 ));
             }
         }
+        "tcp" => {
+            let addr = config
+                .tcp_addr
+                .parse()
+                .map_err(|e| AppError::Service(format!("Invalid TCP address: {}", e)))?;
+            info!("Starting gRPC server on TCP at {}", addr);
+            Server::builder()
+                .add_service(DebugServer::new(DebugGrpc::new(enclave_client.clone())))
+                .add_service(WorkOrderServer::new(WorkOrderGrpcService::new(
+                    work_order_orchestrator,
+                )))
+                .serve_with_shutdown(addr, async {
+                    let _ = shutdown.recv().await;
+                })
+                .await
+                .map_err(|e| AppError::Service(format!("gRPC server error: {}", e)))?;
+        }
         other => {
             return Err(AppError::Service(format!("Invalid gRPC mode: {}", other)));
         }

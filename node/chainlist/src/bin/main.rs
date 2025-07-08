@@ -248,8 +248,6 @@ fn prepare_rpc_tasks_for_chain(source_chains: &[SourceChain]) -> Vec<RpcTask> {
                 let mut add_task_if_new = |task_url: Url| {
                     if seen_urls.insert((chain.chain_id, task_url.to_string())) {
                         tasks.push(RpcTask {
-                            chain_id: chain.chain_id,
-                            chain_name: chain.name.clone(),
                             url: task_url,
                             tracking: rpc.tracking.clone(),
                         });

@@ -3,10 +3,10 @@
 # Stage 0: Download workerd
 FROM alpine:3.20 AS workerd-downloader
 
-ARG WORKERD_VERSION=v1.20250520.0
-ARG WORKERD_ARCH=linux-64
 RUN apk add --no-cache curl gzip
 
+ARG WORKERD_VERSION=v1.20250520.0
+ARG WORKERD_ARCH=linux-64
 RUN curl -sSL "https://github.com/cloudflare/workerd/releases/download/${WORKERD_VERSION}/workerd-${WORKERD_ARCH}.gz" | gunzip > /opt/workerd
 
 # Stage 1: Builder
@@ -44,8 +44,9 @@ COPY daemon/Cargo.toml ./daemon/Cargo.toml
 COPY enclave/Cargo.toml ./enclave/Cargo.toml
 COPY vm/base/Cargo.toml ./vm/base/Cargo.toml
 COPY vm/workerd/Cargo.toml ./vm/workerd/Cargo.toml
-RUN mkdir -p interface/src daemon/src enclave/src vm/base/src vm/workerd/src && \
-    touch interface/src/lib.rs daemon/src/main.rs enclave/src/main.rs vm/base/src/lib.rs vm/workerd/src/main.rs
+COPY chainlist/Cargo.toml ./chainlist/Cargo.toml
+RUN mkdir -p interface/src daemon/src enclave/src vm/base/src vm/workerd/src chainlist/src && \
+    touch interface/src/lib.rs daemon/src/main.rs enclave/src/main.rs vm/base/src/lib.rs vm/workerd/src/main.rs chainlist/src/main.rs
 
 # Cache the crates
 RUN cargo metadata --format-version 1 > /dev/null
@@ -101,7 +102,7 @@ COPY --from=builder --chown=${USERNAME}:${USERNAME} /app/target/${BUILD_MODE:-de
 
 # Copy the entrypoint script.
 COPY --chown=${USERNAME}:${USERNAME} entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh && chmod +x /usr/local/bin/workerd
 
 # Environment variables for default configuration.
 # These can be overridden at `docker run -e ...`.

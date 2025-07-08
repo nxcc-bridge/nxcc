@@ -86,7 +86,7 @@ fn default_listen_addresses() -> Vec<String> {
 /// Configuration for the local gRPC interface.
 #[derive(Debug, Clone, Serialize, Deserialize, clap::Args)]
 pub struct GrpcConfig {
-    /// Mode for the local gRPC interface: "vsock" or "uds"
+    /// Mode for the local gRPC interface: "vsock", "uds", or "tcp"
     #[clap(long, default_value = "uds")]
     #[serde(default = "default_grpc_mode")]
     pub mode: String,
@@ -105,6 +105,11 @@ pub struct GrpcConfig {
     #[clap(long, default_value = "/tmp/daemon_grpc.sock")]
     #[serde(default = "default_uds_path")]
     pub uds_path: String,
+
+    /// When using TCP: the address to listen on (e.g., "0.0.0.0:50051")
+    #[clap(long, default_value = "0.0.0.0:50051")]
+    #[serde(default = "default_tcp_addr")]
+    pub tcp_addr: String,
 }
 
 impl Default for GrpcConfig {
@@ -114,6 +119,7 @@ impl Default for GrpcConfig {
             vsock_port: default_vsock_port(),
             vsock_cid: default_vsock_cid(),
             uds_path: default_uds_path(),
+            tcp_addr: default_tcp_addr(),
         }
     }
 }
@@ -132,6 +138,10 @@ fn default_vsock_cid() -> u32 {
 
 fn default_uds_path() -> String {
     "/tmp/daemon_grpc.sock".to_string()
+}
+
+fn default_tcp_addr() -> String {
+    "0.0.0.0:50051".to_string()
 }
 
 /// Configuration related to the connected enclave and its associated VM.

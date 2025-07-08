@@ -3,36 +3,67 @@
 # This script is executed by tini as PID 1 inside the container.
 set -e
 
-APP_VERBOSE="${NXCC_ALL_VERBOSE}"
-
-DAEMON_P2P_LISTEN_EFFECTIVE="${DAEMON_P2P_LISTEN_ADDR}"
-DAEMON_OWN_GRPC_UDS_PATH_EFFECTIVE="/run/nxcc/daemon.sock"
-ENCLAVE_UDS_PATH_EFFECTIVE="${ENCLAVE_UDS_SOCKET}"
-WORKERD_VM_UDS_PATH_EFFECTIVE="${WORKERD_UDS_SOCKET}"
-WORKERD_EXECUTABLE_PATH_EFFECTIVE="${WORKERD_BIN_PATH_ABS}"
-
-DAEMON_IDENTITY_PATH_EFFECTIVE="${NXCC_IDENTITY_PATH:-}"
-DAEMON_POLICY_CACHE_DIR_EFFECTIVE="${NXCC_POLICY_CACHE_DIR:-}"
-DAEMON_CONFIG_PATH_EFFECTIVE="${NXCC_CONFIG_PATH:-config.toml}"
+# --- Configuration ---
+# Use environment variables for configuration, with sensible defaults.
+APP_VERBOSE="${NXCC_ALL_VERBOSE:-false}"
+DAEMON_GRPC_ADDR="${DAEMON_GRPC_TARGET_ADDR:-}"
+DAEMON_P2P_ADDR="${DAEMON_P2P_LISTEN_ADDR:-/ip4/0.0.0.0/tcp/9000}"
+DAEMON_UDS_PATH="/run/nxcc/daemon.sock"
+ENCLAVE_UDS_PATH="${ENCLAVE_UDS_SOCKET:-/run/nxcc/enclave.sock}"
+WORKERD_VM_UDS_PATH="${WORKERD_UDS_SOCKET:-/run/nxcc/workerd.sock}"
+WORKERD_BIN_PATH="${WORKERD_BIN_PATH_ABS:-/usr/local/bin/workerd}"
+IDENTITY_PATH="${NXCC_IDENTITY_PATH:-}"
+POLICY_CACHE_DIR="${NXCC_POLICY_CACHE_DIR:-}"
+CONFIG_PATH="${NXCC_CONFIG_PATH:-config.toml}"
 DAEMON_EXTRA_ARGS="${NXCC_DAEMON_EXTRA_ARGS:-}"
 
+# --- Start VM ---
+vm_cli_args="--server-mode uds --server-uds-path $WORKERD_VM_UDS_PATH --workerd-path $WORKERD_BIN_PATH"
+if [ "$APP_VERBOSE" = "true" ]; then
+  vm_cli_args="$vm_cli_args --verbose"
+fi
+echo "Starting nxcc-workerd-vm with args: $vm_cli_args"
+nxcc-workerd-vm $vm_cli_args &
+
+# --- Start Enclave ---
+enclave_cli_args="--grpc-mode uds --grpc-uds-path $ENCLAVE_UDS_PATH"
+if [ "$APP_VERBOSE" = "true" ]; then
+  enclave_cli_args="$enclave_cli_args --verbose"
+fi
+echo "Starting nxcc-platform-enclave with args: $enclave_cli_args"
+nxcc-platform-enclave $enclave_cli_args &
+
+# Wait for dependent services to be ready before starting the daemon.
+echo "Waiting for VM and enclave sockets..."
+while ! [ -S "$WORKERD_VM_UDS_PATH" ] || ! [ -S "$ENCLAVE_UDS_PATH" ]; do
+  sleep 0.1
+done
+echo "VM and enclave are ready."
+
+# --- Start Daemon ---
+# It is assumed that the daemon will automatically attach the VM specified via
+# --default-vm-uds-path once the socket is available.
 daemon_cli_args=""
 if [ "$APP_VERBOSE" = "true" ]; then
   daemon_cli_args="$daemon_cli_args --verbose"
 fi
 
-if [ -f "$DAEMON_CONFIG_PATH_EFFECTIVE" ]; then
-  daemon_cli_args="$daemon_cli_args --config $DAEMON_CONFIG_PATH_EFFECTIVE"
+if [ -f "$CONFIG_PATH" ]; then
+  daemon_cli_args="$daemon_cli_args --config $CONFIG_PATH"
 else
-  daemon_cli_args="$daemon_cli_args --mode uds --uds-path $DAEMON_OWN_GRPC_UDS_PATH_EFFECTIVE"
-  daemon_cli_args="$daemon_cli_args --listen-addresses $DAEMON_P2P_LISTEN_EFFECTIVE"
-  daemon_cli_args="$daemon_cli_args --enclave-uds-path $ENCLAVE_UDS_PATH_EFFECTIVE"
-  daemon_cli_args="$daemon_cli_args --default-vm-uds-path $WORKERD_VM_UDS_PATH_EFFECTIVE"
-  if [ -n "$DAEMON_IDENTITY_PATH_EFFECTIVE" ]; then
-    daemon_cli_args="$daemon_cli_args --identity-path $DAEMON_IDENTITY_PATH_EFFECTIVE"
+  if [ -n "$DAEMON_GRPC_ADDR" ]; then
+    daemon_cli_args="$daemon_cli_args --mode tcp --tcp-addr $DAEMON_GRPC_ADDR"
+  else
+    daemon_cli_args="$daemon_cli_args --mode uds --uds-path $DAEMON_UDS_PATH"
   fi
-  if [ -n "$DAEMON_POLICY_CACHE_DIR_EFFECTIVE" ]; then
-    daemon_cli_args="$daemon_cli_args --policy-cache-dir $DAEMON_POLICY_CACHE_DIR_EFFECTIVE"
+  daemon_cli_args="$daemon_cli_args --listen-addresses $DAEMON_P2P_ADDR"
+  daemon_cli_args="$daemon_cli_args --enclave-uds-path $ENCLAVE_UDS_PATH"
+  daemon_cli_args="$daemon_cli_args --default-vm-uds-path $WORKERD_VM_UDS_PATH"
+  if [ -n "$IDENTITY_PATH" ]; then
+    daemon_cli_args="$daemon_cli_args --identity-path $IDENTITY_PATH"
+  fi
+  if [ -n "$POLICY_CACHE_DIR" ]; then
+    daemon_cli_args="$daemon_cli_args --policy-cache-dir $POLICY_CACHE_DIR"
   fi
 fi
 
@@ -43,23 +74,5 @@ fi
 echo "Starting nxcc-daemon with args:$daemon_cli_args"
 nxcc-daemon $daemon_cli_args &
 
-enclave_cli_args=""
-if [ "$APP_VERBOSE" = "true" ]; then
-  enclave_cli_args="$enclave_cli_args --verbose"
-fi
-enclave_cli_args="$enclave_cli_args --grpc-mode uds --grpc-uds-path $ENCLAVE_UDS_PATH_EFFECTIVE"
-
-echo "Starting nxcc-platform-enclave with args:$enclave_cli_args"
-nxcc-platform-enclave $enclave_cli_args &
-
-workerd_vm_cli_args=""
-if [ "$APP_VERBOSE" = "true" ]; then
-  workerd_vm_cli_args="$workerd_vm_cli_args --verbose"
-fi
-workerd_vm_cli_args="$workerd_vm_cli_args --server-mode uds --server-uds-path $WORKERD_VM_UDS_PATH_EFFECTIVE"
-workerd_vm_cli_args="$workerd_vm_cli_args --workerd-path $WORKERD_EXECUTABLE_PATH_EFFECTIVE"
-
-echo "Starting nxcc-workerd-vm with args:$workerd_vm_cli_args"
-nxcc-workerd-vm $workerd_vm_cli_args &
-
+echo "All components started. Waiting for processes to exit..."
 wait

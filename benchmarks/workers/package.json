@@ -1,0 +1,14 @@
+{
+  "name": "nxcc-bench-workers",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "esbuild *.js --bundle --outdir=dist --format=esm"
+  },
+  "dependencies": {
+    "viem": "^2.17.4"
+  },
+  "devDependencies": {
+    "esbuild": "^0.20.0"
+  }
+}
