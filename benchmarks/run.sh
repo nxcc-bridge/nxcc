@@ -94,23 +94,23 @@ setup() {
 run_benchmarks() {
   info "--- Running benchmarks ---"
 
-  restart_node
-  "$BENCH_DIR/target/release/benchmarks" \
-    --node-grpc-addr "http://localhost:50051" \
-    --anvil-rpc-url "http://localhost:8545" \
-    idle
+  # restart_node
+  # "$BENCH_DIR/target/release/benchmarks" \
+  #   --node-grpc-addr "http://localhost:50051" \
+  #   --anvil-rpc-url "http://localhost:8545" \
+  #   idle
 
-  restart_node
-  "$BENCH_DIR/target/release/benchmarks" \
-    --node-grpc-addr "http://localhost:50051" \
-    --anvil-rpc-url "http://localhost:8545" \
-    cpu
+  # restart_node
+  # "$BENCH_DIR/target/release/benchmarks" \
+  #   --node-grpc-addr "http://localhost:50051" \
+  #   --anvil-rpc-url "http://localhost:8545" \
+  #   cpu
 
-  restart_node
-  "$BENCH_DIR/target/release/benchmarks" \
-    --node-grpc-addr "http://localhost:50051" \
-    --anvil-rpc-url "http://localhost:8545" \
-    io
+  # restart_node
+  # "$BENCH_DIR/target/release/benchmarks" \
+  #   --node-grpc-addr "http://localhost:50051" \
+  #   --anvil-rpc-url "http://localhost:8545" \
+  #   io
 
   restart_node
   "$BENCH_DIR/target/release/benchmarks" \

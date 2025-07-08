@@ -1,6 +1,6 @@
 async function backgroundTask(env) {
-  const min_work_factor = env.USER_CONFIG?.min_cpu_work_factor || 10_000;
-  const max_work_factor = env.USER_CONFIG?.max_cpu_work_factor || 100_000;
+  const min_work_factor = env.USER_CONFIG?.min_cpu_work_factor || 100_000;
+  const max_work_factor = env.USER_CONFIG?.max_cpu_work_factor || 1_000_000;
   const min_sleep_ms = env.USER_CONFIG?.min_sleep_ms || 50;
   const max_sleep_ms = env.USER_CONFIG?.max_sleep_ms || 1000;
 
