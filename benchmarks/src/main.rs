@@ -5,7 +5,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use indicatif::{ProgressBar, ProgressStyle};
 use nxcc_interface::{
-    proto::daemon::work_order_client::WorkOrderClient,
+    proto::daemon::{work_order_client::WorkOrderClient, CheckWorkerStatusRequest},
     types::{WorkerEvent, WorkerEventKind},
 };
 use tonic::transport::Channel;
@@ -149,6 +149,7 @@ async fn run_active_benchmark_scenario(
     userdata: Option<serde_json::Value>,
 ) -> Result<u64> {
     let mut count = 0;
+    let mut work_order_ids = Vec::new();
     const SUBMISSION_TIMEOUT: Duration = Duration::from_secs(5);
     const WORKER_START_DELAY: Duration = Duration::from_millis(100);
 
@@ -161,19 +162,20 @@ async fn run_active_benchmark_scenario(
             utils::create_work_order(worker_path, userdata.clone(), Some(vec![launch_event]))?;
         let request = utils::create_submit_request(work_order)?;
 
-        // Race the submission with a timeout
         let submission_result =
             tokio::time::timeout(SUBMISSION_TIMEOUT, client.submit_work_order(request)).await;
 
         match submission_result {
             Ok(Ok(response)) => {
-                if !response.into_inner().success {
+                let response = response.into_inner();
+                if !response.success {
                     info!(
                         "Failed to start worker {}. Assuming capacity reached.",
                         count + 1
                     );
                     break;
                 }
+                work_order_ids.push(response.work_order_id);
             }
             Ok(Err(e)) => {
                 info!(
@@ -194,11 +196,39 @@ async fn run_active_benchmark_scenario(
 
         count += 1;
 
-        // Pause momentarily to allow the active worker to begin
         tokio::time::sleep(WORKER_START_DELAY).await;
 
-        if count % 10 == 0 {
-            info!("Started {} active workers...", count);
+        if count > 0 && count % 3 == 0 {
+            info!("Checking status of {} workers...", count);
+            for (i, work_order_id) in work_order_ids.iter().enumerate() {
+                let request = tonic::Request::new(CheckWorkerStatusRequest {
+                    work_order_id: work_order_id.clone(),
+                });
+                match client.check_worker_status(request).await {
+                    Ok(response) => {
+                        let status = response.into_inner();
+                        if !status.is_running {
+                            info!(
+                                "Worker {} ({}) is not running (status: '{}'). Assuming capacity reached.",
+                                i + 1,
+                                work_order_id,
+                                status.status_message
+                            );
+                            return Ok(count - 1);
+                        }
+                    }
+                    Err(e) => {
+                        info!(
+                            "Error checking status for worker {} ({}): {}. Assuming capacity reached.",
+                            i + 1,
+                            work_order_id,
+                            e
+                        );
+                        return Ok(count - 1);
+                    }
+                }
+            }
+            info!("All {} workers are running.", count);
         }
     }
     Ok(count)

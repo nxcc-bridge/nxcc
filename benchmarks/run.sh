@@ -65,7 +65,6 @@ setup() {
   info "--- Setting up benchmark environment ---"
 
   info "Building node Docker image..."
-  set -x
   # Build arguments for Docker
   BUILD_ARGS="--build-arg BUILD_MODE=release"
   # Add ARM64 build arg if running on ARM64 platform
@@ -73,7 +72,6 @@ setup() {
     BUILD_ARGS="$BUILD_ARGS --build-arg WORKERD_ARCH=linux-arm64"
   fi
   docker build $BUILD_ARGS -t "$NODE_IMAGE" "$NODE_DIR"
-  set +x
 
   info "Building test contracts..."
   (cd "$NODE_DIR/tests" && FOUNDRY_PROFILE=release forge build)
@@ -96,23 +94,23 @@ setup() {
 run_benchmarks() {
   info "--- Running benchmarks ---"
 
-  # restart_node
-  # "$BENCH_DIR/target/release/benchmarks" \
-  #   --node-grpc-addr "http://localhost:50051" \
-  #   --anvil-rpc-url "http://localhost:8545" \
-  #   idle
+  restart_node
+  "$BENCH_DIR/target/release/benchmarks" \
+    --node-grpc-addr "http://localhost:50051" \
+    --anvil-rpc-url "http://localhost:8545" \
+    idle
 
-  # restart_node
-  # "$BENCH_DIR/target/release/benchmarks" \
-  #   --node-grpc-addr "http://localhost:50051" \
-  #   --anvil-rpc-url "http://localhost:8545" \
-  #   cpu
+  restart_node
+  "$BENCH_DIR/target/release/benchmarks" \
+    --node-grpc-addr "http://localhost:50051" \
+    --anvil-rpc-url "http://localhost:8545" \
+    cpu
 
-  # restart_node
-  # "$BENCH_DIR/target/release/benchmarks" \
-  #   --node-grpc-addr "http://localhost:50051" \
-  #   --anvil-rpc-url "http://localhost:8545" \
-  #   io
+  restart_node
+  "$BENCH_DIR/target/release/benchmarks" \
+    --node-grpc-addr "http://localhost:50051" \
+    --anvil-rpc-url "http://localhost:8545" \
+    io
 
   restart_node
   "$BENCH_DIR/target/release/benchmarks" \
