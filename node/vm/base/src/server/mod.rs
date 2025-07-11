@@ -5,7 +5,7 @@ use std::{error::Error, fmt, sync::Arc};
 
 use thiserror::Error;
 use tonic::{Request, Response, Status, transport::Server};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, instrument, warn};
 
 use crate::binding::{BoundClient, ClientBindingLayer};
 
@@ -187,17 +187,22 @@ impl<T: VmRuntime> Vm for VmServiceGrpc<T> {
         }
     }
 
+    #[instrument(
+        level = "info",
+        name = "invoke_worker",
+        skip(self, request),
+        fields(
+            worker.id = %request.get_ref().id,
+            worker.handler = %request.get_ref().handler_name,
+            worker.payload_size = request.get_ref().payload.len(),
+        ),
+        err(Display)
+    )]
     async fn invoke_worker(
         &self,
         request: Request<InvokeWorkerRequest>,
     ) -> Result<Response<InvokeWorkerResponse>, Status> {
         let req = request.into_inner();
-        debug!(
-            "gRPC InvokeWorker request for id '{}', handler '{}', payload size {}",
-            req.id,
-            req.handler_name,
-            req.payload.len()
-        );
 
         match self
             .runtime
@@ -205,21 +210,18 @@ impl<T: VmRuntime> Vm for VmServiceGrpc<T> {
             .await
         {
             Ok(result) => {
-                debug!("Successfully invoked worker, result size {}", result.len());
+                debug!(result.len = result.len(), "Successfully invoked worker");
                 Ok(Response::new(InvokeWorkerResponse {
                     result,
                     success: true,
                     error_message: String::new(),
                 }))
             }
-            Err(e) => {
-                error!("Failed to invoke worker: {}", e);
-                Ok(Response::new(InvokeWorkerResponse {
-                    result: Vec::new(),
-                    success: false,
-                    error_message: e.to_string(),
-                }))
-            }
+            Err(e) => Ok(Response::new(InvokeWorkerResponse {
+                result: Vec::new(),
+                success: false,
+                error_message: e.to_string(),
+            })),
         }
     }
 

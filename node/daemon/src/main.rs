@@ -17,7 +17,7 @@ use grpc::enclave_client;
 use nxcc_interface::proto::enclave as enclave_proto;
 use tokio::sync::RwLock;
 use tracing::{Level, error, info};
-use tracing_subscriber::{EnvFilter, fmt::Subscriber};
+use tracing_subscriber::{EnvFilter, FmtSubscriber as Subscriber, fmt::format::FmtSpan};
 
 use crate::{
     config::{Config, EnclaveConfig},
@@ -44,7 +44,10 @@ async fn main() -> anyhow::Result<()> {
     let base_filter = format!("{}={}", env!("CARGO_PKG_NAME").replace("-", "_"), log_level);
     let env_filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(base_filter));
-    let subscriber = Subscriber::builder().with_env_filter(env_filter).finish();
+    let subscriber = Subscriber::builder()
+        .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+        .with_env_filter(env_filter)
+        .finish();
     tracing::subscriber::set_global_default(subscriber)?;
 
     let local_key = match &config.identity_path {

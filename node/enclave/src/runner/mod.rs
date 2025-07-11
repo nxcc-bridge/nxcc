@@ -22,7 +22,7 @@ use nxcc_vm_base::{
 use serde::Serialize;
 use thiserror::Error;
 use tokio::sync::{RwLock, mpsc};
-use tracing::{debug, error, info, warn};
+use tracing::{Instrument as _, debug, debug_span, error, info, info_span, warn};
 
 use crate::secrets::Secrets;
 
@@ -109,10 +109,11 @@ impl VmClient {
     }
 
     // Async function to invoke a worker
+    #[tracing::instrument(level = "info", skip(self, payload), fields(payload_size = payload.len()))]
     pub async fn invoke_worker(
         &mut self,
         worker_id: String,
-        handler_name: String, // Added handler_name
+        handler_name: String,
         payload: Vec<u8>,
     ) -> Result<Vec<u8>, ClientError> {
         match self {
@@ -123,6 +124,7 @@ impl VmClient {
     }
 
     // Async function to invoke an HTTP request on a worker
+    #[tracing::instrument(level = "info", skip(self, request))]
     pub async fn invoke_http(
         &mut self,
         worker_id: String,
@@ -171,7 +173,7 @@ pub struct RunnerService {
     /// Shared secrets service for storing authorizations.
     secrets: Arc<Secrets>,
     /// Sender for the internal event queue: (worker_id, handler_name, serialized_vm_invocation_payload)
-    event_tx: mpsc::Sender<(String, String, Vec<u8>)>,
+    event_tx: mpsc::UnboundedSender<(String, String, Vec<u8>)>,
 }
 
 /// Structure passed as payload to VmClient::invoke_worker for event delivery.
@@ -186,7 +188,7 @@ struct VmEventInvocation<'a> {
 
 impl RunnerService {
     pub fn new(secrets: Arc<Secrets>) -> Self {
-        let (event_tx, mut event_rx) = mpsc::channel::<(String, String, Vec<u8>)>(1024); // TODO: Make capacity configurable
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel::<(String, String, Vec<u8>)>();
 
         let vms_clone = Arc::new(RwLock::new(HashMap::<String, VmClient>::new()));
         let worker_map_clone = Arc::new(RwLock::new(HashMap::<String, String>::new()));
@@ -194,61 +196,87 @@ impl RunnerService {
         let vms_for_task = vms_clone.clone();
         let worker_map_for_task = worker_map_clone.clone();
 
-        tokio::spawn(async move {
-            info!("Enclave event processing task started.");
-            while let Some((worker_id, handler_name, vm_invocation_payload_bytes)) =
-                event_rx.recv().await
-            {
-                debug!(
-                    "Processing event for worker_id: {}, handler: {}, payload_size: {}",
-                    worker_id,
-                    handler_name,
-                    vm_invocation_payload_bytes.len()
-                );
-                let vm_id_option = worker_map_for_task.read().await.get(&worker_id).cloned();
+        tokio::spawn(
+            async move {
+                info!("Enclave event processing task started.");
 
-                if let Some(vm_id) = vm_id_option {
-                    let mut vms_guard = vms_for_task.write().await;
-                    if let Some(client) = vms_guard.get_mut(&vm_id) {
-                        match client
-                            .invoke_worker(
-                                worker_id.clone(),
-                                handler_name.clone(),
-                                vm_invocation_payload_bytes,
-                            )
-                            .await
-                        {
-                            Ok(response) => {
-                                debug!(
-                                    "Worker {} handler {} invocation successful, response_size: {}",
-                                    worker_id,
-                                    handler_name,
-                                    response.len()
-                                );
-                                // TODO: Handle worker response if necessary
-                            }
-                            Err(e) => {
-                                error!(
-                                    "Failed to invoke worker {} handler {} in VM {}: {}",
-                                    worker_id, handler_name, vm_id, e
-                                );
+                loop {
+                    // Span specifically for the receive operation to track blocking time
+                    let receive_result = async {
+                        event_rx.recv().await
+                    }
+                    .instrument(debug_span!("event_receive"))
+                    .await;
+
+                    let Some((worker_id, handler_name, vm_invocation_payload_bytes)) = receive_result else {
+                        break;
+                    };
+
+                    // Span for processing each event
+                    async {
+                        debug!(
+                            "Processing event for worker_id: {}, handler: {}, payload_size: {}",
+                            worker_id,
+                            handler_name,
+                            vm_invocation_payload_bytes.len()
+                        );
+
+                        let (vm_id, client_clone) = async {
+                            let worker_map_guard = worker_map_for_task.read().await;
+                            let vm_id = worker_map_guard.get(&worker_id).cloned();
+                            if let Some(ref vm_id_str) = vm_id {
+                                let vms_guard = vms_for_task.read().await;
+                                let client_clone = vms_guard.get(vm_id_str).cloned();
+                                (vm_id, client_clone)
+                            } else {
+                                (vm_id, None)
                             }
                         }
-                    } else {
-                        error!(
-                            "VM {} not found for worker {} during event processing.",
-                            vm_id, worker_id
-                        );
+                        .instrument(debug_span!("lookup_vm_and_client"))
+                        .await;
+
+                        if let (Some(vm_id), Some(mut client)) = (vm_id, client_clone) {
+                            let invoke_result = client
+                                .invoke_worker(
+                                    worker_id.clone(),
+                                    handler_name.clone(),
+                                    vm_invocation_payload_bytes,
+                                )
+                                .instrument(debug_span!("invoke_worker", worker_id = %worker_id, handler = %handler_name))
+                                .await;
+
+                            match invoke_result {
+                                Ok(response) => {
+                                    debug!(
+                                        "Worker {} handler {} invocation successful, response_size: {}",
+                                        worker_id,
+                                        handler_name,
+                                        response.len()
+                                    );
+                                    // TODO: Handle worker response if necessary
+                                }
+                                Err(e) => {
+                                    error!(
+                                        "Failed to invoke worker {} handler {} in VM {}: {}",
+                                        worker_id, handler_name, vm_id, e
+                                    );
+                                }
+                            }
+                        } else {
+                            error!(
+                                "Worker {} not found in map during event processing.",
+                                worker_id
+                            );
+                        }
                     }
-                } else {
-                    error!(
-                        "Worker {} not found in map during event processing.",
-                        worker_id
-                    );
+                    .instrument(info_span!("process_event", worker_id = %worker_id, handler = %handler_name))
+                    .await;
                 }
+
+                info!("Enclave event processing task stopped.");
             }
-            info!("Enclave event processing task stopped.");
-        });
+            .instrument(info_span!("enclave_event_processing_task"))
+        );
 
         Self {
             vms: vms_clone,
@@ -596,15 +624,11 @@ impl RunnerService {
             })?;
 
             // 3. Send to internal queue
-            if let Err(e) = self
-                .event_tx
-                .send((
-                    worker_id.clone(),
-                    handler_name.clone(),
-                    vm_invocation_payload_bytes,
-                ))
-                .await
-            {
+            if let Err(e) = self.event_tx.send((
+                worker_id.clone(),
+                handler_name.clone(),
+                vm_invocation_payload_bytes,
+            )) {
                 error!(
                     "Failed to send event (handler: {}) to internal queue for worker {}: {}",
                     handler_name, worker_id, e

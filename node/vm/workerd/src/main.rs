@@ -14,7 +14,7 @@ use std::{error::Error, sync::Arc};
 
 use nxcc_vm_base::{run_server, server::ServerConfig};
 use tracing::{Level, info};
-use tracing_subscriber::{EnvFilter, fmt::Subscriber};
+use tracing_subscriber::{EnvFilter, FmtSubscriber as Subscriber, fmt::format::FmtSpan};
 use vmm::WorkerdVmm;
 
 #[tokio::main]
@@ -29,7 +29,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let base_filter = format!("nxcc_workerd_vm={0},nxcc_vm_base={0}", log_level);
     let env_filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(base_filter));
-    let subscriber = Subscriber::builder().with_env_filter(env_filter).finish();
+    let subscriber = Subscriber::builder()
+        .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+        .with_env_filter(env_filter)
+        .finish();
     tracing::subscriber::set_global_default(subscriber).expect("Setting default subscriber failed");
 
     tracing::info!("Starting Workerd VMM with configuration: {:?}", config);
