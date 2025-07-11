@@ -92,7 +92,7 @@ setup() {
   fi
 
   info "Starting Anvil container..."
-  docker run -d --rm --name anvil-bench -p 8545:8545 --network "$DOCKER_NETWORK" --network-alias anvil -e ANVIL_IP_ADDR=0.0.0.0  ghcr.io/foundry-rs/foundry:latest anvil >/dev/null
+  docker run -d --rm --name anvil-bench -p 8545:8545 --network "$DOCKER_NETWORK" --network-alias anvil ghcr.io/foundry-rs/foundry:latest "anvil --host 0.0.0.0 --disable-block-gas-limit" >/dev/null
 }
 
 run_benchmarks() {
@@ -110,11 +110,11 @@ run_benchmarks() {
   # restart_node
   # "$BENCH_DIR/target/release/benchmarks" realistic
 
-  # restart_node
-  # "$BENCH_DIR/target/release/benchmarks" web3-throughput
+  restart_node
+  "$BENCH_DIR/target/release/benchmarks" web3-latency
 
-  # restart_node
-  # "$BENCH_DIR/target/release/benchmarks" web3-latency
+  restart_node
+  "$BENCH_DIR/target/release/benchmarks" web3-event-processing-throughput
 
   # restart_node
   # "$BENCH_DIR/target/release/benchmarks" polling --interval-ms "1"
