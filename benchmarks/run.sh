@@ -113,8 +113,23 @@ run_benchmarks() {
   # restart_node
   # "$BENCH_DIR/target/release/benchmarks" web3-throughput
 
-  restart_node
-  "$BENCH_DIR/target/release/benchmarks" web3-latency
+  # restart_node
+  # "$BENCH_DIR/target/release/benchmarks" web3-latency
+
+  # restart_node
+  # "$BENCH_DIR/target/release/benchmarks" polling --interval-ms "1"
+
+  # restart_node
+  # "$BENCH_DIR/target/release/benchmarks" polling --interval-ms "5"
+
+  # restart_node
+  # "$BENCH_DIR/target/release/benchmarks" polling --interval-ms "7.5"
+
+  # restart_node
+  # "$BENCH_DIR/target/release/benchmarks" polling --interval-ms "10"
+
+  # restart_node
+  # "$BENCH_DIR/target/release/benchmarks" polling --interval-ms "100"
 }
 
 teardown() {

@@ -35,6 +35,8 @@ enum Benchmark {
     Io,
     /// Benchmark realistic (CPU + IO) active worker capacity
     Realistic,
+    /// Benchmark polling worker capacity
+    Polling { #[arg(long)] interval_ms: f64 },
     /// Benchmark Web3 event throughput
     Web3Throughput,
     /// Benchmark Web3 event latency
@@ -66,6 +68,13 @@ async fn main() -> Result<()> {
         Benchmark::Realistic => {
             println!("--- Running Realistic Active Worker Capacity Benchmark ---");
             run_realistic_worker_benchmark(client.clone()).await?;
+        }
+        Benchmark::Polling { interval_ms } => {
+            println!(
+                "--- Running Polling Worker Capacity Benchmark ({}ms interval) ---",
+                interval_ms
+            );
+            run_polling_worker_benchmark(client.clone(), &args.worker_anvil_rpc_url, interval_ms).await?;
         }
         Benchmark::Web3Throughput => {
             println!("--- Running Web3 Event Throughput Benchmark ---");
@@ -222,6 +231,33 @@ async fn run_realistic_worker_benchmark(mut client: WorkOrderClient<Channel>) ->
     let count =
         run_active_benchmark_scenario(&mut client, "realistic_worker.js", None, bar).await?;
     println!("Realistic Worker Capacity: {}", count);
+    Ok(())
+}
+
+async fn run_polling_worker_benchmark(
+    mut client: WorkOrderClient<Channel>,
+    worker_anvil_rpc_url: &str,
+    interval_ms: f64,
+) -> Result<()> {
+    let bar = ProgressBar::new_spinner();
+    bar.set_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner:.blue} {msg} [{elapsed_precise}]")?
+            .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ "),
+    );
+    bar.set_message(format!(
+        "Testing polling workers with {}ms interval...",
+        interval_ms
+    ));
+
+    let config = serde_json::json!({
+        "interval_ms": interval_ms,
+        "url": worker_anvil_rpc_url,
+    });
+
+    let count =
+        run_active_benchmark_scenario(&mut client, "polling_worker.js", Some(config), bar).await?;
+    println!("Polling Worker Capacity ({}ms interval): {}", interval_ms, count);
     Ok(())
 }
 

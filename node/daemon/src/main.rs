@@ -177,7 +177,7 @@ async fn main() -> anyhow::Result<()> {
     let mut shutdown_rx_for_event_delivery = shutdown_tx.subscribe();
     tokio::spawn(async move {
         let mut batch = Vec::with_capacity(EVENT_BATCH_SIZE);
-        let mut ticker = interval(Duration::from_millis(100)); // Send batch every 100ms or if full
+        let mut ticker = interval(Duration::from_millis(10)); // Send batch every 10ms or if full
 
         loop {
             tokio::select! {
