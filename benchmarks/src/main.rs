@@ -424,7 +424,7 @@ async fn run_web3_latency_benchmark(
     setup_bar.finish_and_clear();
 
     let mut histogram = hdrhistogram::Histogram::<u64>::new(3)?;
-    let num_events = 10000;
+    let num_events = 1000;
 
     let bar = ProgressBar::new(num_events);
     bar.set_style(

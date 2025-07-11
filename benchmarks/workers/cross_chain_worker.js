@@ -28,7 +28,12 @@ async function sendUpdateStateTx(targetChainConfig, newValue, data) {
       account,
     });
     const hash = await walletClient.writeContract(request);
-    const receipt = await publicClient.waitForTransactionReceipt({ hash });
+    const receipt = await publicClient.waitForTransactionReceipt({
+      hash,
+      pollingInterval: 10,
+      confirmations: 0,
+      retryDelay: 10,
+    });
     return new Response(
       JSON.stringify({ success: true, txHash: receipt.transactionHash }),
       {
