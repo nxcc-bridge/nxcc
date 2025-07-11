@@ -17,3 +17,5 @@ Polling Worker Capacity (1ms interval): 82-85
 Polling Worker Capacity (5ms interval): 95
 Polling Worker Capacity (10ms interval): 215
 Polling Worker Capacity (100ms interval): 214
+
+Web3 Event Throughput: 1130.98 events/sec

@@ -122,7 +122,7 @@ pub async fn deploy_test_events_contract(
         "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80".parse()?;
     let provider = Arc::new(
         ProviderBuilder::new()
-            .with_simple_nonce_management()
+            .with_cached_nonce_management()
             .wallet(pk)
             .connect_http(anvil_url.parse()?)
             .erased(),
@@ -152,10 +152,33 @@ pub fn create_cross_chain_work_order(
         handler: "valueChanged".to_string(),
         kind: WorkerEventKind::Web3Event(Web3Event {
             chain: 31337,
-            address: vec![contract_address.clone()],
+            address: vec![*contract_address],
             topics: vec![vec![TestEvents::ValueChanged::SIGNATURE_HASH]],
         }),
     };
 
     create_work_order("cross_chain_worker.js", Some(userdata), Some(vec![event]))
+}
+
+pub fn create_event_counter_work_order(
+    chain_url: &str,
+    contract_abi: &str,
+    contract_address: &Address,
+) -> Result<DsseEnvelope> {
+    let userdata = serde_json::json!({
+        "chain1": { "rpcUrl": chain_url, "contractAddress": contract_address.to_string() },
+        "contractAbi": contract_abi,
+        "ethereumPrivateKey": "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+    });
+
+    let event = WorkerEvent {
+        handler: "valueChanged".to_string(),
+        kind: WorkerEventKind::Web3Event(Web3Event {
+            chain: 31337,
+            address: vec![*contract_address],
+            topics: vec![vec![TestEvents::ValueChanged::SIGNATURE_HASH]],
+        }),
+    };
+
+    create_work_order("event_counter_worker.js", Some(userdata), Some(vec![event]))
 }

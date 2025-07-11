@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 
 use alloy_primitives::U256;
+use alloy_provider::Provider;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use indicatif::{ProgressBar, ProgressStyle};
@@ -36,7 +37,10 @@ enum Benchmark {
     /// Benchmark realistic (CPU + IO) active worker capacity
     Realistic,
     /// Benchmark polling worker capacity
-    Polling { #[arg(long)] interval_ms: f64 },
+    Polling {
+        #[arg(long)]
+        interval_ms: f64,
+    },
     /// Benchmark Web3 event throughput
     Web3Throughput,
     /// Benchmark Web3 event latency
@@ -74,7 +78,8 @@ async fn main() -> Result<()> {
                 "--- Running Polling Worker Capacity Benchmark ({}ms interval) ---",
                 interval_ms
             );
-            run_polling_worker_benchmark(client.clone(), &args.worker_anvil_rpc_url, interval_ms).await?;
+            run_polling_worker_benchmark(client.clone(), &args.worker_anvil_rpc_url, interval_ms)
+                .await?;
         }
         Benchmark::Web3Throughput => {
             println!("--- Running Web3 Event Throughput Benchmark ---");
@@ -151,10 +156,10 @@ async fn run_idle_worker_benchmark(mut client: WorkOrderClient<Channel>) -> Resu
                                 Err(_) => {
                                     failed_count += 1;
                                     if failed_count >= 2 {
-                                        bar.finish_with_message(format!(
+                                        bar.finish_with_message(
                                             "Multiple workers failing liveness check. Capacity \
-                                             reached."
-                                        ));
+                                             reached.",
+                                        );
                                         println!("Idle Worker Capacity: {}", count - 1);
                                         return Ok(());
                                     }
@@ -257,7 +262,10 @@ async fn run_polling_worker_benchmark(
 
     let count =
         run_active_benchmark_scenario(&mut client, "polling_worker.js", Some(config), bar).await?;
-    println!("Polling Worker Capacity ({}ms interval): {}", interval_ms, count);
+    println!(
+        "Polling Worker Capacity ({}ms interval): {}",
+        interval_ms, count
+    );
     Ok(())
 }
 
@@ -366,11 +374,10 @@ async fn run_web3_throughput_benchmark(
     );
     bar.set_message("Deploying test contract...");
 
-    let (_provider, contract, contract_abi) = utils::deploy_test_events_contract(anvil_url).await?;
+    let (provider, contract, contract_abi) = utils::deploy_test_events_contract(anvil_url).await?;
 
     bar.set_message("Starting web3 event worker...");
-    let work_order = utils::create_cross_chain_work_order(
-        worker_anvil_url,
+    let work_order = utils::create_event_counter_work_order(
         worker_anvil_url,
         &contract_abi,
         contract.address(),
@@ -389,31 +396,129 @@ async fn run_web3_throughput_benchmark(
     }
 
     bar.set_message("Waiting for worker to be ready...");
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    tokio::time::sleep(Duration::from_secs(5)).await;
 
-    bar.set_message("Emitting events...");
-    let total_duration = Duration::from_secs(10);
+    let num_events_to_emit = 2500_u64;
+    let batch_size = 50;
+
+    provider
+        .raw_request::<_, ()>("anvil_setAutomine".into(), [false])
+        .await?;
+
+    // Create a new progress bar specifically for event emission
+    let emit_bar = ProgressBar::new(num_events_to_emit);
+    emit_bar.set_style(
+        ProgressStyle::default_bar()
+            .template(
+                "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta}) \
+                 {msg}",
+            )?
+            .progress_chars("#>-")
+            .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ "),
+    );
+    emit_bar.set_message("Emitting events in batches...");
+
+    let mut tx_hashes = Vec::new();
+    let emit_start = Instant::now();
+
+    for batch_start in (1..=num_events_to_emit).step_by(batch_size) {
+        let batch_end = std::cmp::min(batch_start + batch_size as u64 - 1, num_events_to_emit);
+
+        let batch_futures: Vec<_> = (batch_start..=batch_end)
+            .map(|i| {
+                let contract = &contract;
+                async move {
+                    let tx = contract.triggerEvent(U256::from(i), vec![].into());
+                    tx.send().await
+                }
+            })
+            .collect();
+
+        let batch_results = futures::future::join_all(batch_futures).await;
+
+        for result in batch_results {
+            let pending_tx = result?;
+            tx_hashes.push(*pending_tx.tx_hash());
+            emit_bar.inc(1);
+        }
+
+        let current_count = tx_hashes.len() as u64;
+        if current_count % 100 == 0 || current_count == num_events_to_emit {
+            let elapsed = emit_start.elapsed();
+            let rate = current_count as f64 / elapsed.as_secs_f64();
+            emit_bar.set_message(format!(
+                "Emitting events in batches... ({:.0} events/sec)",
+                rate
+            ));
+        }
+    }
+
+    let emit_elapsed = emit_start.elapsed();
+    let emit_rate = num_events_to_emit as f64 / emit_elapsed.as_secs_f64();
+    emit_bar.finish_with_message(format!(
+        "Emitted {} events in {} batches in {:?} ({:.0} events/sec)",
+        num_events_to_emit,
+        (num_events_to_emit + (batch_size as u64) - 1).div_ceil(batch_size as u64),
+        emit_elapsed,
+        emit_rate
+    ));
+
+    bar.set_message("Mining block with all events...");
+    provider
+        .raw_request::<_, String>("evm_mine".into(), ())
+        .await?;
     let start_time = Instant::now();
-    let mut event_count = 0;
+    provider
+        .raw_request::<_, ()>("anvil_setAutomine".into(), [true])
+        .await?;
 
-    while start_time.elapsed() < total_duration {
-        contract
-            .triggerEvent(U256::from(42), vec![].into())
-            .send()
-            .await?
-            .get_receipt()
-            .await?;
-        event_count += 1;
-        bar.set_message(format!("Emitted {} events", event_count));
-        // TODO: make this actually measure throughput
+    bar.set_message("Waiting for all events to be mined...");
+    for tx_hash in tx_hashes {
+        let receipt = provider.get_transaction_receipt(tx_hash).await?;
+        receipt.ok_or_else(|| anyhow::anyhow!("Transaction receipt not found"))?;
+    }
+
+    bar.set_message(format!(
+        "All {} events emitted. Measuring processing time...",
+        num_events_to_emit
+    ));
+
+    let timeout = Duration::from_secs(120);
+
+    loop {
+        let current_value: u64 = contract.value().call().await?.to();
+        bar.set_message(format!(
+            "Processed {}/{} events",
+            current_value, num_events_to_emit
+        ));
+
+        if current_value >= num_events_to_emit {
+            break;
+        }
+
+        if start_time.elapsed() > timeout {
+            let elapsed = start_time.elapsed();
+            let throughput = current_value as f64 / elapsed.as_secs_f64();
+            bar.finish_with_message(format!(
+                "Timeout! Processed {}/{} events in {:?}. Throughput: {:.2} events/sec",
+                current_value, num_events_to_emit, elapsed, throughput
+            ));
+            println!(
+                "Web3 Event Throughput: {:.2} events/sec (timed out)",
+                throughput
+            );
+            return Ok(());
+        }
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
     }
 
     let elapsed = start_time.elapsed();
-    let throughput = event_count as f64 / elapsed.as_secs_f64();
+    let throughput = num_events_to_emit as f64 / elapsed.as_secs_f64();
 
     bar.finish_with_message(format!(
         "Completed: {:.2} events/sec ({} events in {:?})",
-        throughput, event_count, elapsed
+        throughput, num_events_to_emit, elapsed
     ));
 
     println!("Web3 Event Throughput: {:.2} events/sec", throughput);

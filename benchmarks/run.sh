@@ -110,11 +110,11 @@ run_benchmarks() {
   # restart_node
   # "$BENCH_DIR/target/release/benchmarks" realistic
 
-  restart_node
-  "$BENCH_DIR/target/release/benchmarks" web3-latency
+  # restart_node
+  # "$BENCH_DIR/target/release/benchmarks" web3-latency
 
   restart_node
-  "$BENCH_DIR/target/release/benchmarks" web3-event-processing-throughput
+  "$BENCH_DIR/target/release/benchmarks" web3-throughput
 
   # restart_node
   # "$BENCH_DIR/target/release/benchmarks" polling --interval-ms "1"
