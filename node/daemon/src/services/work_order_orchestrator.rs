@@ -373,7 +373,7 @@ impl WorkOrderOrchestrator {
                 WorkerEventKind::Web3Event(web3_config) => {
                     web3_event_configs.push(web3_config.clone());
                 }
-                WorkerEventKind::HttpRequestTrigger => {
+                WorkerEventKind::HttpRequest => {
                     http_requested = true;
                     info!(
                         "Work order (hash: {}) requests HTTP capability.",

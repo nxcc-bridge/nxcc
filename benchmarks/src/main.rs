@@ -4,6 +4,7 @@ use alloy_primitives::U256;
 use alloy_provider::Provider;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use futures::future;
 use indicatif::{ProgressBar, ProgressStyle};
 use nxcc_interface::{
     proto::daemon::{work_order_client::WorkOrderClient, CheckWorkerStatusRequest},
@@ -45,6 +46,8 @@ enum Benchmark {
     Web3Throughput,
     /// Benchmark Web3 event latency
     Web3Latency,
+    /// Benchmark HTTP event throughput for a single worker
+    HttpThroughput,
 }
 
 #[tokio::main]
@@ -98,6 +101,10 @@ async fn main() -> Result<()> {
                 &args.worker_anvil_rpc_url,
             )
             .await?;
+        }
+        Benchmark::HttpThroughput => {
+            println!("--- Running HTTP Event Throughput Benchmark ---");
+            run_http_throughput_benchmark(client.clone()).await?;
         }
     }
 
@@ -609,6 +616,102 @@ async fn run_web3_latency_benchmark(
     println!("p50: {}", histogram.value_at_quantile(0.5));
     println!("p90: {}", histogram.value_at_quantile(0.9));
     println!("p99: {}", histogram.value_at_quantile(0.99));
+
+    Ok(())
+}
+
+async fn run_http_throughput_benchmark(mut client: WorkOrderClient<Channel>) -> Result<()> {
+    let bar = ProgressBar::new_spinner();
+    bar.set_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner:.cyan} {msg} [{elapsed_precise}]")?
+            .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ "),
+    );
+    bar.set_message("Starting HTTP counter worker...");
+
+    let http_event = WorkerEvent {
+        handler: "http".to_string(),
+        kind: WorkerEventKind::HttpRequest,
+    };
+    let work_order =
+        utils::create_work_order("http_counter_worker.js", None, Some(vec![http_event]))?;
+    let request = utils::create_submit_request(work_order)?;
+
+    let work_order_id = match client.submit_work_order(request).await {
+        Ok(response) => {
+            let inner = response.into_inner();
+            if !inner.success {
+                bar.finish_with_message("Failed to start http counter worker");
+                return Err(anyhow::anyhow!("Failed to start http counter worker"));
+            }
+            inner.work_order_id
+        }
+        Err(e) => {
+            bar.finish_with_message(format!("Error starting http counter worker: {}", e));
+            return Err(anyhow::anyhow!("Error starting http counter worker: {}", e));
+        }
+    };
+
+    bar.set_message("Waiting for worker to be ready...");
+    tokio::time::sleep(Duration::from_secs(3)).await;
+
+    let worker_url = format!("http://localhost:6922/w/{}", work_order_id);
+    let http_client = reqwest::Client::new();
+    let total_requests: u64 = 20000;
+    let concurrency = 100;
+
+    let requests_bar = ProgressBar::new(total_requests);
+    requests_bar.set_style(
+        ProgressStyle::default_bar()
+            .template(
+                "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta}) \
+                 {msg}",
+            )?
+            .progress_chars("#>-"),
+    );
+    requests_bar.set_message(format!(
+        "Sending {} requests (concurrency: {})",
+        total_requests, concurrency
+    ));
+
+    let start_time = Instant::now();
+    let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(concurrency));
+
+    let mut tasks = Vec::new();
+    for _ in 0..total_requests {
+        let sem_clone = semaphore.clone();
+        let client_clone = http_client.clone();
+        let url_clone = worker_url.clone();
+        let bar_clone = requests_bar.clone();
+        tasks.push(tokio::spawn(async move {
+            let permit = sem_clone.acquire_owned().await.unwrap();
+            let res = client_clone.post(&url_clone).send().await;
+            eprintln!("{res:?}");
+            drop(permit);
+            bar_clone.inc(1);
+            res
+        }));
+    }
+
+    let results = future::join_all(tasks).await;
+    let elapsed = start_time.elapsed();
+    requests_bar.finish_with_message("All requests sent.");
+
+    let successes = results
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter_map(|res| res.ok())
+        .filter(|res| res.status().is_success())
+        .count();
+
+    let throughput = successes as f64 / elapsed.as_secs_f64();
+
+    bar.finish_with_message(format!(
+        "Completed: {:.2} req/sec ({} successful requests in {:?})",
+        throughput, successes, elapsed
+    ));
+
+    println!("HTTP Event Throughput: {:.2} req/sec", throughput);
 
     Ok(())
 }

@@ -587,7 +587,7 @@ jq -n \
         id: $id,
         worker: $worker_manifest[0],
         events: [
-            {"handler": "fetch", "kind": "http_request_trigger"}
+            {"handler": "fetch", "kind": "http_request"}
         ]
     }' >"$HTTP_ECHO_WORK_ORDER_PAYLOAD_FILE"
 

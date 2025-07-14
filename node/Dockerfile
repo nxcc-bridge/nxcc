@@ -2,6 +2,7 @@
 
 # Stage 0: Download workerd
 FROM alpine:3.20 AS workerd-downloader
+# FROM alpine:3.20@sha256:a8560b36e8b8210634f77d9f7f9efd7ffa463e380b75e2e74aff4511df3ef88c AS workerd-downloader
 
 RUN apk add --no-cache curl gzip
 
@@ -11,6 +12,7 @@ RUN curl -sSL "https://github.com/cloudflare/workerd/releases/download/${WORKERD
 
 # Stage 1: Builder
 FROM rust:1.85.0-slim-bookworm AS builder
+# FROM rust:1.85.0-slim-bookworm@sha256:1829c432be4a592f3021501334d3fcca24f238432b13306a4e62669dec538e52 AS builder
 
 ENV CARGO_TERM_COLOR=always
 
@@ -69,6 +71,7 @@ RUN cargo build --locked ${BUILD_FLAG} -p nxcc-daemon
 
 # Stage 2: Runtime
 FROM debian:12-slim AS runtime
+# FROM debian:12-slim@sha256:264982ff4d18000fa74540837e2c43ca5137a53a83f8f62c7b3803c0f0bdcd56 AS runtime
 
 # Install tini as an init system, and ca-certificates.
 RUN apt-get update && apt-get install -y --no-install-recommends \

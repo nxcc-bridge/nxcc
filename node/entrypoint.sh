@@ -57,6 +57,7 @@ else
     daemon_cli_args="$daemon_cli_args --mode uds --uds-path $DAEMON_UDS_PATH"
   fi
   daemon_cli_args="$daemon_cli_args --listen-addresses $DAEMON_P2P_ADDR"
+  daemon_cli_args="$daemon_cli_args --http-listen-addr 0.0.0.0:6922"
   daemon_cli_args="$daemon_cli_args --enclave-uds-path $ENCLAVE_UDS_PATH"
   daemon_cli_args="$daemon_cli_args --default-vm-uds-path $WORKERD_VM_UDS_PATH"
   if [ -n "$IDENTITY_PATH" ]; then

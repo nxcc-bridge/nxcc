@@ -294,7 +294,7 @@ const aiNftMoverManifestObject = {
   events: [
     {
       handler: "fetch",
-      kind: "http_request_trigger",
+      kind: "http_request",
     },
   ],
   userdata: {

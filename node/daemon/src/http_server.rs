@@ -5,7 +5,7 @@ use axum::{
     extract::{Json, State},
     http::{self, Request, StatusCode},
     response::{IntoResponse, Response},
-    routing::{any, post, Router},
+    routing::{Router, any, post},
 };
 use nxcc_interface::types::DsseEnvelope;
 use tokio::sync::RwLock;
@@ -100,7 +100,6 @@ async fn universal_http_handler(
         }
     };
 
-
     // Reconstruct the URI to be sent to the worker, preserving the query string.
     let mut worker_uri = format!("/{}", worker_path);
     if let Some(query) = request.uri().query() {
@@ -162,10 +161,7 @@ async fn universal_http_handler(
                 ) {
                     response_builder = response_builder.header(name, value);
                 } else {
-                    warn!(
-                        "Failed to parse header from worker: key='{}'",
-                        header.key
-                    );
+                    warn!("Failed to parse header from worker: key='{}'", header.key);
                 }
             }
 
@@ -239,8 +235,7 @@ pub async fn start_http_server(
 
     // Conditionally add the `/api` routes
     if config.api_enabled {
-        let mut api_router =
-            Router::new().route("/work-orders", post(submit_work_order_handler));
+        let mut api_router = Router::new().route("/work-orders", post(submit_work_order_handler));
 
         // Conditionally add CORS layer to the API router
         if !config.api_cors_allowed_origins.is_empty() {
@@ -273,7 +268,7 @@ pub async fn start_http_server(
     // Apply the shared state to the final, composed application.
     let app = app.with_state(app_state);
 
-    let addr: SocketAddr = config.listen_addr.parse()?;
+    let addr: SocketAddr = config.http_listen_addr.parse()?;
     tracing::info!(
         "HTTP server listening on {} for worker path '{}' and API path '/api' (enabled: {})",
         addr,

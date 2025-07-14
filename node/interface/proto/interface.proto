@@ -94,6 +94,6 @@ message EventPayload {
     // TimerEvent timer_event = 3;
     // HttpEvent http_event = 4;
     google.protobuf.Empty launch_event = 2;
-    google.protobuf.Empty http_request_trigger = 3;
+    google.protobuf.Empty http_request = 3;
   }
 }

@@ -196,7 +196,7 @@ pub struct HttpConfig {
     /// The listen address for the HTTP server.
     #[clap(long, default_value = "127.0.0.1:6922")]
     #[serde(default = "default_http_listen_addr")]
-    pub listen_addr: String,
+    pub http_listen_addr: String,
 
     /// Enable the public HTTP API (e.g., for submitting work orders).
     #[clap(long, env = "NXCC_HTTP_API_ENABLED")]
@@ -218,7 +218,7 @@ impl Default for HttpConfig {
     fn default() -> Self {
         Self {
             base_mount_path: default_http_base_mount_path(),
-            listen_addr: default_http_listen_addr(),
+            http_listen_addr: default_http_listen_addr(),
             api_enabled: false,
             api_cors_allowed_origins: default_cors_allowed_origins(),
         }
