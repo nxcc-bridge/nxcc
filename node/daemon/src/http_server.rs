@@ -1,27 +1,28 @@
 use std::{collections::HashMap, future::Future, net::SocketAddr, sync::Arc};
 
 use axum::{
-    Router,
-    body::Body,
+    body::{Body, Bytes},
     extract::{Json, State},
-    http::{Request, StatusCode, Uri},
+    http::{self, Request, StatusCode},
     response::{IntoResponse, Response},
-    routing::post,
+    routing::{any, post, Router},
 };
 use nxcc_interface::types::DsseEnvelope;
 use tokio::sync::RwLock;
 use tower_http::cors::{Any, CorsLayer};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, instrument, warn};
 
 use crate::{
     config::HttpConfig, error::AppError, grpc::enclave_client::EnclaveClient,
     services::work_order_orchestrator::WorkOrderOrchestrator,
 };
 
+/// Shared application state available to all handlers.
 struct AppState {
     enclave_client: EnclaveClient,
-    http_mounts: Arc<RwLock<HashMap<String, String>>>, // mount_segment (hash) -> enclave_worker_id
-    base_mount_path: String,
+    /// Maps a URL path segment to a worker ID.
+    /// e.g., "my-worker" -> "enclave_worker_id_123"
+    http_mounts: Arc<RwLock<HashMap<String, String>>>,
     work_order_orchestrator: Arc<WorkOrderOrchestrator>,
 }
 
@@ -36,24 +37,55 @@ struct SubmitWorkOrderSuccessResponse {
     message: String,
 }
 
+/// A wrapper for `AppError` to provide an `IntoResponse` implementation for the API layer.
+/// This allows handlers to return `Result<_, AppError>` and have errors automatically
+/// converted into a user-facing JSON response.
+struct ApiError(AppError);
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        let app_error = self.0;
+        let (status, error_message) = match &app_error {
+            AppError::Validation(_) => (StatusCode::BAD_REQUEST, app_error.to_string()),
+            AppError::Authorization(_) => (StatusCode::FORBIDDEN, app_error.to_string()),
+            _ => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "An internal error occurred".to_string(),
+            ),
+        };
+
+        error!("API Error: {} - {}", status, app_error);
+
+        let body = Json(ApiErrorResponse {
+            error: error_message,
+        });
+
+        (status, body).into_response()
+    }
+}
+
+// --- API Handlers ---
+
+/// Handles forwarding arbitrary HTTP requests to a mounted worker enclave.
+/// The first path segment determines the worker, and the rest of the path is forwarded.
+/// e.g., a request to `/my-worker/some/path` will be forwarded to the worker mounted at "my-worker".
+#[instrument(skip_all, fields(uri = %request.uri()))]
 async fn universal_http_handler(
     State(state): State<Arc<AppState>>,
     request: Request<Body>,
-) -> impl IntoResponse {
-    let path = request.uri().path().to_string();
-    let path = path.trim_start_matches('/');
-    let mut segments = path.splitn(2, '/');
-    let mount_segment = segments.next().unwrap_or("").to_string();
-    let worker_path_segment = segments.next().unwrap_or("");
+) -> Response {
+    let path = request.uri().path().trim_start_matches('/');
+    let (mount_segment, worker_path) = path.split_once('/').unwrap_or((path, ""));
 
     if mount_segment.is_empty() {
-        debug!("Missing mount segment in path_after_base: {}", path);
-        return (StatusCode::NOT_FOUND, "Missing mount segment").into_response();
+        debug!("Request is missing mount segment: {}", path);
+        return (StatusCode::NOT_FOUND, "Not Found").into_response();
     }
 
     let enclave_worker_id = {
         let mounts = state.http_mounts.read().await;
-        mounts.get(&mount_segment).cloned()
+        // Look up the worker ID using the mount segment.
+        mounts.get(mount_segment).cloned()
     };
 
     let enclave_worker_id = match enclave_worker_id {
@@ -68,22 +100,19 @@ async fn universal_http_handler(
         }
     };
 
-    let mut worker_uri_str = format!("/{}", worker_path_segment.trim_start_matches('/'));
+
+    // Reconstruct the URI to be sent to the worker, preserving the query string.
+    let mut worker_uri = format!("/{}", worker_path);
     if let Some(query) = request.uri().query() {
-        worker_uri_str.push('?');
-        worker_uri_str.push_str(query);
-    }
-    // Ensure worker_uri_str always starts with a single slash if not empty
-    if worker_uri_str != "/" && !worker_uri_str.starts_with('/') && !worker_uri_str.is_empty() {
-        worker_uri_str = format!("/{}", worker_uri_str);
-    } else if worker_uri_str.is_empty() {
-        worker_uri_str = "/".to_string();
+        worker_uri.push('?');
+        worker_uri.push_str(query);
     }
 
-    let method = request.method().to_string();
+    let method = request.method().clone();
     let headers = request.headers().clone();
-    let body_bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
-        Ok(bytes) => bytes,
+    let mount_segment = mount_segment.to_string(); // Release the borrow on request, but preserve the mount segment for debugging.
+    let body = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
+        Ok(bytes) => bytes.to_vec(),
         Err(e) => {
             error!("Failed to read request body: {}", e);
             return (
@@ -94,24 +123,25 @@ async fn universal_http_handler(
         }
     };
 
-    let mut proto_headers = Vec::new();
-    for (key, value) in headers.iter() {
-        proto_headers.push(nxcc_interface::proto::vm::Header {
+    // Convert HTTP headers to the protobuf format expected by the enclave client.
+    let proto_headers = headers
+        .iter()
+        .map(|(key, value)| nxcc_interface::proto::vm::Header {
             key: key.as_str().to_string(),
             value: value.as_bytes().to_vec(),
-        });
-    }
+        })
+        .collect();
 
     let vm_http_request = nxcc_interface::proto::vm::HttpRequest {
-        method,
-        uri: worker_uri_str.clone(),
+        method: method.to_string(),
+        uri: worker_uri.clone(),
         headers: proto_headers,
-        body: body_bytes.to_vec(),
+        body,
     };
 
     debug!(
-        "Forwarding HTTP request (method: {}, uri: {}) to enclave_worker_id: {}, segment: {}",
-        vm_http_request.method, worker_uri_str, enclave_worker_id, mount_segment
+        "Forwarding HTTP request (method: {}, uri: {}) to enclave_worker_id: {}",
+        method, worker_uri, enclave_worker_id
     );
 
     match state
@@ -125,22 +155,22 @@ async fn universal_http_handler(
                     .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
             );
 
-            for header_proto in vm_http_response.headers {
+            for header in vm_http_response.headers {
                 if let (Ok(name), Ok(value)) = (
-                    axum::http::header::HeaderName::from_bytes(header_proto.key.as_bytes()),
-                    axum::http::header::HeaderValue::from_bytes(&header_proto.value),
+                    http::header::HeaderName::from_bytes(header.key.as_bytes()),
+                    http::header::HeaderValue::from_bytes(&header.value),
                 ) {
                     response_builder = response_builder.header(name, value);
                 } else {
                     warn!(
-                        "Failed to parse header from worker: {}={:?}",
-                        header_proto.key, header_proto.value
+                        "Failed to parse header from worker: key='{}'",
+                        header.key
                     );
                 }
             }
 
             response_builder
-                .body(axum::body::Body::from(vm_http_response.body))
+                .body(Body::from(vm_http_response.body))
                 .unwrap_or_else(|e| {
                     error!("Failed to construct response: {}", e);
                     (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
@@ -160,60 +190,31 @@ async fn universal_http_handler(
     }
 }
 
+/// Handles submission of a new work order.
+/// It accepts a DSSE envelope in the request body.
 async fn submit_work_order_handler(
     State(state): State<Arc<AppState>>,
-    Json(dsse_envelope): Json<DsseEnvelope>,
-) -> impl IntoResponse {
+    body: Bytes,
+) -> Result<impl IntoResponse, ApiError> {
     info!("Received HTTP SubmitWorkOrder request");
-    let work_order_dsse_bytes = match serde_json::to_vec(&dsse_envelope) {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            error!("Failed to serialize incoming DSSE envelope: {}", e);
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(ApiErrorResponse {
-                    error: "Failed to process DSSE envelope".to_string(),
-                }),
-            )
-                .into_response();
-        }
-    };
 
-    match state
+    let (work_order_id, message) = state
         .work_order_orchestrator
         .clone()
-        .submit_work_order(work_order_dsse_bytes)
+        .submit_work_order(body.to_vec())
         .await
-    {
-        Ok((work_order_id, message)) => (
-            StatusCode::ACCEPTED,
-            Json(SubmitWorkOrderSuccessResponse {
-                work_order_id,
-                message,
-            }),
-        )
-            .into_response(),
-        Err(e) => {
-            error!("SubmitWorkOrder failed via HTTP: {:?}", e);
-            let (status, error_message) = match e {
-                AppError::Validation(_) => (StatusCode::BAD_REQUEST, e.to_string()),
-                AppError::Authorization(_) => (StatusCode::FORBIDDEN, e.to_string()),
-                _ => (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "An internal error occurred".to_string(),
-                ),
-            };
-            (
-                status,
-                Json(ApiErrorResponse {
-                    error: error_message,
-                }),
-            )
-                .into_response()
-        }
-    }
+        .map_err(ApiError)?; // Use the ApiError wrapper for automatic response conversion
+
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(SubmitWorkOrderSuccessResponse {
+            work_order_id,
+            message,
+        }),
+    ))
 }
 
+/// Configures and starts the HTTP server.
 pub async fn start_http_server(
     config: &HttpConfig,
     http_mounts: Arc<RwLock<HashMap<String, String>>>,
@@ -221,31 +222,27 @@ pub async fn start_http_server(
     work_order_orchestrator: Arc<WorkOrderOrchestrator>,
     shutdown_signal: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), anyhow::Error> {
-    let worker_base_path = config.base_mount_path.trim_end_matches('/').to_string();
+    let worker_base_path = config.base_mount_path.trim_end_matches('/');
     if !worker_base_path.starts_with('/') && !worker_base_path.is_empty() {
         anyhow::bail!("HTTP base_mount_path must start with '/' or be empty for root");
     }
 
-    let app_state_base_path = if worker_base_path.is_empty() {
-        "/".to_string()
-    } else {
-        worker_base_path.clone()
-    };
-
     let app_state = Arc::new(AppState {
         enclave_client,
         http_mounts,
-        base_mount_path: app_state_base_path,
         work_order_orchestrator,
     });
 
+    // --- Router Configuration ---
+
     let mut app = Router::new();
 
+    // Conditionally add the `/api` routes
     if config.api_enabled {
-        let mut api_router = Router::new()
-            .route("/work-orders", post(submit_work_order_handler))
-            .with_state(app_state.clone());
+        let mut api_router =
+            Router::new().route("/work-orders", post(submit_work_order_handler));
 
+        // Conditionally add CORS layer to the API router
         if !config.api_cors_allowed_origins.is_empty() {
             let origins = config
                 .api_cors_allowed_origins
@@ -262,14 +259,19 @@ pub async fn start_http_server(
         app = app.nest("/api", api_router);
     }
 
-    let worker_router = Router::new()
-        .fallback_service(axum::routing::any(universal_http_handler).with_state(app_state));
+    // The worker router acts as a fallback for any request under its mount point.
+    let worker_router = Router::new().fallback(any(universal_http_handler));
 
-    let app = if worker_base_path.is_empty() || worker_base_path == "/" {
-        app.fallback_service(worker_router)
+    // Combine the routers. The worker router is either nested under a base path
+    // or used as a fallback for the entire application if the base path is root.
+    let app = if worker_base_path.is_empty() {
+        app.fallback_service(worker_router.with_state(app_state.clone()))
     } else {
-        app.nest(&worker_base_path, worker_router)
+        app.nest(worker_base_path, worker_router)
     };
+
+    // Apply the shared state to the final, composed application.
+    let app = app.with_state(app_state);
 
     let addr: SocketAddr = config.listen_addr.parse()?;
     tracing::info!(

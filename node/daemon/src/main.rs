@@ -4,7 +4,7 @@ use tokio::time::{Duration, interval};
 mod config;
 mod error;
 mod grpc;
-mod http_server; // New module for Axum server
+mod http_server;
 mod identity;
 mod network;
 mod policy;
