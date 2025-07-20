@@ -1,0 +1,10 @@
+{
+  "bundle": {
+    "source": "../dist/my-worker.js"
+  },
+  "identities": [],
+  "userdata": {
+    "name": "My First nXCC Worker",
+    "version": "1.0"
+  }
+}

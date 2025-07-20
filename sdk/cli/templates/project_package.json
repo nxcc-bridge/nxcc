@@ -1,0 +1,14 @@
+{
+  "name": "my-nxcc-project",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc && esbuild workers/my-worker.ts --bundle --outfile=dist/my-worker.js --format=esm",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240403.0",
+    "esbuild": "^0.21.4",
+    "typescript": "^5.4.5"
+  }
+}
