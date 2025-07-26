@@ -1,7 +1,6 @@
 ---
 import Layout from "../layouts/Layout.astro";
 import { Code } from "astro:components";
-import { Icon } from "@lucide/astro";
 
 const jsCodeSnippet = `
 import { ethers } from "ethers";
@@ -36,614 +35,261 @@ async function handleValueChanged(eventPayload, env) {
 ---
 
 <Layout title="nXCC | The Programmable Glue for the Multi-Chain World">
-  <div class="fixed top-0 left-0 w-full h-full -z-10 overflow-hidden">
-    <div class="aurora-bg"></div>
-    <div class="grid-bg"></div>
-  </div>
-
-  <header
-    id="header"
-    class="fixed top-0 left-0 w-full z-50 transition-all duration-300"
-  >
-    <nav class="container mx-auto px-6 py-4 flex justify-between items-center">
-      <a href="/" class="text-2xl font-bold text-slate-50 tracking-tight">
-        nX<span class="text-amber-400">CC</span>
-      </a>
-      <div class="hidden md:flex items-center space-x-10">
-        <a
-          href="#features"
-          class="text-slate-400 hover:text-amber-400 transition-colors duration-200 font-medium"
-          >Features</a
-        >
-        <a
-          href="#use-cases"
-          class="text-slate-400 hover:text-amber-400 transition-colors duration-200 font-medium"
-          >Use Cases</a
-        >
-        <a
-          href="#"
-          class="text-slate-400 hover:text-amber-400 transition-colors duration-200 font-medium"
-          >Docs</a
-        >
-        <a
-          href="#"
-          class="text-slate-400 hover:text-amber-400 transition-colors duration-200 font-medium"
-          >GitHub</a
-        >
-      </div>
-      <div class="hidden md:block">
-        <a
-          href="#"
-          class="inline-block px-5 py-2.5 rounded-lg font-semibold text-center transition-all duration-300 text-slate-900 bg-slate-50 hover:bg-slate-200 focus:outline-none focus:ring-4 focus:ring-slate-50/20"
-          >Start Building</a
-        >
-      </div>
-      <button id="menu-btn" class="md:hidden focus:outline-none">
-        <Icon name="menu" class="w-7 h-7 text-slate-300" />
-      </button>
+  <header>
+    <nav>
+      <a href="/"><strong>nXCC</strong></a>
+      <ul>
+        <li><a href="#features">Features</a></li>
+        <li><a href="#use-cases">Use Cases</a></li>
+        <li><a href="/docs">Docs</a></li>
+        <li><a href="https://github.com/nxcc-bridge/nxcc">GitHub</a></li>
+      </ul>
     </nav>
-    <div
-      id="mobile-menu"
-      class="hidden md:hidden bg-slate-900/90 backdrop-blur-lg"
-    >
-      <a
-        href="#features"
-        class="block py-3 px-6 text-center text-slate-300 hover:text-amber-400 transition-colors duration-200 font-medium"
-        >Features</a
-      >
-      <a
-        href="#use-cases"
-        class="block py-3 px-6 text-center text-slate-300 hover:text-amber-400 transition-colors duration-200 font-medium"
-        >Use Cases</a
-      >
-      <a
-        href="#"
-        class="block py-3 px-6 text-center text-slate-300 hover:text-amber-400 transition-colors duration-200 font-medium"
-        >Docs</a
-      >
-      <a
-        href="#"
-        class="block py-3 px-6 text-center text-slate-300 hover:text-amber-400 transition-colors duration-200 font-medium"
-        >GitHub</a
-      >
-      <div class="p-6">
-        <a
-          href="#"
-          class="w-full inline-block px-6 py-3 rounded-lg font-semibold text-center transition-all duration-300 text-slate-900 bg-slate-50 hover:bg-slate-200 focus:outline-none focus:ring-4 focus:ring-slate-50/20"
-          >Start Building</a
-        >
-      </div>
-    </div>
   </header>
 
-  <main class="pt-28 md:pt-32">
-    <!-- Hero Section -->
-    <section class="py-20 md:py-32 text-center">
-      <div class="container mx-auto px-6">
-        <h1
-          class="text-5xl md:text-7xl lg:text-8xl font-black text-slate-50 leading-tight tracking-tighter animate-fade-in-up"
-        >
-          The Programmable <span class="text-amber-400">Glue</span><br /> for the
-          Multi-Chain World
-        </h1>
-        <p
-          class="mt-8 max-w-3xl mx-auto text-lg md:text-xl text-slate-400 leading-relaxed animate-fade-in-up"
-          style="animation-delay: 0.2s;"
-        >
-          nXCC is the secure, off-chain orchestration engine that connects any
-          blockchain, API, or system. Build complex, high-performance workflows
-          without the cost and complexity of a new layer.
-        </p>
-        <div
-          class="mt-12 flex flex-col sm:flex-row justify-center items-center gap-4 animate-fade-in-up"
-          style="animation-delay: 0.4s;"
-        >
-          <a
-            href="#"
-            class="inline-block px-8 py-4 text-lg rounded-lg font-bold text-center transition-all duration-300 focus:outline-none focus:ring-4 focus:ring-amber-400/30 bg-amber-400 text-amber-950 hover:bg-amber-300 scale-100 hover:scale-105 active:scale-100"
-            >Start Building</a
-          >
-          <a
-            href="#"
-            class="inline-flex items-center gap-2 px-8 py-4 text-lg rounded-lg font-semibold text-center transition-all duration-300 focus:outline-none focus:ring-4 focus:ring-slate-50/20 bg-slate-50/10 text-slate-200 hover:bg-slate-50/20"
-          >
-            Read the Docs <Icon name="arrow-right" class="w-5 h-5" />
-          </a>
-        </div>
-      </div>
+  <main>
+    <section>
+      <h1>The Programmable Glue for the Multi-Chain World</h1>
+      <p>
+        nXCC is the secure, off-chain orchestration engine that connects any
+        blockchain, API, or system. Build complex, high-performance workflows
+        without the cost and complexity of a new layer.
+      </p>
+      <p>
+        <a href="/docs">Get Started</a>
+      </p>
     </section>
 
-    <!-- Introduction / Problem Statement -->
-    <section class="py-24 md:py-32">
-      <div class="container mx-auto px-6 text-center max-w-4xl">
-        <h2
-          class="text-4xl md:text-5xl font-bold text-slate-100 tracking-tight"
-        >
-          Web3 is Fragmented. Your Solution Shouldn't Be.
-        </h2>
-        <p class="mt-6 text-lg text-slate-400 leading-relaxed">
-          The future is multi-chain, but today's reality is a maze of isolated
-          networks, expensive on-chain operations, and complex bridging
-          solutions. Moving data and value is slow, costly, and often insecure.
-          Developers are forced to build on monolithic layers, while
-          decision-makers worry about vendor lock-in and regulatory compliance.
-        </p>
-        <p class="mt-8 text-xl font-medium text-slate-200">
-          What if you could securely connect it all instead?
-        </p>
-      </div>
+    <hr />
+
+    <section>
+      <h2>Web3 is Fragmented. Your Solution Shouldn't Be.</h2>
+      <p>
+        The future is multi-chain, but today's reality is a maze of isolated
+        networks, expensive on-chain operations, and complex bridging
+        solutions. Moving data and value is slow, costly, and often insecure.
+        Developers are forced to build on monolithic layers, while
+        decision-makers worry about vendor lock-in and regulatory compliance.
+      </p>
+      <p>
+        <strong>What if you could securely connect it all instead?</strong>
+      </p>
     </section>
 
-    <!-- How it Works / Features Section -->
-    <section id="features" class="py-24 md:py-32">
-      <div class="container mx-auto px-6">
-        <div class="text-center mb-16">
-          <h2
-            class="text-4xl md:text-5xl font-bold text-slate-100 tracking-tight"
-          >
-            Orchestrate Anything, Anywhere. Securely.
-          </h2>
-          <p class="mt-4 max-w-2xl mx-auto text-lg text-slate-400">
-            nXCC provides the essential components to bind disparate systems
-            into a single, cohesive application.
+    <hr />
+
+    <section id="features">
+      <h2>Orchestrate Anything, Anywhere. Securely.</h2>
+      <p>
+        nXCC provides the essential components to bind disparate systems into a
+        single, cohesive application.
+      </p>
+      <ul>
+        <li>
+          <h3>Define Logic, Not Infrastructure</h3>
+          <p>
+            Define complex, event-driven workflows in JavaScript. React to
+            on-chain events, trigger APIs, and route assets across chains in a
+            single, streamlined environment.
           </p>
-        </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-          {
-            [
-              {
-                icon: "workflow",
-                title: "Define Logic, Not Infrastructure",
-                text: "Define complex, event-driven workflows in JavaScript. React to on-chain events, trigger APIs, and route assets across chains in a single, streamlined environment.",
-              },
-              {
-                icon: "shield-check",
-                title: "Compute with Confidence",
-                text: "Our Platform Services Enclave, powered by Trusted Execution Environments (TEEs), provides a verifiable black box for sensitive computations and policy enforcement.",
-              },
-              {
-                icon: "users",
-                title: "Decentralize Trust, Not Just Assets",
-                text: "Move beyond centralized operators with a federated trust model. Run your own nodes or form a consortium, with on-chain identity contracts for full transparency.",
-              },
-              {
-                icon: "key-round",
-                title: "Integrated Secret Management",
-                text: "Securely manage API keys and private data with a built-in service using peer-to-peer, TEE-to-TEE protocols, governed by your on-chain policies.",
-              },
-            ].map((feature) => (
-              <div class="relative bg-slate-900 p-8 rounded-xl border border-slate-800 transition-all duration-300 hover:-translate-y-2 hover:border-amber-400/50 hover:shadow-2xl hover:shadow-amber-500/10">
-                <Icon
-                  name={feature.icon}
-                  class="w-10 h-10 text-amber-400 mb-6"
-                />
-                <h3 class="text-xl font-bold text-slate-100 mb-3">
-                  {feature.title}
-                </h3>
-                <p class="text-slate-400">{feature.text}</p>
-              </div>
-            ))
-          }
-        </div>
-      </div>
-    </section>
-
-    <!-- Use Cases Section -->
-    <section id="use-cases" class="py-24 md:py-32">
-      <div class="container mx-auto px-6">
-        <div class="text-center mb-16">
-          <h2
-            class="text-4xl md:text-5xl font-bold text-slate-100 tracking-tight"
-          >
-            Powering the Next Wave of Cross-Chain Applications
-          </h2>
-          <p class="mt-4 max-w-2xl mx-auto text-lg text-slate-400">
-            nXCC is a general-purpose engine, but its power is best seen in
-            action.
+        </li>
+        <li>
+          <h3>Compute with Confidence</h3>
+          <p>
+            Our Platform Services Enclave, powered by Trusted Execution
+            Environments (TEEs), provides a verifiable black box for sensitive
+            computations and policy enforcement.
           </p>
-        </div>
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {
-            [
-              {
-                title: "Privacy-Preserving Ad Tech",
-                challenge:
-                  "Compute ad-matching on private user data and distribute rewards across multiple chains without a central data store.",
-                solution:
-                  "nXCC orchestrates the flow, computing on sensitive data inside TEEs, bridging rewards, and synchronizing state while preserving user privacy.",
-              },
-              {
-                title: "Automated Public Goods Funding",
-                challenge:
-                  "Automate funding for open-source projects by unlocking on-chain funds based on real-world development metrics from external data sources.",
-                solution:
-                  "An nXCC worker acts as a trustworthy oracle, securely fetching metrics and executing on-chain transactions to create a transparent retroPGF mechanism.",
-              },
-              {
-                title: "Secure AI Agents",
-                challenge:
-                  "Allow autonomous AI agents to interact with multiple blockchains while protecting their valuable models and sensitive decision logic.",
-                solution:
-                  "nXCC provides a secure, verifiable platform for hosting AI agents on confidential computing infrastructure, enabling complex cross-chain tasks with provable integrity.",
-              },
-            ].map((useCase) => (
-              <div class="rounded-xl bg-gradient-to-b from-slate-800 to-slate-900/50 p-px shadow-lg">
-                <div class="rounded-[11px] bg-slate-900 h-full p-8">
-                  <h3 class="text-2xl font-bold text-slate-100 mb-4">
-                    {useCase.title}
-                  </h3>
-                  <p class="text-slate-400 mb-6">
-                    <strong class="text-slate-300 font-semibold">
-                      Challenge:
-                    </strong>{" "}
-                    {useCase.challenge}
-                  </p>
-                  <p class="text-slate-300">
-                    <strong class="text-amber-400 font-semibold">
-                      Solution:
-                    </strong>{" "}
-                    {useCase.solution}
-                  </p>
-                </div>
-              </div>
-            ))
-          }
-        </div>
-      </div>
-    </section>
-
-    <!-- For Builders Section -->
-    <section class="py-24 md:py-32 bg-slate-950/50">
-      <div class="container mx-auto px-6">
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
-          <div>
-            <h2
-              class="text-4xl md:text-5xl font-bold text-slate-100 tracking-tight"
-            >
-              Built for Builders
-            </h2>
-            <p class="mt-4 text-lg text-slate-400">
-              We speak your language. nXCC is open-source, flexible, and
-              designed to get out of your way.
-            </p>
-            <ul class="mt-10 space-y-6">
-              {
-                [
-                  {
-                    icon: "terminal-square",
-                    title: "Familiar Runtimes:",
-                    text: "Write workers in JavaScript and run them in the battle-tested `workerd` environment.",
-                  },
-                  {
-                    icon: "git-fork",
-                    title: "Open Source:",
-                    text: "Fork it, extend it, run it yourself. The core is built in Rust for performance and security.",
-                  },
-                  {
-                    icon: "webhook",
-                    title: "Event-Driven:",
-                    text: "Build reactive applications that listen to on-chain events, HTTP webhooks, and P2P messages.",
-                  },
-                  {
-                    icon: "link",
-                    title: "True Interoperability:",
-                    text: "Start with full EVM support and an architecture ready for non-EVM chains and alternative VMs.",
-                  },
-                ].map((item) => (
-                  <li class="flex items-start gap-4">
-                    <div class="mt-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-amber-400/10 text-amber-400">
-                      <Icon name={item.icon} class="w-5 h-5" />
-                    </div>
-                    <div>
-                      <strong class="text-slate-200 font-semibold">
-                        {item.title}
-                      </strong>{" "}
-                      {item.text}
-                    </div>
-                  </li>
-                ))
-              }
-            </ul>
-          </div>
-          <div
-            class="rounded-xl overflow-hidden border border-slate-700/80 shadow-2xl shadow-slate-950/50"
-          >
-            <div class="bg-slate-800/80 px-4 py-3 flex items-center gap-2">
-              <div class="w-3 h-3 rounded-full bg-slate-600"></div>
-              <div class="w-3 h-3 rounded-full bg-slate-600"></div>
-              <div class="w-3 h-3 rounded-full bg-slate-600"></div>
-              <div class="ml-auto text-xs text-slate-400 font-mono">
-                js_workers/event_handler_worker.js
-              </div>
-            </div>
-            <Code code={jsCodeSnippet} lang="js" theme="github-dark" />
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- For Decision Makers Section -->
-    <section class="py-24 md:py-32">
-      <div class="container mx-auto px-6">
-        <div class="text-center mb-16">
-          <h2
-            class="text-4xl md:text-5xl font-bold text-slate-100 tracking-tight"
-          >
-            The Advantage of Connection Over Complexity
-          </h2>
-          <p class="mt-4 max-w-3xl mx-auto text-lg text-slate-400">
-            In a world of competing layers, nXCC offers a fundamentally
-            different approach.
+        </li>
+        <li>
+          <h3>Decentralize Trust, Not Just Assets</h3>
+          <p>
+            Move beyond centralized operators with a federated trust model. Run
+            your own nodes or form a consortium, with on-chain identity
+            contracts for full transparency.
           </p>
-        </div>
-        <div
-          class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-12 max-w-5xl mx-auto"
-        >
-          {
-            [
-              {
-                icon: "trending-down",
-                title: "Lower Costs & Carbon Footprint",
-                text: "Move logic off-chain into hyper-efficient TEEs to drastically reduce gas fees and environmental impact.",
-              },
-              {
-                icon: "shield-half",
-                title: "Enhanced Security & Compliance",
-                text: "TEEs provide verifiable security impossible with traditional cloud, meeting demands of regulated industries.",
-              },
-              {
-                icon: "unlink",
-                title: "No Vendor Lock-in",
-                text: "The federated model means you control the infrastructure. Maintain strategic autonomy without protocol dependence.",
-              },
-              {
-                icon: "rocket",
-                title: "Accelerated Development",
-                text: "Build sophisticated multi-chain apps faster using a single, cohesive framework instead of stitching together services.",
-              },
-            ].map((item) => (
-              <div class="flex items-start gap-6">
-                <Icon
-                  name={item.icon}
-                  class="w-10 h-10 text-amber-400 flex-shrink-0 mt-1"
-                />
-                <div>
-                  <h3 class="text-xl font-bold text-slate-100">{item.title}</h3>
-                  <p class="text-slate-400 mt-2">{item.text}</p>
-                </div>
-              </div>
-            ))
-          }
-        </div>
-      </div>
+        </li>
+        <li>
+          <h3>Integrated Secret Management</h3>
+          <p>
+            Securely manage API keys and private data with a built-in service
+            using peer-to-peer, TEE-to-TEE protocols, governed by your on-chain
+            policies.
+          </p>
+        </li>
+      </ul>
     </section>
 
-    <!-- Project Credibility Section -->
-    <section class="py-24">
-      <div class="container mx-auto px-6">
-        <div
-          class="relative rounded-2xl p-px bg-gradient-to-br from-amber-400/50 via-amber-400/10 to-transparent"
-        >
-          <div class="rounded-[15px] bg-slate-900 p-8 md:p-12">
-            <div
-              class="flex flex-col md:flex-row items-center gap-8 text-center md:text-left"
-            >
-              <div class="flex-shrink-0">
-                <div
-                  class="w-24 h-24 bg-slate-950 rounded-full flex items-center justify-center border border-slate-800 shadow-[0_0_30px_theme(colors.amber.500/0.15)]"
-                >
-                  <Icon name="award" class="w-12 h-12 text-amber-400" />
-                </div>
-              </div>
-              <div>
-                <h3
-                  class="text-2xl md:text-3xl font-bold text-slate-100 tracking-tight"
-                >
-                  A Foundation of Trust
-                </h3>
-                <p class="mt-3 text-lg text-slate-400">
-                  nXCC is a proud recipient of funding from the European Union’s <strong
-                    class="font-semibold text-slate-200"
-                    >Next Generation Internet (NGI) TrustChain</strong
-                  > initiative. Our work is committed to advancing a more open, trustworthy,
-                  and human-centric internet, with a focus on digital sovereignty
-                  and privacy by design.
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
+    <hr />
 
-    <!-- Final CTA Section -->
-    <section class="py-24 md:py-32 text-center">
-      <div class="container mx-auto px-6">
-        <h2
-          class="text-5xl md:text-6xl font-black text-slate-50 tracking-tighter"
-        >
-          Build Without Boundaries
-        </h2>
-        <p class="mt-6 max-w-2xl mx-auto text-lg text-slate-400">
-          Ready to see how nXCC can simplify your multi-chain strategy? Dive
-          into our documentation, try the interactive demo, or get in touch with
-          the team.
+    <section id="use-cases">
+      <h2>Powering the Next Wave of Cross-Chain Applications</h2>
+      <p>
+        nXCC is a general-purpose engine, but its power is best seen in action.
+      </p>
+      <article>
+        <h3>Privacy-Preserving Ad Tech</h3>
+        <p>
+          <strong>Challenge:</strong>
+          Compute ad-matching on private user data and distribute rewards across
+          multiple chains without a central data store.
         </p>
-        <div class="mt-10 flex flex-wrap justify-center items-center gap-4">
-          <a
-            href="#"
-            class="inline-block px-8 py-4 text-lg rounded-lg font-bold text-center transition-all duration-300 focus:outline-none focus:ring-4 focus:ring-amber-400/30 bg-amber-400 text-amber-950 hover:bg-amber-300 scale-100 hover:scale-105 active:scale-100"
-            >Try the Demo</a
-          >
-          <a
-            href="#"
-            class="inline-block px-8 py-4 text-lg rounded-lg font-semibold text-center transition-all duration-300 focus:outline-none focus:ring-4 focus:ring-slate-50/20 bg-slate-50/10 text-slate-200 hover:bg-slate-50/20"
-            >Join our Community</a
-          >
-        </div>
-      </div>
+        <p>
+          <strong>Solution:</strong>
+          nXCC orchestrates the flow, computing on sensitive data inside TEEs,
+          bridging rewards, and synchronizing state while preserving user
+          privacy.
+        </p>
+      </article>
+      <article>
+        <h3>Automated Public Goods Funding</h3>
+        <p>
+          <strong>Challenge:</strong>
+          Automate funding for open-source projects by unlocking on-chain funds
+          based on real-world development metrics from external data sources.
+        </p>
+        <p>
+          <strong>Solution:</strong>
+          An nXCC worker acts as a trustworthy oracle, securely fetching metrics
+          and executing on-chain transactions to create a transparent retroPGF
+          mechanism.
+        </p>
+      </article>
+      <article>
+        <h3>Secure AI Agents</h3>
+        <p>
+          <strong>Challenge:</strong>
+          Allow autonomous AI agents to interact with multiple blockchains while
+          protecting their valuable models and sensitive decision logic.
+        </p>
+        <p>
+          <strong>Solution:</strong>
+          nXCC provides a secure, verifiable platform for hosting AI agents on
+          confidential computing infrastructure, enabling complex cross-chain
+          tasks with provable integrity.
+        </p>
+      </article>
+    </section>
+
+    <hr />
+
+    <section>
+      <h2>Built for Builders</h2>
+      <p>
+        We speak your language. nXCC is open-source, flexible, and designed to
+        get out of your way.
+      </p>
+      <ul>
+        <li>
+          <strong>Familiar Runtimes:</strong>
+          Write workers in JavaScript and run them in the battle-tested `workerd`
+          environment.
+        </li>
+        <li>
+          <strong>Open Source:</strong>
+          Fork it, extend it, run it yourself. The core is built in Rust for
+          performance and security.
+        </li>
+        <li>
+          <strong>Event-Driven:</strong>
+          Build reactive applications that listen to on-chain events, HTTP
+          webhooks, and P2P messages.
+        </li>
+        <li>
+          <strong>True Interoperability:</strong>
+          Start with full EVM support and an architecture ready for non-EVM
+          chains and alternative VMs.
+        </li>
+      </ul>
+      <figure>
+        <figcaption>js_workers/event_handler_worker.js</figcaption>
+        <Code code={jsCodeSnippet} lang="js" />
+      </figure>
+    </section>
+
+    <hr />
+
+    <section>
+      <h2>The Advantage of Connection Over Complexity</h2>
+      <p>
+        In a world of competing layers, nXCC offers a fundamentally different
+        approach.
+      </p>
+      <ul>
+        <li>
+          <h3>Lower Costs & Carbon Footprint</h3>
+          <p>
+            Move logic off-chain into hyper-efficient TEEs to drastically reduce
+            gas fees and environmental impact.
+          </p>
+        </li>
+        <li>
+          <h3>Enhanced Security & Compliance</h3>
+          <p>
+            TEEs provide verifiable security impossible with traditional cloud,
+            meeting demands of regulated industries.
+          </p>
+        </li>
+        <li>
+          <h3>No Vendor Lock-in</h3>
+          <p>
+            The federated model means you control the infrastructure. Maintain
+            strategic autonomy without protocol dependence.
+          </p>
+        </li>
+        <li>
+          <h3>Accelerated Development</h3>
+          <p>
+            Build sophisticated multi-chain apps faster using a single, cohesive
+            framework instead of stitching together services.
+          </p>
+        </li>
+      </ul>
+    </section>
+
+    <hr />
+
+    <section>
+      <article>
+        <h3>A Foundation of Trust</h3>
+        <p>
+          nXCC is a proud recipient of funding from the European Union’s
+          <strong>Next Generation Internet (NGI) TrustChain</strong>
+          initiative. Our work is committed to advancing a more open,
+          trustworthy, and human-centric internet, with a focus on digital
+          sovereignty and privacy by design.
+        </p>
+      </article>
+    </section>
+
+    <hr />
+
+    <section>
+      <h2>Build Without Boundaries</h2>
+      <p>
+        Ready to see how nXCC can simplify your multi-chain strategy? Dive into
+        our documentation, try the interactive demo, or get in touch with the
+        team.
+      </p>
+      <p>
+        <a href="/discord">Join our Community</a>
+      </p>
     </section>
   </main>
 
-  <footer class="border-t border-slate-800/50">
-    <div class="container mx-auto px-6 py-10">
-      <div class="flex flex-col md:flex-row justify-between items-center gap-8">
-        <div class="text-center md:text-left">
-          <a href="/" class="text-2xl font-bold text-slate-50 tracking-tight">
-            nX<span class="text-amber-400">CC</span>
-          </a>
-          <p class="text-sm text-slate-500 mt-1">
-            The Programmable Glue for the Multi-Chain World
-          </p>
-        </div>
-        <div class="flex space-x-6">
-          <a
-            href="#"
-            aria-label="GitHub"
-            class="text-slate-500 hover:text-amber-400 transition-all duration-300 hover:scale-110"
-            ><Icon name="github" class="w-6 h-6" /></a
-          >
-          <a
-            href="#"
-            aria-label="Discord"
-            class="text-slate-500 hover:text-amber-400 transition-all duration-300 hover:scale-110"
-            ><Icon name="message-circle" class="w-6 h-6" /></a
-          >
-          <a
-            href="#"
-            aria-label="Twitter"
-            class="text-slate-500 hover:text-amber-400 transition-all duration-300 hover:scale-110"
-            ><Icon name="twitter" class="w-6 h-6" /></a
-          >
-        </div>
-      </div>
-      <div
-        class="mt-8 border-t border-slate-800/50 pt-8 text-center text-sm text-slate-500"
-      >
-        © {new Date().getFullYear()} nXCC Project. All Rights Reserved.
-      </div>
+  <footer>
+    <div>
+      <a href="/"><strong>nXCC</strong></a>
+      <p>The Programmable Glue for the Multi-Chain World</p>
+    </div>
+    <nav>
+      <ul>
+        <li><a href="https://github.com/nxcc-bridge/nxcc">GitHub</a></li>
+        <li><a href="/discord">Discord</a></li>
+      </ul>
+    </nav>
+    <div>
+      <p>© {new Date().getFullYear()} nXCC Project. All Rights Reserved.</p>
     </div>
   </footer>
 </Layout>
-
-<script>
-  // Mobile Menu Toggle
-  const menuBtn = document.getElementById("menu-btn");
-  const mobileMenu = document.getElementById("mobile-menu");
-  menuBtn.addEventListener("click", () => {
-    mobileMenu.classList.toggle("hidden");
-  });
-
-  // Close mobile menu when a link is clicked
-  mobileMenu.addEventListener("click", (e) => {
-    if (e.target.tagName === "A") {
-      mobileMenu.classList.add("hidden");
-    }
-  });
-
-  // Sticky Header on Scroll
-  const header = document.getElementById("header");
-  window.addEventListener("scroll", () => {
-    if (window.scrollY > 20) {
-      header.classList.add(
-        "bg-slate-950/75",
-        "backdrop-blur-lg",
-        "border-b",
-        "border-slate-800/50",
-      );
-    } else {
-      header.classList.remove(
-        "bg-slate-950/75",
-        "backdrop-blur-lg",
-        "border-b",
-        "border-slate-800/50",
-      );
-    }
-  });
-</script>
-
-<style>
-  :root {
-    font-family: "Inter", sans-serif;
-  }
-  @supports (font-variation-settings: normal) {
-    :root {
-      font-family: "Inter var", sans-serif;
-    }
-  }
-
-  /* Complex background effects */
-  .aurora-bg {
-    position: absolute;
-    top: 0;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 1400px;
-    height: 1400px;
-    /* CORRECTED: Replaced theme() with rgba() for opacity */
-    background-image:
-      radial-gradient(
-        circle at 50% 30%,
-        rgba(120, 53, 15, 0.4),
-        transparent 35%
-      ),
-      radial-gradient(
-        circle at 20% 80%,
-        rgba(12, 74, 110, 0.4),
-        transparent 30%
-      ),
-      radial-gradient(
-        circle at 80% 70%,
-        rgba(49, 46, 129, 0.4),
-        transparent 30%
-      );
-    pointer-events: none;
-    opacity: 0.7;
-  }
-
-  .grid-bg {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    /* CORRECTED: Replaced theme() with rgba() for opacity */
-    background-image:
-      linear-gradient(to right, rgba(30, 41, 59, 0.5) 1px, transparent 1px),
-      linear-gradient(to bottom, rgba(30, 41, 59, 0.5) 1px, transparent 1px);
-    background-size: 4rem 4rem;
-    -webkit-mask-image: radial-gradient(
-      ellipse 80% 50% at 50% 0%,
-      black,
-      transparent
-    );
-    mask-image: radial-gradient(ellipse 80% 50% at 50% 0%, black, transparent);
-    pointer-events: none;
-    opacity: 0.5;
-  }
-
-  /* Custom animation for fade-in effect */
-  @keyframes fade-in-up {
-    from {
-      opacity: 0;
-      transform: translateY(20px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-
-  .animate-fade-in-up {
-    animation: fade-in-up 0.7s ease-out forwards;
-  }
-
-  /* Ensure astro code block has correct background and styling */
-  :global(pre[data-astro-code]) {
-    background-color: #0d1117 !important; /* Match github-dark theme */
-    border: none;
-    padding: 1.5rem;
-    margin: 0;
-    border-radius: 0;
-  }
-</style>

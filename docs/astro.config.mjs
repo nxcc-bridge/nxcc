@@ -10,12 +10,12 @@ import vue from "@astrojs/vue";
 export default defineConfig({
   integrations: [
     starlight({
-      title: "My Docs",
+      title: "nXCC",
       social: [
         {
           icon: "github",
           label: "GitHub",
-          href: "https://github.com/withastro/starlight",
+          href: "https://github.com/nxcc-bridge/nxcc",
         },
       ],
       sidebar: [
