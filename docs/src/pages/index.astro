@@ -32,6 +32,65 @@ async function handleValueChanged(eventPayload, env) {
   }
 }
 `;
+
+const pricingTiers = [
+  {
+    name: "Hobby",
+    price: "Free",
+    audience: "Individual Devs, Testing",
+    popular: false,
+    features: [
+      "100,000 Monthly Invocations",
+      "2 Active Workers",
+      "Standard Execution Priority",
+      "Shared RPC Endpoints",
+      "On-Chain, Cron (/min) Triggers",
+      "Community (Discord) Support",
+    ],
+  },
+  {
+    name: "Pro",
+    price: "€149/mo",
+    audience: "Production dApps, Small Teams",
+    popular: true,
+    features: [
+      "5,000,000 Monthly Invocations",
+      "10 Active Workers",
+      "High Execution Priority",
+      "Premium RPC Endpoints",
+      "On-Chain, Cron (/sec), Webhooks",
+      "Email Support (24h SLA)",
+    ],
+  },
+  {
+    name: "Team",
+    price: "€699/mo",
+    audience: "Scaling Businesses, High-Volume",
+    popular: false,
+    features: [
+      "25,000,000 Monthly Invocations",
+      "25 Active Workers",
+      "Highest Execution Priority",
+      "Dedicated RPC Endpoints",
+      "Direct API Triggers",
+      "Private Channel (Priority SLA)",
+    ],
+  },
+  {
+    name: "Enterprise",
+    price: "Custom",
+    audience: "Large-Scale, Mission-Critical Apps",
+    popular: false,
+    features: [
+      "Custom / Unlimited Invocations",
+      "Custom Active Workers",
+      "Dedicated Queue",
+      "Dedicated Infrastructure",
+      "Custom Integrations",
+      "Dedicated Support Engineer & SLA",
+    ],
+  },
+];
 ---
 
 <Layout title="nXCC | The Programmable Glue for the Multi-Chain World">
@@ -57,19 +116,24 @@ async function handleValueChanged(eventPayload, env) {
               >Features</a
             >
             <a
+              href="#performance"
+              class="rounded-sm text-gray-600 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+              >Performance</a
+            >
+            <a
+              href="#pricing"
+              class="rounded-sm text-gray-600 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+              >Pricing</a
+            >
+            <a
               href="#use-cases"
               class="rounded-sm text-gray-600 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
               >Use Cases</a
             >
             <a
-              href="/guides/getting-started"
+              href="/docs/guides/getting-started"
               class="rounded-sm text-gray-600 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
               >Docs</a
-            >
-            <a
-              href="https://github.com/nxcc-bridge/nxcc"
-              class="rounded-sm text-gray-600 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-              >GitHub</a
             >
           </div>
           <div class="flex md:hidden">
@@ -126,19 +190,24 @@ async function handleValueChanged(eventPayload, env) {
             >Features</a
           >
           <a
+            href="#performance"
+            class="block rounded-md px-3 py-2 text-base font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+            >Performance</a
+          >
+          <a
+            href="#pricing"
+            class="block rounded-md px-3 py-2 text-base font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+            >Pricing</a
+          >
+          <a
             href="#use-cases"
             class="block rounded-md px-3 py-2 text-base font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
             >Use Cases</a
           >
           <a
-            href="/guides/getting-started"
+            href="/docs/guides/getting-started"
             class="block rounded-md px-3 py-2 text-base font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
             >Docs</a
-          >
-          <a
-            href="https://github.com/nxcc-bridge/nxcc"
-            class="block rounded-md px-3 py-2 text-base font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-            >GitHub</a
           >
         </div>
       </div>
@@ -159,7 +228,7 @@ async function handleValueChanged(eventPayload, env) {
           </p>
           <div class="mt-10">
             <a
-              href="/guides/getting-started"
+              href="/docs/guides/getting-started"
               class="inline-block rounded-lg bg-brand px-8 py-3 font-semibold text-white shadow-md transition-colors hover:bg-brand/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
             >
               Get Started
@@ -241,6 +310,238 @@ async function handleValueChanged(eventPayload, env) {
           </p>
         </li>
       </ul>
+    </section>
+
+    <hr class="border-gray-200" />
+
+    <section class="py-12 md:py-20">
+      <div class="text-center">
+        <h2 class="text-3xl font-bold tracking-tight text-gray-900 md:text-4xl">
+          The nXCC Advantage: Speed, Savings, and Security
+        </h2>
+      </div>
+      <div class="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        <div class="space-y-2">
+          <h3 class="text-xl font-semibold text-gray-900">
+            Radical Cost Reduction
+          </h3>
+          <p class="text-gray-600">
+            Slash off-chain messaging costs by over 99% compared to incumbent
+            solutions. Enable high-volume use cases that were previously
+            economically unfeasible.
+          </p>
+        </div>
+        <div class="space-y-2">
+          <h3 class="text-xl font-semibold text-gray-900">Ultra-Low Latency</h3>
+          <p class="text-gray-600">
+            Execute cross-chain logic in milliseconds, not minutes. With a p99
+            latency under 20ms, nXCC is built for performance-critical
+            applications.
+          </p>
+        </div>
+        <div class="space-y-2">
+          <h3 class="text-xl font-semibold text-gray-900">
+            Hardware-Enforced Privacy
+          </h3>
+          <p class="text-gray-600">
+            Leverage the power of Trusted Execution Environments (TEEs) to
+            process sensitive data and enforce policies with verifiable,
+            hardware-level security.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <hr class="border-gray-200" />
+
+    <section id="performance" class="py-12 md:py-20">
+      <div class="text-center">
+        <h2 class="text-3xl font-bold tracking-tight text-gray-900 md:text-4xl">
+          Performance & Efficiency by Design
+        </h2>
+        <p class="mx-auto mt-4 max-w-3xl text-lg text-gray-600">
+          Engineered for minimal overhead, nXCC delivers high throughput and low
+          latency.
+        </p>
+      </div>
+      <ul class="mx-auto mt-10 grid max-w-4xl grid-cols-3 gap-8 text-center">
+        <li>
+          <p class="text-3xl font-extrabold text-brand">&lt;20 ms</p>
+          <p class="mt-1 text-sm text-gray-600">p99 Event Latency</p>
+        </li>
+        <li>
+          <p class="text-3xl font-extrabold text-brand">1 100+</p>
+          <p class="mt-1 text-sm text-gray-600">Events / Second</p>
+        </li>
+      </ul>
+      <div class="mt-16">
+        <h3 class="text-center text-2xl font-bold tracking-tight text-gray-900">
+          A Greener Alternative for Web3
+        </h3>
+        <p class="mx-auto mt-4 max-w-3xl text-center text-lg text-gray-600">
+          Our "almost consensus-free" design is orders of magnitude more
+          energy-efficient per message than traditional interoperability
+          protocols, contributing to the EU Green Deal's goals.
+        </p>
+        <div class="mt-8">
+          <div class="flex justify-center">
+            <div class="overflow-x-auto rounded-lg border border-gray-200">
+              <table class="divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th
+                      scope="col"
+                      class="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500"
+                      >Network</th
+                    >
+                    <th
+                      scope="col"
+                      class="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500"
+                      >Relative Energy per Message</th
+                    >
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200 bg-white">
+                  <tr>
+                    <td
+                      class="whitespace-nowrap px-6 py-4 text-sm font-medium text-gray-900"
+                      ><strong>nXCC</strong></td
+                    >
+                    <td
+                      class="whitespace-nowrap px-6 py-4 text-sm font-bold text-green-600"
+                      ><strong>1x</strong></td
+                    >
+                  </tr>
+                  <tr>
+                    <td
+                      class="whitespace-nowrap px-6 py-4 text-sm font-medium text-gray-900"
+                      >Chainlink CCIP</td
+                    >
+                    <td
+                      class="whitespace-nowrap px-6 py-4 text-sm text-gray-500"
+                      >~4.5x more</td
+                    >
+                  </tr>
+                  <tr>
+                    <td
+                      class="whitespace-nowrap px-6 py-4 text-sm font-medium text-gray-900"
+                      >Axelar</td
+                    >
+                    <td
+                      class="whitespace-nowrap px-6 py-4 text-sm text-gray-500"
+                      >~4.8x more</td
+                    >
+                  </tr>
+                  <tr>
+                    <td
+                      class="whitespace-nowrap px-6 py-4 text-sm font-medium text-gray-900"
+                      >Wormhole</td
+                    >
+                    <td
+                      class="whitespace-nowrap px-6 py-4 text-sm text-gray-500"
+                      >~9.8x more</td
+                    >
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <p class="mt-2 text-center text-xs text-gray-500">
+            Based on public data and internal benchmarks.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <hr class="border-gray-200" />
+
+    <section id="pricing" class="py-16 md:py-24">
+      <div class="text-center">
+        <h2 class="text-3xl font-bold tracking-tight text-gray-900 md:text-4xl">
+          Transparent & Accessible Pricing
+        </h2>
+        <p class="mx-auto mt-4 max-w-3xl text-lg text-gray-600">
+          Start for free and scale as you grow. Our IaaS model is designed to be
+          orders of magnitude more affordable than incumbents.
+        </p>
+        <div
+          class="mt-4 inline-block rounded-full bg-green-100 px-4 py-2 text-green-800"
+        >
+          <p class="font-semibold">
+            Save over 99% on off-chain messaging costs vs. major bridges.
+          </p>
+        </div>
+      </div>
+      <div
+        class="mt-12 grid max-w-7xl grid-cols-1 gap-8 sm:mx-auto lg:grid-cols-4"
+      >
+        {
+          pricingTiers.map((tier) => (
+            <div
+              class:list={[
+                "flex flex-col rounded-lg border border-gray-200 shadow-sm",
+                { "border-2 border-brand": tier.popular },
+              ]}
+            >
+              <div class="p-6">
+                <div class="flex items-center justify-between">
+                  <h3 class="text-xl font-semibold text-gray-900">
+                    {tier.name}
+                  </h3>
+                  {tier.popular && (
+                    <div class="ml-2 shrink-0 rounded-full bg-brand/10 px-3 py-1 text-xs font-semibold text-brand">
+                      Most Popular
+                    </div>
+                  )}
+                </div>
+                <p class="mt-2 text-sm text-gray-500">{tier.audience}</p>
+                <p class="mt-4">
+                  <span class="text-4xl font-bold tracking-tight text-gray-900">
+                    {tier.price}
+                  </span>
+                </p>
+              </div>
+              <div class="flex flex-1 flex-col justify-between space-y-6 p-6 pt-0">
+                <ul class="space-y-4">
+                  {tier.features.map((feature) => (
+                    <li class="flex items-start">
+                      <div class="flex-shrink-0">
+                        <svg
+                          class="h-6 w-6 text-green-500"
+                          xmlns="http://www.w3.org/2000/svg"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke-width="1.5"
+                          stroke="currentColor"
+                          aria-hidden="true"
+                        >
+                          <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                          />
+                        </svg>
+                      </div>
+                      <p class="ml-3 text-sm text-gray-600">{feature}</p>
+                    </li>
+                  ))}
+                </ul>
+                <a
+                  href="/docs/guides/getting-started"
+                  class:list={[
+                    "block w-full rounded-md px-3 py-2 text-center text-sm font-semibold shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2",
+                    tier.popular
+                      ? "bg-brand text-white hover:bg-brand/90 focus-visible:outline-brand"
+                      : "bg-gray-100 text-gray-800 hover:bg-gray-200 focus-visible:outline-gray-400",
+                  ]}
+                >
+                  {tier.name === "Enterprise" ? "Contact Sales" : "Get Started"}
+                </a>
+              </div>
+            </div>
+          ))
+        }
+      </div>
     </section>
 
     <hr class="border-gray-200" />
@@ -377,56 +678,6 @@ async function handleValueChanged(eventPayload, env) {
     <hr class="border-gray-200" />
 
     <section class="py-16 md:py-24">
-      <div class="text-center">
-        <h2 class="text-3xl font-bold tracking-tight text-gray-900 md:text-4xl">
-          The Advantage of Connection Over Complexity
-        </h2>
-        <p class="mx-auto mt-4 max-w-2xl text-lg text-gray-600">
-          In a world of competing layers, nXCC offers a fundamentally different
-          approach.
-        </p>
-      </div>
-      <ul class="mt-12 grid gap-8 md:grid-cols-2">
-        <li class="p-8">
-          <h3 class="text-xl font-semibold text-gray-900">
-            Lower Costs & Carbon Footprint
-          </h3>
-          <p class="mt-2 text-gray-600">
-            Move logic off-chain into hyper-efficient TEEs to drastically reduce
-            gas fees and environmental impact.
-          </p>
-        </li>
-        <li class="p-8">
-          <h3 class="text-xl font-semibold text-gray-900">
-            Enhanced Security & Compliance
-          </h3>
-          <p class="mt-2 text-gray-600">
-            TEEs provide verifiable security impossible with traditional cloud,
-            meeting demands of regulated industries.
-          </p>
-        </li>
-        <li class="p-8">
-          <h3 class="text-xl font-semibold text-gray-900">No Vendor Lock-in</h3>
-          <p class="mt-2 text-gray-600">
-            The federated model means you control the infrastructure. Maintain
-            strategic autonomy without protocol dependence.
-          </p>
-        </li>
-        <li class="p-8">
-          <h3 class="text-xl font-semibold text-gray-900">
-            Accelerated Development
-          </h3>
-          <p class="mt-2 text-gray-600">
-            Build sophisticated multi-chain apps faster using a single, cohesive
-            framework instead of stitching together services.
-          </p>
-        </li>
-      </ul>
-    </section>
-
-    <hr class="border-gray-200" />
-
-    <section class="py-16 md:py-24">
       <article
         class="mx-auto max-w-4xl rounded-lg bg-gray-50 p-8 text-center md:p-12"
       >
@@ -436,8 +687,8 @@ async function handleValueChanged(eventPayload, env) {
         <p class="mt-4 text-lg text-gray-600">
           nXCC is a proud recipient of funding from the European Union’s
           <strong>Next Generation Internet (NGI) TrustChain</strong>
-          initiative. Our work is committed to advancing a more open, trustworthy,
-          and human-centric internet, with a focus on digital sovereignty and privacy
+          initiative. We are committed to advancing a more open, trustworthy, and
+          human-centric internet, with a focus on digital sovereignty and privacy
           by design.
         </p>
       </article>
@@ -451,15 +702,20 @@ async function handleValueChanged(eventPayload, env) {
       </h2>
       <p class="mx-auto mt-4 max-w-2xl text-lg text-gray-600">
         Ready to see how nXCC can simplify your multi-chain strategy? Dive into
-        our documentation, try the interactive demo, or get in touch with the
-        team.
+        our documentation, explore our code, or get in touch with the team.
       </p>
-      <div class="mt-8">
+      <div class="mt-8 flex flex-wrap items-center justify-center gap-4">
         <a
-          href="/discord"
+          href="/docs/guides/getting-started"
+          class="inline-block rounded-lg bg-brand px-8 py-3 font-semibold text-white shadow-md transition-colors hover:bg-brand/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+        >
+          Read the Docs
+        </a>
+        <a
+          href="https://github.com/nxcc-bridge/nxcc"
           class="inline-block rounded-lg bg-gray-800 px-8 py-3 font-semibold text-white shadow-md transition-colors hover:bg-gray-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
         >
-          Join our Community
+          View on GitHub
         </a>
       </div>
     </section>
