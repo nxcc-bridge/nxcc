@@ -1,0 +1,123 @@
+---
+title: CLI Reference
+description: A comprehensive reference for all @nxcc/cli commands.
+---
+
+The nXCC Command Line Interface (`@nxcc/cli`) is the primary tool for developing and managing your nXCC projects, workers, and on-chain identities.
+
+## Installation
+
+Install the CLI globally using npm:
+
+```bash
+npm install -g @nxcc/cli
+```
+
+Verify the installation:
+
+```bash
+nxcc --version
+```
+
+## Commands
+
+### `nxcc init`
+
+Scaffolds a new nXCC project in the specified directory.
+
+```bash
+nxcc init [directory]
+```
+
+-   **`[directory]`** (optional): The directory to create the project in. Defaults to the current directory.
+
+This command creates a basic project structure with a sample worker, manifest, and TypeScript configuration, ready for you to start building.
+
+### `nxcc bundle`
+
+Creates a self-contained, deployable worker bundle from a manifest template. A bundle is a [DSSE](https://github.com/secure-systems-lab/dsse)-formatted JSON file containing your compiled worker code and metadata.
+
+```bash
+nxcc bundle <manifest-template>
+```
+
+-   **`<manifest-template>`**: Path to the worker manifest template file (e.g., `workers/worker.manifest.json`).
+
+**Options:**
+
+-   `--out <path>`: The output path for the generated bundle file. Defaults to `bundle.json` in the same directory as the manifest.
+-   `--signer <private-key>`: An Ethereum-style private key (hex format, `0x...`) to sign the bundle's DSSE envelope.
+
+### `nxcc worker`
+
+Commands for deploying and interacting with workers.
+
+#### `nxcc worker deploy`
+
+Deploys a worker to an nXCC node by submitting a "work order".
+
+```bash
+nxcc worker deploy <manifest-path>
+```
+
+-   **`<manifest-path>`**: Path to the worker's manifest file.
+
+**Options:**
+
+-   `--rpc-url <url>` (required): The HTTP RPC URL of the target nXCC node. Defaults to `http://localhost:6922`.
+-   `--bundle`: If specified, the CLI will bundle the worker's code (referenced in `manifest.bundle.source`) into a `data:` URL within the manifest before deploying. This is useful for deploying workers with local code files.
+-   `--signer <private-key>`: An Ethereum-style private key to sign the work order's DSSE envelope.
+
+### `nxcc identity`
+
+Commands for managing on-chain identities.
+
+#### `nxcc identity create`
+
+Creates a new identity by minting an ERC-721 NFT to your account.
+
+```bash
+nxcc identity create <chain> <address>
+```
+
+-   **`<chain>`**: The chain ID where the Identity contract is deployed (e.g., `31337` for local Anvil).
+-   **`<address>`**: The address of the deployed `Identity.sol` contract.
+
+**Options:**
+
+-   `--gateway-url <url>` (required): The RPC URL of the Web3 gateway for the target chain. Defaults to `http://localhost:8545`.
+-   `--signer <private-key>` (required): The private key of the account that will own the new identity.
+
+#### `nxcc identity set-policy`
+
+Sets or updates the policy for an existing identity. This updates the `tokenURI` of the identity NFT.
+
+```bash
+nxcc identity set-policy <chain> <address> <id> <url-or-path-to-bundle>
+```
+
+-   **`<chain>`**: The chain ID.
+-   **`<address>`**: The `Identity.sol` contract address.
+-   **`<id>`**: The token ID of the identity to update.
+-   **`<url-or-path-to-bundle>`**: The URL of the policy or a local path to a policy bundle. If a path is provided, it will be converted to a `data:` URL.
+
+**Options:**
+
+-   `--gateway-url <url>` (required): The RPC URL of the Web3 gateway.
+-   `--signer <private-key>` (required): The private key of the identity's owner or an approved operator.
+
+#### `nxcc identity get-policy`
+
+Retrieves the current policy URL for an identity.
+
+```bash
+nxcc identity get-policy <chain> <address> <id>
+```
+
+-   **`<chain>`**: The chain ID.
+-   **`<address>`**: The `Identity.sol` contract address.
+-   **`<id>`**: The token ID of the identity.
+
+**Options:**
+
+-   `--gateway-url <url>` (required): The RPC URL of the Web3 gateway.

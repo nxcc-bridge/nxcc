@@ -1,0 +1,59 @@
+---
+title: Core Concepts
+description: Understand the fundamental building blocks of the nXCC platform.
+---
+
+The nXCC platform is built on a few core concepts that work together to provide a secure, programmable, and decentralized environment for off-chain computation. Understanding these concepts is key to building powerful cross-chain applications.
+
+## The nXCC Architecture
+
+At a high level, an nXCC node is composed of three main parts that run within a secure boundary:
+
+1.  **Daemon**: The public-facing component that handles networking (P2P communication with other nodes), API requests, and orchestrates work.
+2.  **Platform Services Enclave**: A secure environment (TEE) that runs the core logic for managing secrets and running workers. It ensures that sensitive operations are isolated and verifiable.
+3.  **Execution Enclave**: A secure environment (TEE) that runs the actual worker code in a sandboxed Virtual Machine (VM), providing a final layer of isolation.
+
+These components interact based on the following core concepts.
+
+![nXCC System Diagram](/assets/system-diagram.svg)
+
+### 1. Identities
+
+An **Identity** is the root of trust for any secure process in nXCC. It is an on-chain asset, represented as a standard **ERC-721 NFT**, that gives a process a unique, verifiable, and ownable presence on the blockchain.
+
+-   **What it is**: A unique token on an EVM-compatible blockchain, managed by the `Identity.sol` smart contract.
+-   **What it represents**: A secure off-chain process or entity. For example, an Identity could represent a price oracle, a cross-chain bridge relay, or an automated treasury manager.
+-   **Key Feature**: Each Identity NFT has a `tokenURI` that points to its **Policy**.
+
+Because identities are NFTs, they can be owned, transferred, and managed by standard Web3 tools, wallets, or even DAOs.
+
+### 2. Policies
+
+A **Policy** is the gatekeeper for an Identity. It is a special, stateless worker whose sole job is to make authorization decisions. It defines *who* can access the secrets associated with an Identity and under *what conditions*.
+
+-   **What it is**: A piece of code (e.g., TypeScript) that runs inside the Platform Services Enclave.
+-   **How it works**: When another worker or node requests access to an Identity's secrets, the nXCC node fetches the Policy from the URL specified in the Identity NFT's `tokenURI`. It then executes the policy within the secure enclave.
+-   **The Decision**: The policy code receives the requester's verifiable attestation report (proving it's a genuine TEE) and other context, and returns a simple `true` (allow) or `false` (deny) decision.
+
+This mechanism ensures that access control is both programmable and anchored to the blockchain, as only the Identity's owner can change its policy URL.
+
+### 3. Workers
+
+A **Worker** is where your application logic lives. It's a script, typically written in TypeScript or JavaScript, that performs the off-chain tasks you want to automate.
+
+-   **What it is**: Your application code, running in a serverless environment.
+-   **Execution Environment**: Workers run inside a sandboxed VM (specifically, Cloudflare's `workerd` runtime) within a secure Execution Enclave (TEE). This isolates them from the host system and other workers.
+-   **Capabilities**: A worker can be triggered by various events (on-chain events, HTTP requests, timers), make outbound network requests to any API, and submit transactions to any blockchain.
+-   **Accessing Secrets**: If a worker's manifest declares that it needs access to an Identity, and the Identity's Policy approves the request, the nXCC node will securely inject the Identity's secrets into the worker's environment.
+
+### The Security Model: Tying It All Together
+
+The security and trust model of nXCC emerges from the interaction of these three concepts:
+
+1.  An **Identity** NFT on a public blockchain provides a transparent, user-owned root of trust.
+2.  The Identity's `tokenURI` points to a **Policy**, which defines access control rules in code.
+3.  An nXCC node uses its **TEE** to verifiably fetch and execute this Policy. The TEE's attestation proves to other nodes that it is running genuine nXCC software in a secure environment.
+4.  The Policy evaluates requests from **Workers** (which also run in TEEs) and grants or denies access to the Identity's secrets.
+5.  A Worker, once granted access to secrets (like private keys), can perform its designated tasks, such as signing and submitting transactions.
+
+This creates a powerful, decentralized system where trust is not placed in a single operator, but is distributed and enforced by a combination of on-chain logic, programmable policies, and verifiable confidential computing.

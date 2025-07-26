@@ -28,7 +28,7 @@ export default defineConfig({
         },
         {
           label: "Reference",
-          autogenerate: { directory: "reference" },
+          autogenerate: { directory: "docs/reference" },
         },
       ],
       customCss: ["./src/styles/global.css"],
