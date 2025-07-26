@@ -21,19 +21,19 @@ These components interact based on the following core concepts.
 
 An **Identity** is the root of trust for any secure process in nXCC. It is an on-chain asset, represented as a standard **ERC-721 NFT**, that gives a process a unique, verifiable, and ownable presence on the blockchain.
 
--   **What it is**: A unique token on an EVM-compatible blockchain, managed by the `Identity.sol` smart contract.
--   **What it represents**: A secure off-chain process or entity. For example, an Identity could represent a price oracle, a cross-chain bridge relay, or an automated treasury manager.
--   **Key Feature**: Each Identity NFT has a `tokenURI` that points to its **Policy**.
+- **What it is**: A unique token on an EVM-compatible blockchain, managed by the `Identity.sol` smart contract.
+- **What it represents**: A secure off-chain process or entity. For example, an Identity could represent a price oracle, a cross-chain bridge relay, or an automated treasury manager.
+- **Key Feature**: Each Identity NFT has a `tokenURI` that points to its **Policy**.
 
 Because identities are NFTs, they can be owned, transferred, and managed by standard Web3 tools, wallets, or even DAOs.
 
 ### 2. Policies
 
-A **Policy** is the gatekeeper for an Identity. It is a special, stateless worker whose sole job is to make authorization decisions. It defines *who* can access the secrets associated with an Identity and under *what conditions*.
+A **Policy** is the gatekeeper for an Identity. It is a special, stateless worker whose sole job is to make authorization decisions. It defines _who_ can access the secrets associated with an Identity and under _what conditions_.
 
--   **What it is**: A piece of code (e.g., TypeScript) that runs inside the Platform Services Enclave.
--   **How it works**: When another worker or node requests access to an Identity's secrets, the nXCC node fetches the Policy from the URL specified in the Identity NFT's `tokenURI`. It then executes the policy within the secure enclave.
--   **The Decision**: The policy code receives the requester's verifiable attestation report (proving it's a genuine TEE) and other context, and returns a simple `true` (allow) or `false` (deny) decision.
+- **What it is**: A piece of code (e.g., TypeScript) that runs inside the Platform Services Enclave.
+- **How it works**: When another worker or node requests access to an Identity's secrets, the nXCC node fetches the Policy from the URL specified in the Identity NFT's `tokenURI`. It then executes the policy within the secure enclave.
+- **The Decision**: The policy code receives the requester's verifiable attestation report (proving it's a genuine TEE) and other context, and returns a simple `true` (allow) or `false` (deny) decision.
 
 This mechanism ensures that access control is both programmable and anchored to the blockchain, as only the Identity's owner can change its policy URL.
 
@@ -41,10 +41,10 @@ This mechanism ensures that access control is both programmable and anchored to 
 
 A **Worker** is where your application logic lives. It's a script, typically written in TypeScript or JavaScript, that performs the off-chain tasks you want to automate.
 
--   **What it is**: Your application code, running in a serverless environment.
--   **Execution Environment**: Workers run inside a sandboxed VM (specifically, Cloudflare's `workerd` runtime) within a secure Execution Enclave (TEE). This isolates them from the host system and other workers.
--   **Capabilities**: A worker can be triggered by various events (on-chain events, HTTP requests, timers), make outbound network requests to any API, and submit transactions to any blockchain.
--   **Accessing Secrets**: If a worker's manifest declares that it needs access to an Identity, and the Identity's Policy approves the request, the nXCC node will securely inject the Identity's secrets into the worker's environment.
+- **What it is**: Your application code, running in a serverless environment.
+- **Execution Environment**: Workers run inside a sandboxed VM (specifically, Cloudflare's `workerd` runtime) within a secure Execution Enclave (TEE). This isolates them from the host system and other workers.
+- **Capabilities**: A worker can be triggered by various events (on-chain events, HTTP requests, timers), make outbound network requests to any API, and submit transactions to any blockchain.
+- **Accessing Secrets**: If a worker's manifest declares that it needs access to an Identity, and the Identity's Policy approves the request, the nXCC node will securely inject the Identity's secrets into the worker's environment.
 
 ### The Security Model: Tying It All Together
 

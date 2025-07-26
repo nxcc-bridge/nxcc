@@ -59,8 +59,8 @@ The `http_request` event exposes your worker as a public HTTP endpoint. This all
 The worker becomes available at a unique URL based on the hash of its work order:
 `http://<node-url>/w/<work-order-hash>`
 
--   `<node-url>`: The address of the nXCC node (e.g., `localhost:6922`).
--   `<work-order-hash>`: The SHA-256 hash (base64url encoded) of the DSSE envelope used to deploy the worker. The `nxcc worker deploy` command returns this hash.
+- `<node-url>`: The address of the nXCC node (e.g., `localhost:6922`).
+- `<work-order-hash>`: The SHA-256 hash (base64url encoded) of the DSSE envelope used to deploy the worker. The `nxcc worker deploy` command returns this hash.
 
 When a request hits this endpoint, the nXCC node forwards the full HTTP `Request` object to your worker's `fetch` handler.
 
@@ -82,8 +82,8 @@ The `web3_event` trigger is the core of nXCC's cross-chain capabilities. It inst
 }
 ```
 
--   `chain`: The ID of the target blockchain.
--   `address`: An array of contract addresses to monitor.
--   `topics`: An array of topic filters, following the [JSON-RPC specification](https://docs.alchemy.com/reference/eth_getlogs#topics-array). The first topic is typically the signature hash of the event. You can generate this using tools like `cast` or `viem`.
+- `chain`: The ID of the target blockchain.
+- `address`: An array of contract addresses to monitor.
+- `topics`: An array of topic filters, following the [JSON-RPC specification](https://docs.alchemy.com/reference/eth_getlogs#topics-array). The first topic is typically the signature hash of the event. You can generate this using tools like `cast` or `viem`.
 
 When the specified event is detected, the `fetch` handler receives a request with a JSON body containing the full `Web3Log` object, including topics and data. Your worker can then decode this payload to perform its logic.

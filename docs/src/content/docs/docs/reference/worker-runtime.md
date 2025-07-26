@@ -28,11 +28,11 @@ export default {
 
 ### `fetch` Handler Arguments
 
--   **`request`** (`Request`): A standard [Fetch API `Request`](https://developer.mozilla.org/en-US/docs/Web/API/Request) object.
-    -   For `http_request` triggers, this is the original incoming HTTP request.
-    -   For all other triggers (e.g., `web3_event`, `launch`), the nXCC node constructs a `POST` request where the body contains a JSON payload describing the event.
--   **`env`** (`any`): An object containing environment variables, secrets, and user-configured data. See below for details.
--   **`ctx`** (`any`): An execution context object provided by the `workerd` runtime.
+- **`request`** (`Request`): A standard [Fetch API `Request`](https://developer.mozilla.org/en-US/docs/Web/API/Request) object.
+  - For `http_request` triggers, this is the original incoming HTTP request.
+  - For all other triggers (e.g., `web3_event`, `launch`), the nXCC node constructs a `POST` request where the body contains a JSON payload describing the event.
+- **`env`** (`any`): An object containing environment variables, secrets, and user-configured data. See below for details.
+- **`ctx`** (`any`): An execution context object provided by the `workerd` runtime.
 
 ## The `env` Object
 
@@ -58,11 +58,16 @@ For security, the raw secret is **not** exposed directly. Instead, it is provide
 const rootKey = env.ETHEREUM_SIGNER; // This is a CryptoKey
 
 const derivedKey = await crypto.subtle.deriveKey(
-  { name: "HKDF", hash: "SHA-256", salt: new Uint8Array(), info: new TextEncoder().encode("eth-child-key") },
+  {
+    name: "HKDF",
+    hash: "SHA-256",
+    salt: new Uint8Array(),
+    info: new TextEncoder().encode("eth-child-key"),
+  },
   rootKey,
   { name: "ECDSA", namedCurve: "P-256" },
   false, // not extractable
-  ["sign", "verify"]
+  ["sign", "verify"],
 );
 ```
 
@@ -70,9 +75,9 @@ const derivedKey = await crypto.subtle.deriveKey(
 
 The `workerd` runtime provides a wide range of standard web APIs. You can use them just as you would in a modern browser or other serverless JavaScript environments.
 
--   **`fetch()`**: Make outbound HTTP requests to any API.
--   **`crypto.subtle`**: Access the Web Crypto API for hashing, signing, and encryption.
--   **`setTimeout` / `setInterval`**: Schedule asynchronous tasks.
--   **`Request` / `Response` / `Headers`**: Construct and handle HTTP primitives.
+- **`fetch()`**: Make outbound HTTP requests to any API.
+- **`crypto.subtle`**: Access the Web Crypto API for hashing, signing, and encryption.
+- **`setTimeout` / `setInterval`**: Schedule asynchronous tasks.
+- **`Request` / `Response` / `Headers`**: Construct and handle HTTP primitives.
 
 For a comprehensive list of available APIs, please refer to the [Cloudflare Workers runtime documentation](https://developers.cloudflare.com/workers/runtime-apis/).

@@ -29,7 +29,7 @@ Scaffolds a new nXCC project in the specified directory.
 nxcc init [directory]
 ```
 
--   **`[directory]`** (optional): The directory to create the project in. Defaults to the current directory.
+- **`[directory]`** (optional): The directory to create the project in. Defaults to the current directory.
 
 This command creates a basic project structure with a sample worker, manifest, and TypeScript configuration, ready for you to start building.
 
@@ -41,12 +41,12 @@ Creates a self-contained, deployable worker bundle from a manifest template. A b
 nxcc bundle <manifest-template>
 ```
 
--   **`<manifest-template>`**: Path to the worker manifest template file (e.g., `workers/worker.manifest.json`).
+- **`<manifest-template>`**: Path to the worker manifest template file (e.g., `workers/worker.manifest.json`).
 
 **Options:**
 
--   `--out <path>`: The output path for the generated bundle file. Defaults to `bundle.json` in the same directory as the manifest.
--   `--signer <private-key>`: An Ethereum-style private key (hex format, `0x...`) to sign the bundle's DSSE envelope.
+- `--out <path>`: The output path for the generated bundle file. Defaults to `bundle.json` in the same directory as the manifest.
+- `--signer <private-key>`: An Ethereum-style private key (hex format, `0x...`) to sign the bundle's DSSE envelope.
 
 ### `nxcc worker`
 
@@ -60,13 +60,13 @@ Deploys a worker to an nXCC node by submitting a "work order".
 nxcc worker deploy <manifest-path>
 ```
 
--   **`<manifest-path>`**: Path to the worker's manifest file.
+- **`<manifest-path>`**: Path to the worker's manifest file.
 
 **Options:**
 
--   `--rpc-url <url>` (required): The HTTP RPC URL of the target nXCC node. Defaults to `http://localhost:6922`.
--   `--bundle`: If specified, the CLI will bundle the worker's code (referenced in `manifest.bundle.source`) into a `data:` URL within the manifest before deploying. This is useful for deploying workers with local code files.
--   `--signer <private-key>`: An Ethereum-style private key to sign the work order's DSSE envelope.
+- `--rpc-url <url>` (required): The HTTP RPC URL of the target nXCC node. Defaults to `http://localhost:6922`.
+- `--bundle`: If specified, the CLI will bundle the worker's code (referenced in `manifest.bundle.source`) into a `data:` URL within the manifest before deploying. This is useful for deploying workers with local code files.
+- `--signer <private-key>`: An Ethereum-style private key to sign the work order's DSSE envelope.
 
 ### `nxcc identity`
 
@@ -80,13 +80,13 @@ Creates a new identity by minting an ERC-721 NFT to your account.
 nxcc identity create <chain> <address>
 ```
 
--   **`<chain>`**: The chain ID where the Identity contract is deployed (e.g., `31337` for local Anvil).
--   **`<address>`**: The address of the deployed `Identity.sol` contract.
+- **`<chain>`**: The chain ID where the Identity contract is deployed (e.g., `31337` for local Anvil).
+- **`<address>`**: The address of the deployed `Identity.sol` contract.
 
 **Options:**
 
--   `--gateway-url <url>` (required): The RPC URL of the Web3 gateway for the target chain. Defaults to `http://localhost:8545`.
--   `--signer <private-key>` (required): The private key of the account that will own the new identity.
+- `--gateway-url <url>` (required): The RPC URL of the Web3 gateway for the target chain. Defaults to `http://localhost:8545`.
+- `--signer <private-key>` (required): The private key of the account that will own the new identity.
 
 #### `nxcc identity set-policy`
 
@@ -96,15 +96,15 @@ Sets or updates the policy for an existing identity. This updates the `tokenURI`
 nxcc identity set-policy <chain> <address> <id> <url-or-path-to-bundle>
 ```
 
--   **`<chain>`**: The chain ID.
--   **`<address>`**: The `Identity.sol` contract address.
--   **`<id>`**: The token ID of the identity to update.
--   **`<url-or-path-to-bundle>`**: The URL of the policy or a local path to a policy bundle. If a path is provided, it will be converted to a `data:` URL.
+- **`<chain>`**: The chain ID.
+- **`<address>`**: The `Identity.sol` contract address.
+- **`<id>`**: The token ID of the identity to update.
+- **`<url-or-path-to-bundle>`**: The URL of the policy or a local path to a policy bundle. If a path is provided, it will be converted to a `data:` URL.
 
 **Options:**
 
--   `--gateway-url <url>` (required): The RPC URL of the Web3 gateway.
--   `--signer <private-key>` (required): The private key of the identity's owner or an approved operator.
+- `--gateway-url <url>` (required): The RPC URL of the Web3 gateway.
+- `--signer <private-key>` (required): The private key of the identity's owner or an approved operator.
 
 #### `nxcc identity get-policy`
 
@@ -114,10 +114,10 @@ Retrieves the current policy URL for an identity.
 nxcc identity get-policy <chain> <address> <id>
 ```
 
--   **`<chain>`**: The chain ID.
--   **`<address>`**: The `Identity.sol` contract address.
--   **`<id>`**: The token ID of the identity.
+- **`<chain>`**: The chain ID.
+- **`<address>`**: The `Identity.sol` contract address.
+- **`<id>`**: The token ID of the identity.
 
 **Options:**
 
--   `--gateway-url <url>` (required): The RPC URL of the Web3 gateway.
+- `--gateway-url <url>` (required): The RPC URL of the Web3 gateway.

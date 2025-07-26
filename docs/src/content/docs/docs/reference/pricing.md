@@ -13,15 +13,15 @@ Our pricing is designed to be simple, transparent, and accessible for individual
 
 ## IaaS Tiers
 
-| Feature                   | Hobby (Free)                  | Pro (€149/mo)                   | Team (€699/mo)                     | Enterprise (Custom)                |
-| :------------------------ | :---------------------------- | :------------------------------ | :--------------------------------- | :--------------------------------- |
-| **Target Audience**       | Individual Devs, Testing      | Production dApps, Small Teams   | Scaling Businesses, High-Volume    | Large-Scale, Mission-Critical      |
-| **Monthly Invocations**   | 100,000                       | 5,000,000                       | 25,000,000                         | Custom / Unlimited                 |
-| **Active Workers**        | 2                             | 10                              | 25                                 | Custom                             |
-| **Execution Priority**    | Standard                      | High                            | Highest                            | Dedicated Queue                    |
-| **Web3 Connectivity**     | Shared RPC Endpoints          | Premium RPC Endpoints           | Dedicated RPC Endpoints            | Dedicated Infrastructure           |
-| **Triggers**              | On-Chain, Cron (/min)         | On-Chain, Cron (/sec), Webhooks | On-Chain, Cron, Webhooks, Direct API | All, plus custom integrations      |
-| **Support**               | Community (Discord)           | Email Support (24h SLA)         | Private Channel (Priority SLA)     | Dedicated Support Engineer & SLA   |
+| Feature                 | Hobby (Free)             | Pro (€149/mo)                   | Team (€699/mo)                       | Enterprise (Custom)              |
+| :---------------------- | :----------------------- | :------------------------------ | :----------------------------------- | :------------------------------- |
+| **Target Audience**     | Individual Devs, Testing | Production dApps, Small Teams   | Scaling Businesses, High-Volume      | Large-Scale, Mission-Critical    |
+| **Monthly Invocations** | 100,000                  | 5,000,000                       | 25,000,000                           | Custom / Unlimited               |
+| **Active Workers**      | 2                        | 10                              | 25                                   | Custom                           |
+| **Execution Priority**  | Standard                 | High                            | Highest                              | Dedicated Queue                  |
+| **Web3 Connectivity**   | Shared RPC Endpoints     | Premium RPC Endpoints           | Dedicated RPC Endpoints              | Dedicated Infrastructure         |
+| **Triggers**            | On-Chain, Cron (/min)    | On-Chain, Cron (/sec), Webhooks | On-Chain, Cron, Webhooks, Direct API | All, plus custom integrations    |
+| **Support**             | Community (Discord)      | Email Support (24h SLA)         | Private Channel (Priority SLA)       | Dedicated Support Engineer & SLA |
 
 ---
 
@@ -43,10 +43,10 @@ Yes! The core nXCC node is open-source under the Apache-2.0 license. You are fre
 
 The Enterprise tier is a bespoke offering with custom pricing tailored to your specific needs. It can include features like:
 
--   Dedicated, isolated infrastructure
--   Custom feature development
--   Enterprise-grade SLAs and dedicated support channels
--   On-premise deployment options
--   Security audits and compliance assistance
+- Dedicated, isolated infrastructure
+- Custom feature development
+- Enterprise-grade SLAs and dedicated support channels
+- On-premise deployment options
+- Security audits and compliance assistance
 
 [Contact our sales team](mailto:sales@example.com) to discuss your requirements.

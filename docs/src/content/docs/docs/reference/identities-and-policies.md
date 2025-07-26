@@ -9,9 +9,9 @@ Identities and Policies are the foundation of nXCC's security model. They provid
 
 An nXCC Identity is a standard **ERC-721 NFT** deployed on an EVM-compatible blockchain. This provides several key advantages:
 
--   **Ownership**: Each identity has a clear owner, which can be an Externally Owned Account (EOA) or a smart contract like a multisig or DAO.
--   **Verifiability**: Anyone can verify the existence and ownership of an identity on-chain.
--   **Composability**: As a standard NFT, identities can be managed with existing wallets, marketplaces, and smart contract tooling.
+- **Ownership**: Each identity has a clear owner, which can be an Externally Owned Account (EOA) or a smart contract like a multisig or DAO.
+- **Verifiability**: Anyone can verify the existence and ownership of an identity on-chain.
+- **Composability**: As a standard NFT, identities can be managed with existing wallets, marketplaces, and smart contract tooling.
 
 The core of the identity is the `Identity.sol` smart contract. Its most important function is `setPolicyURL`, which allows the owner of the NFT to set its `tokenURI`. In nXCC, this URI points directly to the **Policy** that governs the identity.
 
@@ -68,9 +68,9 @@ export default {
 
 The real power of policies comes from the context they receive. The `PolicyExecutionRequest` object contains verifiable information about the requester that the policy can use to make a decision.
 
--   `secret_ids`: An array of `SecretId`s being requested.
--   `consumer`: Information about the worker requesting access, including the hash of its code bundle (`bundle_hash`).
--   `env_report`: The TEE attestation report from the node making the request. This report cryptographically proves that the requester is running genuine nXCC software in a secure, un-tampered environment.
+- `secret_ids`: An array of `SecretId`s being requested.
+- `consumer`: Information about the worker requesting access, including the hash of its code bundle (`bundle_hash`).
+- `env_report`: The TEE attestation report from the node making the request. This report cryptographically proves that the requester is running genuine nXCC software in a secure, un-tampered environment.
 
 **Example: An Attestation-Based Policy**
 
@@ -84,7 +84,7 @@ export default {
 
     const TRUSTED_MEASUREMENT = "0x..."; // The expected TEE measurement hash
 
-    const decisions = contexts.map(ctx => {
+    const decisions = contexts.map((ctx) => {
       // Check if the requester's TEE measurement matches our trusted value.
       return ctx.env_report.attestation.measurement === TRUSTED_MEASUREMENT;
     });

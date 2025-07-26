@@ -12,18 +12,19 @@
     "lint": "prettier --check . --cache"
   },
   "dependencies": {
-    "@astrojs/starlight": "^0.34.4",
+    "@astrojs/starlight": "^0.35.1",
     "@astrojs/vue": "^5.1.0",
-    "@fontsource/inter": "^5.0.19",
-    "@lucide/astro": "^0.515.0",
+    "@fontsource/inter": "^5.2.6",
+    "@lucide/astro": "^0.525.0",
     "@tailwindcss/vite": "^4.1.11",
-    "astro": "^5.6.1",
-    "lucide-vue-next": "^0.523.0",
+    "astro": "^5.12.3",
+    "lucide-vue-next": "^0.525.0",
+    "shiki": "^3.8.1",
     "tailwindcss": "^4.1.11",
-    "vue": "^3.5.17"
+    "vue": "^3.5.18"
   },
   "devDependencies": {
-    "prettier": "^3.3.3",
+    "prettier": "^3.6.2",
     "prettier-plugin-astro": "^0.14.1"
   }
 }

@@ -40,10 +40,10 @@ docker run -d --rm \
 
 ### Key Configuration
 
--   `-p 6922:6922`: Exposes the node's HTTP API, which the `@nxcc/cli` uses for `worker deploy`.
--   `--network nxcc-dev-net`: Connects the node to the same network as your Anvil container.
--   `-e RUST_LOG=...`: Controls the log level. `nxcc_daemon=debug` is useful for development.
--   `-e NXCC_HTTP_API_ENABLED=true`: **Required** to enable the `/api/work-orders` endpoint for deployments.
+- `-p 6922:6922`: Exposes the node's HTTP API, which the `@nxcc/cli` uses for `worker deploy`.
+- `--network nxcc-dev-net`: Connects the node to the same network as your Anvil container.
+- `-e RUST_LOG=...`: Controls the log level. `nxcc_daemon=debug` is useful for development.
+- `-e NXCC_HTTP_API_ENABLED=true`: **Required** to enable the `/api/work-orders` endpoint for deployments.
 
 ### Viewing Logs
 

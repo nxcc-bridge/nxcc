@@ -31,12 +31,12 @@ A manifest is a JSON object with four top-level properties: `bundle`, `identitie
 
 The `bundle` object points to your worker's code. This code must be packaged in a self-contained, signed file called a "bundle".
 
--   **`source`** (String, Required): A URL pointing to the worker bundle file. The `@nxcc/cli` tool typically handles creating this bundle and can use several URL schemes:
-    -   `file://path/to/bundle.json`: A local file path.
-    -   `data:application/json;base64,...`: The entire bundle, base64-encoded. The CLI's `--bundle` flag uses this to create portable work orders.
-    -   `http(s)://...`: A URL to a publicly accessible bundle file.
+- **`source`** (String, Required): A URL pointing to the worker bundle file. The `@nxcc/cli` tool typically handles creating this bundle and can use several URL schemes:
+  - `file://path/to/bundle.json`: A local file path.
+  - `data:application/json;base64,...`: The entire bundle, base64-encoded. The CLI's `--bundle` flag uses this to create portable work orders.
+  - `http(s)://...`: A URL to a publicly accessible bundle file.
 
--   **`hash`** (String, Optional): The SHA-512 hash of the bundle file for content integrity verification.
+- **`hash`** (String, Optional): The SHA-512 hash of the bundle file for content integrity verification.
 
 ### `identities` (Array, Optional)
 
@@ -59,16 +59,17 @@ It is an array of tuples, where each tuple contains a `SecretId` object and a `s
 
 In this example, the worker requests the secret for identity `123`. If the identity's policy approves the request, the secret will be available in the worker's runtime as `env.ETHEREUM_SIGNER`.
 
--   **`SecretId` Object**:
-    -   `chain_id` (Number): The chain ID where the identity exists.
-    -   `identity_address` (String): The address of the `Identity.sol` contract.
-    -   `identity_id` (String): The token ID of the identity NFT.
+- **`SecretId` Object**:
+  - `chain_id` (Number): The chain ID where the identity exists.
+  - `identity_address` (String): The address of the `Identity.sol` contract.
+  - `identity_id` (String): The token ID of the identity NFT.
 
 ### `userdata` (Object, Optional)
 
 The `userdata` object is a place to put arbitrary, non-sensitive JSON configuration that will be passed to your worker.
 
 **Manifest:**
+
 ```json
 "userdata": {
   "rpcUrl": "https://mainnet.infura.io/v3/...",
@@ -77,13 +78,14 @@ The `userdata` object is a place to put arbitrary, non-sensitive JSON configurat
 ```
 
 **Worker Code:**
+
 ```typescript
 export default {
   async fetch(request, env) {
     const { rpcUrl, retryCount } = env.USER_CONFIG;
     // ...
-  }
-}
+  },
+};
 ```
 
 The entire `userdata` object is made available to the worker inside the `env` object at `env.USER_CONFIG`.
