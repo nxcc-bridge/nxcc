@@ -45,22 +45,102 @@ async function handleValueChanged(eventPayload, env) {
     <header class="relative z-10">
       <div class="container mx-auto px-4">
         <nav class="flex items-center justify-between py-6">
-          <a href="/" class="text-2xl font-bold text-gray-900">nXCC</a>
+          <a
+            href="/"
+            class="rounded-sm text-2xl font-bold text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+            >nXCC</a
+          >
           <div class="hidden items-center space-x-8 md:flex">
-            <a href="#features" class="text-gray-600 hover:text-gray-900"
+            <a
+              href="#features"
+              class="rounded-sm text-gray-600 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
               >Features</a
             >
-            <a href="#use-cases" class="text-gray-600 hover:text-gray-900"
+            <a
+              href="#use-cases"
+              class="rounded-sm text-gray-600 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
               >Use Cases</a
             >
-            <a href="/guides/getting-started" class="text-gray-600 hover:text-gray-900">Docs</a>
+            <a
+              href="/guides/getting-started"
+              class="rounded-sm text-gray-600 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+              >Docs</a
+            >
             <a
               href="https://github.com/nxcc-bridge/nxcc"
-              class="text-gray-600 hover:text-gray-900">GitHub</a
+              class="rounded-sm text-gray-600 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+              >GitHub</a
             >
           </div>
-          <!-- TODO: Add mobile menu button and functionality. -->
+          <div class="flex md:hidden">
+            <button
+              type="button"
+              id="mobile-menu-button"
+              class="inline-flex items-center justify-center rounded-md p-2 text-gray-700 hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand"
+              aria-controls="mobile-menu"
+              aria-expanded="false"
+            >
+              <span class="sr-only">Open main menu</span>
+              <svg
+                id="hamburger-icon"
+                class="block h-6 w-6"
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke-width="1.5"
+                stroke="currentColor"
+                aria-hidden="true"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"
+                >
+                </path>
+              </svg>
+              <svg
+                id="close-icon"
+                class="hidden h-6 w-6"
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke-width="1.5"
+                stroke="currentColor"
+                aria-hidden="true"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M6 18L18 6M6 6l12 12"></path>
+              </svg>
+            </button>
+          </div>
         </nav>
+      </div>
+
+      <div class="hidden md:hidden" id="mobile-menu">
+        <div class="container mx-auto space-y-1 px-4 pb-3 pt-2">
+          <a
+            href="#features"
+            class="block rounded-md px-3 py-2 text-base font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+            >Features</a
+          >
+          <a
+            href="#use-cases"
+            class="block rounded-md px-3 py-2 text-base font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+            >Use Cases</a
+          >
+          <a
+            href="/guides/getting-started"
+            class="block rounded-md px-3 py-2 text-base font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+            >Docs</a
+          >
+          <a
+            href="https://github.com/nxcc-bridge/nxcc"
+            class="block rounded-md px-3 py-2 text-base font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+            >GitHub</a
+          >
+        </div>
       </div>
     </header>
 
@@ -80,7 +160,7 @@ async function handleValueChanged(eventPayload, env) {
           <div class="mt-10">
             <a
               href="/guides/getting-started"
-              class="inline-block rounded-lg bg-brand px-8 py-3 font-semibold text-white shadow-md transition-colors hover:bg-brand/90"
+              class="inline-block rounded-lg bg-brand px-8 py-3 font-semibold text-white shadow-md transition-colors hover:bg-brand/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
             >
               Get Started
             </a>
@@ -240,7 +320,9 @@ async function handleValueChanged(eventPayload, env) {
           </p>
           <ul class="mt-8 space-y-4">
             <li class="flex items-start">
-              <span class="h-6 w-6 flex-shrink-0 text-brand">✓</span>
+              <span class="h-6 w-6 flex-shrink-0 text-brand" aria-hidden="true"
+                >✓</span
+              >
               <span class="ml-3 text-gray-600">
                 <strong>Familiar Runtimes:</strong>
                 Write workers in JavaScript and run them in the battle-tested `workerd`
@@ -248,7 +330,9 @@ async function handleValueChanged(eventPayload, env) {
               </span>
             </li>
             <li class="flex items-start">
-              <span class="h-6 w-6 flex-shrink-0 text-brand">✓</span>
+              <span class="h-6 w-6 flex-shrink-0 text-brand" aria-hidden="true"
+                >✓</span
+              >
               <span class="ml-3 text-gray-600">
                 <strong>Open Source:</strong>
                 Fork it, extend it, run it yourself. The core is built in Rust for
@@ -256,7 +340,9 @@ async function handleValueChanged(eventPayload, env) {
               </span>
             </li>
             <li class="flex items-start">
-              <span class="h-6 w-6 flex-shrink-0 text-brand">✓</span>
+              <span class="h-6 w-6 flex-shrink-0 text-brand" aria-hidden="true"
+                >✓</span
+              >
               <span class="ml-3 text-gray-600">
                 <strong>Event-Driven:</strong>
                 Build reactive applications that listen to on-chain events, HTTP
@@ -264,7 +350,9 @@ async function handleValueChanged(eventPayload, env) {
               </span>
             </li>
             <li class="flex items-start">
-              <span class="h-6 w-6 flex-shrink-0 text-brand">✓</span>
+              <span class="h-6 w-6 flex-shrink-0 text-brand" aria-hidden="true"
+                >✓</span
+              >
               <span class="ml-3 text-gray-600">
                 <strong>True Interoperability:</strong>
                 Start with full EVM support and an architecture ready for non-EVM
@@ -369,7 +457,7 @@ async function handleValueChanged(eventPayload, env) {
       <div class="mt-8">
         <a
           href="/discord"
-          class="inline-block rounded-lg bg-gray-800 px-8 py-3 font-semibold text-white shadow-md transition-colors hover:bg-gray-700"
+          class="inline-block rounded-lg bg-gray-800 px-8 py-3 font-semibold text-white shadow-md transition-colors hover:bg-gray-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
         >
           Join our Community
         </a>
@@ -381,7 +469,11 @@ async function handleValueChanged(eventPayload, env) {
     <div class="container mx-auto px-4 py-12">
       <div class="md:flex md:justify-between">
         <div class="mb-6 md:mb-0">
-          <a href="/" class="text-2xl font-bold text-gray-900">nXCC</a>
+          <a
+            href="/"
+            class="rounded-sm text-2xl font-bold text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+            >nXCC</a
+          >
           <p class="mt-2 text-gray-600">
             The Programmable Glue for the Multi-Chain World
           </p>
@@ -389,9 +481,12 @@ async function handleValueChanged(eventPayload, env) {
         <nav class="flex space-x-8">
           <a
             href="https://github.com/nxcc-bridge/nxcc"
-            class="text-gray-600 hover:text-gray-900">GitHub</a
+            class="rounded-sm text-gray-600 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+            >GitHub</a
           >
-          <a href="/discord" class="text-gray-600 hover:text-gray-900"
+          <a
+            href="/discord"
+            class="rounded-sm text-gray-600 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
             >Discord</a
           >
         </nav>
@@ -401,4 +496,21 @@ async function handleValueChanged(eventPayload, env) {
       </div>
     </div>
   </footer>
+  <script>
+    const mobileMenuButton = document.getElementById("mobile-menu-button");
+    const mobileMenu = document.getElementById("mobile-menu");
+    const hamburgerIcon = document.getElementById("hamburger-icon");
+    const closeIcon = document.getElementById("close-icon");
+
+    if (mobileMenuButton && mobileMenu && hamburgerIcon && closeIcon) {
+      mobileMenuButton.addEventListener("click", () => {
+        const isExpanded =
+          mobileMenuButton.getAttribute("aria-expanded") === "true";
+        mobileMenuButton.setAttribute("aria-expanded", String(!isExpanded));
+        mobileMenu.classList.toggle("hidden");
+        hamburgerIcon.classList.toggle("hidden");
+        closeIcon.classList.toggle("hidden");
+      });
+    }
+  </script>
 </Layout>
