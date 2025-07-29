@@ -32,14 +32,6 @@ export default defineConfig({
         },
       ],
       customCss: ["./src/styles/global.css"],
-      markdown: {
-        shikiConfig: {
-          themes: {
-            light: "github-light",
-            dark: "github-dark",
-          },
-        },
-      },
     }),
     vue(),
   ],
