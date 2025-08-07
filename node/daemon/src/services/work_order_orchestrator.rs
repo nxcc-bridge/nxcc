@@ -148,7 +148,6 @@ impl WorkOrderOrchestrator {
             .fetch_worker_bundle(
                 &worker_manifest.bundle,
                 "work-order-context", // manifest_url_for_context
-                &SecretId::default(), // secret_id_for_log (using Default impl)
             )
             .await?;
         debug!(

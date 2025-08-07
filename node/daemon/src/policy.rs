@@ -102,7 +102,7 @@ impl PolicyManager {
 
         // 5. Fetch the worker bundle using the pointer in the manifest
         let bundle = self
-            .fetch_worker_bundle(&manifest.bundle, &manifest_url, secret_id)
+            .fetch_worker_bundle(&manifest.bundle, &manifest_url)
             .await?;
 
         let package = FullPolicyPackage { manifest, bundle };
@@ -199,12 +199,10 @@ impl PolicyManager {
         &self,
         bundle_pointer: &WorkerBundlePointer,
         manifest_url_for_context: &str, // Used to resolve relative file URLs for mocks
-        secret_id_for_log: &SecretId,   // For logging context
     ) -> Result<WorkerBundle, AppError> {
         let bundle_url_str = bundle_pointer.source.as_str();
         info!(
-            "Fetching worker bundle for policy {:?} from URL: {}",
-            secret_id_for_log,
+            "Fetching worker bundle from URL: {}",
             &bundle_url_str[0..20]
         );
 
@@ -264,9 +262,8 @@ impl PolicyManager {
             {
                 warn!(
                     "Local file bundle source {} appears to be raw executable; wrapping in mock \
-                     DSSE envelope for policy {:?}",
+                     DSSE envelope",
                     absolute_path.display(),
-                    secret_id_for_log
                 );
 
                 let payload_struct = WorkerBundlePayload {
@@ -488,14 +485,9 @@ mod tests {
             source: data_url.parse().unwrap(),
             hash: None,
         };
-        let sid = SecretId {
-            chain_id: 0,
-            identity_address: Address::ZERO,
-            identity_id: U256::ZERO,
-        };
 
         let bundle = pm
-            .fetch_worker_bundle(&pointer, "mock://manifest", &sid)
+            .fetch_worker_bundle(&pointer, "mock://manifest")
             .await
             .expect("bundle fetch");
         assert_eq!(bundle.0, dsse_bytes);

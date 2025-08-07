@@ -148,7 +148,7 @@ fn default_tcp_addr() -> String {
 #[derive(Debug, Clone, Serialize, Deserialize, clap::Args)]
 pub struct EnclaveConfig {
     /// The UDS path for the main enclave gRPC service.
-    #[clap(long, default_value = "/tmp/enclave_grpc.sock")]
+    #[clap(long, default_value = "/tmp/nxcc_enclave.sock")]
     #[serde(default = "default_enclave_uds_path")]
     pub enclave_uds_path: String, // Keep existing name for consistency
 
@@ -160,7 +160,7 @@ pub struct EnclaveConfig {
 
     /// The UDS path for the VM gRPC service that the enclave should connect to.
     /// The daemon tells the enclave this path via AttachVm.
-    #[clap(long, default_value = "/tmp/nxcc-workerd-vmm.sock")]
+    #[clap(long, default_value = "/tmp/nxcc_workerd_vm.sock")]
     #[serde(default = "default_default_vm_uds_path")]
     pub default_vm_uds_path: String,
 }
@@ -199,8 +199,8 @@ pub struct HttpConfig {
     pub http_listen_addr: String,
 
     /// Enable the public HTTP API (e.g., for submitting work orders).
-    #[clap(long, env = "NXCC_HTTP_API_ENABLED")]
-    #[serde(default)]
+    #[clap(long, env = "NXCC_HTTP_API_ENABLED", default_value = "true")]
+    #[serde(default = "default_api_enabled")]
     pub api_enabled: bool,
 
     /// Allowed origins for CORS on the public HTTP API.
@@ -219,10 +219,14 @@ impl Default for HttpConfig {
         Self {
             base_mount_path: default_http_base_mount_path(),
             http_listen_addr: default_http_listen_addr(),
-            api_enabled: false,
+            api_enabled: true,
             api_cors_allowed_origins: default_cors_allowed_origins(),
         }
     }
+}
+
+fn default_api_enabled() -> bool {
+    true
 }
 
 fn default_http_base_mount_path() -> String {
