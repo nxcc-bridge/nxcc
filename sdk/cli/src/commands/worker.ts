@@ -7,6 +7,13 @@ import { LaunchWorkerEvent, WorkOrderPayload, WorkerManifest } from "../utils/ty
 import { createUnsignedDsse, signDsse } from "../utils/crypto";
 
 const DSSE_WORK_ORDER_PAYLOAD_TYPE = "application/vnd.nxcc.workorderpayload.v1+json";
+const DSSE_WORKER_BUNDLE_PAYLOAD_TYPE = "application/vnd.nxcc.workerbundlepayload.v1+json";
+
+interface WorkerBundlePayload {
+  vm: string;
+  executable: string;
+  metadata: Record<string, string>;
+}
 
 async function deploy(
   manifestPath: string,
@@ -30,7 +37,20 @@ async function deploy(
       }
       const bundleAbsPath = path.resolve(manifestDir, bundlePath);
       const bundleContent = await fs.readFile(bundleAbsPath);
-      const bundleB64 = bundleContent.toString("base64");
+
+      const workerBundlePayload: WorkerBundlePayload = {
+        vm: "nxcc/workerd",
+        executable: bundleContent.toString("base64"),
+        metadata: {},
+      };
+      const workerBundlePayloadJson = JSON.stringify(workerBundlePayload);
+
+      const bundleDsseEnvelope = createUnsignedDsse(
+        workerBundlePayloadJson,
+        DSSE_WORKER_BUNDLE_PAYLOAD_TYPE,
+      );
+      const bundleDsseEnvelopeJson = JSON.stringify(bundleDsseEnvelope);
+      const bundleB64 = Buffer.from(bundleDsseEnvelopeJson).toString("base64");
       workerManifest.bundle.source = `data:application/json;base64,${bundleB64}`;
     }
 
@@ -59,18 +79,16 @@ async function deploy(
       body: JSON.stringify(dsseEnvelope),
     });
 
-    const responseData = await response.json();
+    const responseMessage = await response.text();
 
     if (!response.ok) {
       throw new Error(
-        `Failed to deploy worker: ${response.status} ${
-          response.statusText
-        }\n${JSON.stringify(responseData)}`,
+        `Failed to deploy worker: ${response.status} ${response.statusText}\n${responseMessage}`,
       );
     }
 
     console.log("Worker deployed successfully:");
-    console.log(JSON.stringify(responseData, null, 2));
+    console.log(responseMessage);
   } catch (error) {
     console.error("Failed to deploy worker:", error);
     process.exit(1);
@@ -78,14 +96,12 @@ async function deploy(
 }
 
 export function workerSubcommand(program: Command) {
-  const worker = program
-    .command("worker")
-    .description("Interact with a worker")
-    .requiredOption("--rpc-url <url>", "nXCC node HTTP RPC URL", "http://localhost:6922");
+  const worker = program.command("worker").description("Interact with a worker");
 
   worker
     .command("deploy <manifest-path>")
     .description("Deploy a worker to an nXCC node")
+    .requiredOption("--rpc-url <url>", "nXCC node HTTP RPC URL", "http://localhost:6922")
     .option("--bundle", "Bundle the worker code into a data URL")
     .option("--signer <private-key>", "Private key to sign the work order")
     .action(deploy);

@@ -58,9 +58,13 @@ export async function signDsse(
 }
 
 export function createUnsignedDsse(payload: string, payloadType: string): DsseEnvelope {
+  const dummySig: DsseSignatureEntry = {
+    keyid: "bench-key",
+    sig: Buffer.from("benches").toString("base64"),
+  };
   return {
     payload: Buffer.from(payload).toString("base64"),
     payloadType,
-    signatures: [],
+    signatures: [dummySig],
   };
 }
