@@ -149,7 +149,7 @@ async fn test_enclave_workflow() {
         .await
         .unwrap();
     let secrets_box_fail =
-        SecretsBox::from(get_secrets_resp_fail.into_inner().secrets_box.unwrap());
+        SecretsBox::try_from(get_secrets_resp_fail.into_inner().secrets_box.unwrap()).unwrap();
     assert!(
         secrets_box_fail.contained_secret_ids.is_empty(),
         "GetSecrets should return empty box"
@@ -179,7 +179,8 @@ async fn test_enclave_workflow() {
         requester_env_report: Some(getter_env_report.clone().into()), // Getter uses its EnvReport
     });
     let get_secrets_resp_ok = secrets_grpc.get_secrets(get_secrets_req_ok).await.unwrap();
-    let secrets_box_ok = SecretsBox::from(get_secrets_resp_ok.into_inner().secrets_box.unwrap());
+    let secrets_box_ok =
+        SecretsBox::try_from(get_secrets_resp_ok.into_inner().secrets_box.unwrap()).unwrap();
     assert_eq!(secrets_box_ok.contained_secret_ids.len(), 1);
     assert_eq!(secrets_box_ok.contained_secret_ids[0], secret_id);
 
@@ -205,7 +206,7 @@ async fn test_enclave_workflow() {
         .await
         .unwrap();
     let secrets_box_ok_2 =
-        SecretsBox::from(get_secrets_resp_ok_2.into_inner().secrets_box.unwrap());
+        SecretsBox::try_from(get_secrets_resp_ok_2.into_inner().secrets_box.unwrap()).unwrap();
     assert_eq!(secrets_box_ok_2.contained_secret_ids.len(), 1);
     info!("Step 9: Further GetSecret succeeded");
 }

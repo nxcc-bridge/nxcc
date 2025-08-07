@@ -156,7 +156,9 @@ impl WorkOrderOrchestrator {
         );
 
         // 5. Deserialize WorkerBundlePayload (payload() method handles DSSE_WORKER_BUNDLE_PAYLOAD_TYPE check)
-        let actual_bundle_payload = actual_worker_bundle.payload();
+        let actual_bundle_payload = actual_worker_bundle.payload().map_err(|e| {
+            AppError::Validation(format!("Failed to parse worker bundle payload: {}", e))
+        })?;
 
         // 6. Check VM ID
         if actual_bundle_payload.vm != self.config.enclave.default_vm_id {
@@ -176,8 +178,12 @@ impl WorkOrderOrchestrator {
         let daemon_env_report_for_self_auth =
             self.secrets_service.get_own_env_report(vec![]).await?; // TODO: This should be the enclave's report, not daemon's
         let worker_consumer_info_for_self_auth = ConsumerInfo {
-            bundle_hash: actual_worker_bundle.hash_signed_payload(),
-            signature: actual_worker_bundle.get_dsse_signature(),
+            bundle_hash: actual_worker_bundle.hash_signed_payload().map_err(|e| {
+                AppError::Validation(format!("Failed to hash worker bundle payload: {}", e))
+            })?,
+            signature: actual_worker_bundle.get_dsse_signature().map_err(|e| {
+                AppError::Validation(format!("Failed to get worker bundle signature: {}", e))
+            })?,
         };
 
         for (secret_id, _name) in &worker_manifest.identities {
@@ -249,8 +255,12 @@ impl WorkOrderOrchestrator {
                 .as_secs();
             let mut missing_secret_requests = HashMap::new();
             let worker_consumer_info = ConsumerInfo {
-                bundle_hash: actual_worker_bundle.hash_signed_payload(),
-                signature: actual_worker_bundle.get_dsse_signature(),
+                bundle_hash: actual_worker_bundle.hash_signed_payload().map_err(|e| {
+                    AppError::Validation(format!("Failed to hash worker bundle payload: {}", e))
+                })?,
+                signature: actual_worker_bundle.get_dsse_signature().map_err(|e| {
+                    AppError::Validation(format!("Failed to get worker bundle signature: {}", e))
+                })?,
             };
 
             for (id, found, expiry) in statuses {

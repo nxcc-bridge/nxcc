@@ -76,21 +76,22 @@ async fn test_local_worker_secret_authorization_flow() {
         .await
         .expect("Failed to get enclave report")
         .into_inner();
-    let enclave_env_report = EnvReport {
-        attestation: EnvReport::from(nxcc_interface::proto::interface::EnvReport {
-            attestation: Some(enclave_attestation_report_proto),
-            operator_signature: vec![], // Not strictly needed for this part of test
-            node_id: "enclave-self".to_string(),
-        })
-        .attestation,
-        operator_signature: vec![],
-        node_id: "daemon-self".into(),
+    let enclave_env_report = EnvReport::try_from(nxcc_interface::proto::interface::EnvReport {
+        attestation: Some(enclave_attestation_report_proto),
+        operator_signature: vec![], // Not strictly needed for this part of test
+        node_id: "enclave-self".to_string(),
+    })
+    .unwrap();
+    let enclave_env_report_for_policy = EnvReport {
+        attestation: enclave_env_report.attestation,
+        operator_signature: vec![],    // Not used for self-auth
+        node_id: "daemon-self".into(), // The daemon is the one orchestrating
     };
 
     // 3b. Prepare for policy execution
     let worker_consumer_info = ConsumerInfo {
-        bundle_hash: worker_bundle_obj.hash_signed_payload(),
-        signature: worker_bundle_obj.get_dsse_signature(),
+        bundle_hash: worker_bundle_obj.hash_signed_payload().unwrap(),
+        signature: worker_bundle_obj.get_dsse_signature().unwrap(),
     };
 
     // 3c. Execute policy for the secret (using a mock policy worker that approves)
@@ -101,7 +102,7 @@ async fn test_local_worker_secret_authorization_flow() {
         &runner_grpc,
         &mock_vm_client,
         &policy_worker_id_for_self_auth,
-        enclave_env_report, // Enclave's own report
+        enclave_env_report_for_policy, // Enclave's own report
         vec![secret_id_for_worker.clone()],
         true, // Expect policy to succeed for self-auth
         worker_consumer_info.clone(),

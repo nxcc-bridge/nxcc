@@ -12,6 +12,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10.8"
 url = { version = "2.5.4", features = ["serde"] } # Added for WorkerManifest
+thiserror = "1.0"
 tonic = { version = "0.13.1", features = ["transport"] }
 alloy-rpc-types = "1.0.6"
 

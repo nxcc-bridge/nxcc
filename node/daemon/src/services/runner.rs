@@ -115,8 +115,15 @@ impl RunnerService {
         let satisfied = resp
             .satisfied_contexts
             .into_iter()
-            .map(PolicyExecutionRequest::from)
-            .collect();
+            .map(|p| {
+                PolicyExecutionRequest::try_from(p).map_err(|e| {
+                    AppError::Service(format!(
+                        "Invalid policy execution request from enclave: {}",
+                        e
+                    ))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(satisfied)
     }
 

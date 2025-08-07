@@ -75,12 +75,14 @@ impl SecretsServerTrait for SecretsGrpcService {
         for bundle_proto in proto_req.secrets_bundles {
             let secrets_box = bundle_proto
                 .secrets_box
-                .map(SecretsBox::from)
-                .ok_or_else(|| Status::invalid_argument("Missing SecretsBox in bundle"))?;
+                .ok_or_else(|| Status::invalid_argument("Missing SecretsBox in bundle"))?
+                .try_into()
+                .map_err(|e| Status::invalid_argument(format!("Invalid SecretsBox: {}", e)))?;
             let env_report = bundle_proto
                 .env_report
-                .map(EnvReport::from)
-                .ok_or_else(|| Status::invalid_argument("Missing EnvReport in bundle"))?;
+                .ok_or_else(|| Status::invalid_argument("Missing EnvReport in bundle"))?
+                .try_into()
+                .map_err(|e| Status::invalid_argument(format!("Invalid EnvReport: {}", e)))?;
             let consumer_info = bundle_proto
                 .consumer_info
                 .map(ConsumerInfo::from)
@@ -111,14 +113,20 @@ impl SecretsServerTrait for SecretsGrpcService {
         let internal_requests: Vec<(SecretId, ConsumerInfo)> = proto_req
             .requests
             .into_iter()
-            .map(SecretRequest::from) // Convert proto to internal SecretRequest
+            .map(|p| {
+                SecretRequest::try_from(p)
+                    .map_err(|e| Status::invalid_argument(format!("Invalid SecretRequest: {}", e)))
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
             .map(|sr| (sr.secret_id, sr.consumer)) // Extract parts
             .collect();
 
         let requester_env_report = proto_req
             .requester_env_report
-            .map(EnvReport::from)
-            .ok_or_else(|| Status::invalid_argument("Missing requester_env_report"))?;
+            .ok_or_else(|| Status::invalid_argument("Missing requester_env_report"))?
+            .try_into()
+            .map_err(|e| Status::invalid_argument(format!("Invalid EnvReport: {}", e)))?;
 
         match self
             .secrets
@@ -140,7 +148,15 @@ impl SecretsServerTrait for SecretsGrpcService {
     ) -> Result<Response<CheckSecretsResponse>, Status> {
         let proto_req = request.into_inner();
         debug!("gRPC CheckSecrets request for {} IDs", proto_req.ids.len());
-        let ids: Vec<SecretId> = proto_req.ids.into_iter().map(SecretId::from).collect();
+        let ids: Vec<SecretId> = proto_req
+            .ids
+            .into_iter()
+            .map(|p| {
+                SecretId::try_from(p).map_err(|e| {
+                    Status::invalid_argument(format!("Invalid SecretIdentifier: {}", e))
+                })
+            })
+            .collect::<Result<_, _>>()?;
 
         match self.secrets.check_secrets(ids) {
             Ok(statuses) => {
@@ -176,8 +192,13 @@ impl SecretsServerTrait for SecretsGrpcService {
         let internal_requests: Vec<(SecretId, ConsumerInfo)> = proto_req
             .requests
             .into_iter()
-            .map(SecretRequest::from)
-            .map(|sr| (sr.secret_id, sr.consumer))
+            .map(|p| {
+                SecretRequest::try_from(p)
+                    .map_err(|e| Status::invalid_argument(format!("Invalid SecretRequest: {}", e)))
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .map(|sr| (sr.secret_id, sr.consumer)) // Extract parts
             .collect();
         match self.secrets.generate_secrets(internal_requests) {
             Ok(()) => Ok(Response::new(())),
@@ -241,8 +262,9 @@ impl Runner for EnclaveRunnerGrpcService {
         debug!("gRPC AttachVm request for vm_id '{}'", req.vm_id);
         let address = req
             .address
-            .map(VmAddress::from)
-            .ok_or_else(|| Status::invalid_argument("Missing VM address"))?;
+            .ok_or_else(|| Status::invalid_argument("Missing VM address"))?
+            .try_into()
+            .map_err(|e| Status::invalid_argument(format!("Invalid VmAddress: {}", e)))?;
 
         match self.runner.attach_vm(req.vm_id, address).await {
             Ok(attached) => Ok(Response::new(AttachVmResponse { attached })),
@@ -330,8 +352,12 @@ impl Runner for EnclaveRunnerGrpcService {
         let internal_contexts: Vec<PolicyExecutionRequest> = req
             .contexts
             .into_iter()
-            .map(PolicyExecutionRequest::from)
-            .collect();
+            .map(|p| {
+                PolicyExecutionRequest::try_from(p).map_err(|e| {
+                    Status::invalid_argument(format!("Invalid PolicyExecutionRequest: {}", e))
+                })
+            })
+            .collect::<Result<_, _>>()?;
 
         match self
             .runner
@@ -367,7 +393,8 @@ impl Runner for EnclaveRunnerGrpcService {
             let event_payload_proto = proto_event_delivery
                 .event_payload
                 .ok_or_else(|| Status::invalid_argument("EventDelivery missing event_payload"))?;
-            let rust_event_payload = EventPayload::from(event_payload_proto);
+            let rust_event_payload = EventPayload::try_from(event_payload_proto)
+                .map_err(|e| Status::invalid_argument(format!("Invalid EventPayload: {}", e)))?;
             let handler_name = proto_event_delivery.handler_name;
             internal_events.push((worker_id, handler_name, rust_event_payload));
         }

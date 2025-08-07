@@ -278,7 +278,9 @@ impl PolicyManager {
                     payload_type: DSSE_WORKER_BUNDLE_PAYLOAD_TYPE.to_string(),
                     signatures: vec![DsseSignatureEntry {
                         key_id: Some("mock_policy_key_id".to_string()),
-                        sig: base64::encode(b"mock_policy_signature_bytes"),
+                        sig: base64::encode(
+                            b"mock_policy_signature_bytes_longer_than_32_for_base64",
+                        ),
                     }],
                 };
                 serde_json::to_vec(&dsse_envelope).unwrap()
@@ -342,8 +344,10 @@ impl PolicyManager {
 
         let bundle = WorkerBundle(dsse_envelope_bytes);
         // Perform a quick validation that it's a parseable DSSE envelope
-        // and that its payloadType is correct. This will panic on errors.
-        let _ = bundle.payload();
+        // and that its payloadType is correct.
+        bundle
+            .payload()
+            .map_err(|e| AppError::Validation(format!("WorkerBundle payload is invalid: {}", e)))?;
 
         Ok(bundle)
     }

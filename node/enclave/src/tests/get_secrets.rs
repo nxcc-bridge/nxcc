@@ -104,7 +104,8 @@ async fn test_get_secrets_unauthorized_node() {
         requester_env_report: Some(unauthorized_getter_env_report.clone().into()),
     });
     let get_resp_unauth = secrets_grpc.get_secrets(get_req_unauth).await.unwrap();
-    let secrets_box_unauth = SecretsBox::from(get_resp_unauth.into_inner().secrets_box.unwrap());
+    let secrets_box_unauth =
+        SecretsBox::try_from(get_resp_unauth.into_inner().secrets_box.unwrap()).unwrap();
     assert!(
         secrets_box_unauth.contained_secret_ids.is_empty(),
         "Unauthorized GetSecrets should yield empty box"
@@ -120,7 +121,8 @@ async fn test_get_secrets_unauthorized_node() {
         requester_env_report: Some(authorized_getter_env_report.clone().into()),
     });
     let get_resp_auth = secrets_grpc.get_secrets(get_req_auth).await.unwrap();
-    let secrets_box_auth = SecretsBox::from(get_resp_auth.into_inner().secrets_box.unwrap());
+    let secrets_box_auth =
+        SecretsBox::try_from(get_resp_auth.into_inner().secrets_box.unwrap()).unwrap();
     assert_eq!(secrets_box_auth.contained_secret_ids.len(), 1);
     info!("Test OK: Authorized node successfully retrieved secret");
 }

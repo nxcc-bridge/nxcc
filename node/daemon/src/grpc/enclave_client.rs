@@ -115,7 +115,8 @@ impl EnclaveClient {
         let resp = client.get_secrets(req).await.map_err(|e| e.to_string())?;
         let out = resp.into_inner();
         if let Some(box_proto) = out.secrets_box {
-            Ok(SecretsBox::from(box_proto))
+            Ok(SecretsBox::try_from(box_proto)
+                .map_err(|e| format!("Invalid SecretsBox from enclave: {}", e))?)
         } else {
             Err("Enclave returned no SecretsBox".to_string())
         }
@@ -136,7 +137,8 @@ impl EnclaveClient {
         let mut out = Vec::new();
         for st in statuses {
             if let Some(proto_id) = st.id {
-                let sid = SecretId::from(proto_id);
+                let sid = SecretId::try_from(proto_id)
+                    .map_err(|e| format!("Invalid SecretIdentifier from enclave: {}", e))?;
                 out.push((sid, st.found, st.expiry));
             }
         }
@@ -249,8 +251,11 @@ impl EnclaveClient {
         let satisfied = resp
             .satisfied_contexts
             .into_iter()
-            .map(nxcc_interface::types::PolicyExecutionRequest::from)
-            .collect();
+            .map(|p| {
+                nxcc_interface::types::PolicyExecutionRequest::try_from(p)
+                    .map_err(|e| format!("Invalid PolicyExecutionRequest from enclave: {}", e))
+            })
+            .collect::<Result<_, _>>()?;
         Ok(satisfied)
     }
 

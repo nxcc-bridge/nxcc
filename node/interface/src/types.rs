@@ -4,8 +4,29 @@ use alloy_primitives::{Address, B256, U256};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use thiserror::Error;
 
 use crate::proto::{enclave, interface};
+
+#[derive(Debug, Error)]
+pub enum ConversionError {
+    #[error("Missing field in protobuf message: {0}")]
+    MissingField(String),
+    #[error("Invalid value for field {field}: {message}")]
+    InvalidValue { field: String, message: String },
+    #[error("JSON deserialization error: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("Base64 decoding error: {0}")]
+    Base64(#[from] base64::DecodeError),
+    #[error("Invalid DSSE payload type: expected {expected}, got {got}")]
+    InvalidDssePayloadType { expected: String, got: String },
+    #[error("Invalid byte slice length for {name}: expected {expected}, got {got}")]
+    InvalidSliceLength {
+        name: String,
+        expected: usize,
+        got: usize,
+    },
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttestationReport {
@@ -56,13 +77,24 @@ pub struct SecretId {
     pub identity_id: U256,
 }
 
-impl From<interface::SecretIdentifier> for SecretId {
-    fn from(p: interface::SecretIdentifier) -> Self {
-        Self {
+impl TryFrom<interface::SecretIdentifier> for SecretId {
+    type Error = ConversionError;
+    fn try_from(p: interface::SecretIdentifier) -> Result<Self, Self::Error> {
+        Ok(Self {
             chain_id: p.chain_id,
-            identity_address: p.identity_address.parse().unwrap_or(Address::ZERO), // Handle parse error gracefully (identity contract cannot be deployed to the zero address)
-            identity_id: p.identity_id.parse().unwrap_or(U256::ZERO), // Handle parse error (the zero identity is unassignable)
-        }
+            identity_address: p.identity_address.parse().map_err(
+                |e: alloy_primitives::hex::FromHexError| ConversionError::InvalidValue {
+                    field: "identity_address".to_string(),
+                    message: e.to_string(),
+                },
+            )?,
+            identity_id: p.identity_id.parse().map_err(
+                |e: alloy_primitives::ruint::ParseError| ConversionError::InvalidValue {
+                    field: "identity_id".to_string(),
+                    message: e.to_string(),
+                },
+            )?,
+        })
     }
 }
 
@@ -125,18 +157,19 @@ pub struct SecretRequest {
     pub consumer: ConsumerInfo,
 }
 
-impl From<interface::SecretRequest> for SecretRequest {
-    fn from(p: interface::SecretRequest) -> Self {
-        Self {
+impl TryFrom<interface::SecretRequest> for SecretRequest {
+    type Error = ConversionError;
+    fn try_from(p: interface::SecretRequest) -> Result<Self, Self::Error> {
+        Ok(Self {
             secret_id: p
                 .secret_id
-                .map(SecretId::from)
-                .unwrap_or_else(|| SecretId::from(interface::SecretIdentifier::default())),
+                .ok_or(ConversionError::MissingField("secret_id".to_string()))?
+                .try_into()?,
             consumer: p
                 .consumer
                 .map(ConsumerInfo::from)
-                .unwrap_or_else(|| ConsumerInfo::from(interface::ConsumerInfo::default())),
-        }
+                .ok_or(ConversionError::MissingField("consumer".to_string()))?,
+        })
     }
 }
 
@@ -156,18 +189,17 @@ pub struct EnvReport {
     pub node_id: String,
 }
 
-impl From<interface::EnvReport> for EnvReport {
-    fn from(p: interface::EnvReport) -> Self {
-        Self {
+impl TryFrom<interface::EnvReport> for EnvReport {
+    type Error = ConversionError;
+    fn try_from(p: interface::EnvReport) -> Result<Self, Self::Error> {
+        Ok(Self {
             attestation: p
                 .attestation
                 .map(AttestationReport::from)
-                .unwrap_or_else(
-                    || AttestationReport::from(interface::AttestationReport::default()),
-                ),
+                .ok_or(ConversionError::MissingField("attestation".to_string()))?,
             operator_signature: p.operator_signature,
             node_id: p.node_id,
-        }
+        })
     }
 }
 
@@ -225,18 +257,19 @@ impl SecretsBox {
     }
 }
 
-impl From<interface::SecretsBox> for SecretsBox {
-    fn from(p: interface::SecretsBox) -> Self {
-        Self {
+impl TryFrom<interface::SecretsBox> for SecretsBox {
+    type Error = ConversionError;
+    fn try_from(p: interface::SecretsBox) -> Result<Self, Self::Error> {
+        Ok(Self {
             encrypted_payload: p.encrypted_payload,
             sender_public_key: p.sender_public_key,
             alg: p.alg,
             contained_secret_ids: p
                 .contained_secret_ids
                 .into_iter()
-                .map(SecretId::from)
-                .collect(),
-        }
+                .map(SecretId::try_from)
+                .collect::<Result<Vec<_>, _>>()?,
+        })
     }
 }
 
@@ -279,19 +312,24 @@ pub struct PolicyExecutionRequest {
     pub env_report: EnvReport, // The EnvReport of the entity being evaluated
 }
 
-impl From<interface::PolicyExecutionRequest> for PolicyExecutionRequest {
-    fn from(p: interface::PolicyExecutionRequest) -> Self {
-        Self {
-            secret_ids: p.secret_ids.into_iter().map(SecretId::from).collect(),
+impl TryFrom<interface::PolicyExecutionRequest> for PolicyExecutionRequest {
+    type Error = ConversionError;
+    fn try_from(p: interface::PolicyExecutionRequest) -> Result<Self, Self::Error> {
+        Ok(Self {
+            secret_ids: p
+                .secret_ids
+                .into_iter()
+                .map(SecretId::try_from)
+                .collect::<Result<Vec<_>, _>>()?,
             consumer: p
                 .consumer
                 .map(ConsumerInfo::from)
-                .unwrap_or_else(|| ConsumerInfo::from(interface::ConsumerInfo::default())),
+                .ok_or(ConversionError::MissingField("consumer".to_string()))?,
             env_report: p
                 .env_report
-                .map(EnvReport::from)
-                .unwrap_or_else(|| EnvReport::from(interface::EnvReport::default())),
-        }
+                .ok_or(ConversionError::MissingField("env_report".to_string()))?
+                .try_into()?,
+        })
     }
 }
 
@@ -422,19 +460,20 @@ pub enum VmAddress {
     Vsock(VsockAddress),
 }
 
-impl From<enclave::VmAddress> for VmAddress {
-    fn from(p: enclave::VmAddress) -> Self {
+impl TryFrom<enclave::VmAddress> for VmAddress {
+    type Error = ConversionError;
+    fn try_from(p: enclave::VmAddress) -> Result<Self, Self::Error> {
         match p.address_type {
             Some(enclave::vm_address::AddressType::Tcp(tcp)) => {
-                VmAddress::Tcp(TcpAddress::from(tcp))
+                Ok(VmAddress::Tcp(TcpAddress::from(tcp)))
             }
             Some(enclave::vm_address::AddressType::Uds(uds)) => {
-                VmAddress::Uds(UdsAddress::from(uds))
+                Ok(VmAddress::Uds(UdsAddress::from(uds)))
             }
             Some(enclave::vm_address::AddressType::Vsock(vsock)) => {
-                VmAddress::Vsock(VsockAddress::from(vsock))
+                Ok(VmAddress::Vsock(VsockAddress::from(vsock)))
             }
-            None => panic!("VmAddress proto is missing address_type"), // Or return an error
+            None => Err(ConversionError::MissingField("address_type".to_string())),
         }
     }
 }
@@ -534,51 +573,46 @@ pub const DSSE_WORK_ORDER_PAYLOAD_TYPE: &str = "application/vnd.nxcc.workorderpa
 
 impl WorkerBundle {
     /// Parses the DSSE envelope from the raw bytes of the WorkerBundle.
-    fn dsse_envelope(&self) -> Result<DsseEnvelope, serde_json::Error> {
-        serde_json::from_slice(&self.0)
+    fn dsse_envelope(&self) -> Result<DsseEnvelope, ConversionError> {
+        serde_json::from_slice(&self.0).map_err(Into::into)
     }
 
     /// Retrieves the `WorkerBundlePayload` from the DSSE envelope.
-    pub fn payload(&self) -> WorkerBundlePayload {
-        let envelope = self
-            .dsse_envelope()
-            .expect("Failed to parse DSSE envelope from WorkerBundle bytes");
+    pub fn payload(&self) -> Result<WorkerBundlePayload, ConversionError> {
+        let envelope = self.dsse_envelope()?;
         if envelope.payload_type != DSSE_WORKER_BUNDLE_PAYLOAD_TYPE {
-            panic!(
-                "Unexpected DSSE payloadType: expected {}, got {}",
-                DSSE_WORKER_BUNDLE_PAYLOAD_TYPE, envelope.payload_type
-            );
+            return Err(ConversionError::InvalidDssePayloadType {
+                expected: DSSE_WORKER_BUNDLE_PAYLOAD_TYPE.to_string(),
+                got: envelope.payload_type,
+            });
         }
-        let payload_bytes = BASE64_STANDARD
-            .decode(&envelope.payload)
-            .expect("Failed to base64 decode DSSE payload");
-        serde_json::from_slice(&payload_bytes[..])
-            .expect("Failed to decode WorkerBundlePayload from DSSE payload")
+        let payload_bytes = BASE64_STANDARD.decode(&envelope.payload)?;
+        serde_json::from_slice(&payload_bytes[..]).map_err(Into::into)
     }
 
     /// Calculates the SHA512 hash of the encoded `WorkerBundlePayload`.
     /// This hash is used for `ConsumerInfo.bundle_hash`.
     // TODO: remove this in favor of having the enclave verify the signer or having the hash of the executable be part of the signed data or something. right now it's totally broken, as the consumer cannot be verified with all of the arbitrary metadata in it
-    pub fn hash_signed_payload(&self) -> Vec<u8> {
+    pub fn hash_signed_payload(&self) -> Result<Vec<u8>, ConversionError> {
         use sha2::{Digest, Sha512};
-        let payload_struct = self.payload();
-        let payload_bytes = serde_json::to_vec(&payload_struct)
-            .expect("Failed to encode WorkerBundlePayload for hashing");
-        Sha512::digest(payload_bytes).to_vec()
+        let payload_struct = self.payload()?;
+        let payload_bytes = serde_json::to_vec(&payload_struct)?;
+        Ok(Sha512::digest(payload_bytes).to_vec())
     }
 
     /// Extracts the first signature from the DSSE envelope.
-    pub fn get_dsse_signature(&self) -> Vec<u8> {
-        let envelope = self
-            .dsse_envelope()
-            .expect("Failed to parse DSSE envelope for signature extraction");
+    pub fn get_dsse_signature(&self) -> Result<Vec<u8>, ConversionError> {
+        let envelope = self.dsse_envelope()?;
         if envelope.signatures.is_empty() {
-            panic!("DSSE envelope has no signatures");
+            return Err(ConversionError::InvalidValue {
+                field: "signatures".to_string(),
+                message: "DSSE envelope has no signatures".to_string(),
+            });
         }
         // Return the raw bytes of the first signature
         BASE64_STANDARD
             .decode(&envelope.signatures[0].sig)
-            .expect("Failed to base64 decode DSSE signature")
+            .map_err(Into::into)
     }
 }
 
@@ -666,15 +700,21 @@ pub struct Web3Event {
     pub topics: Vec<Vec<B256>>,
 }
 
-impl From<interface::Web3EventConfig> for Web3Event {
-    fn from(p: interface::Web3EventConfig) -> Self {
-        Self {
+impl TryFrom<interface::Web3EventConfig> for Web3Event {
+    type Error = ConversionError;
+    fn try_from(p: interface::Web3EventConfig) -> Result<Self, Self::Error> {
+        Ok(Self {
             chain: p.chain_id,
             address: p
                 .address
                 .into_iter()
-                .map(|s| s.parse().unwrap_or_default())
-                .collect(),
+                .map(|s| {
+                    s.parse().map_err(|e| ConversionError::InvalidValue {
+                        field: "address".to_string(),
+                        message: format!("failed to parse address '{}': {}", s, e),
+                    })
+                })
+                .collect::<Result<_, _>>()?,
             topics: p
                 .topics
                 .into_iter()
@@ -682,11 +722,16 @@ impl From<interface::Web3EventConfig> for Web3Event {
                     topic_filter
                         .values
                         .into_iter()
-                        .map(|s| s.parse().unwrap_or_default())
+                        .map(|s| {
+                            s.parse().map_err(|e| ConversionError::InvalidValue {
+                                field: "topics".to_string(),
+                                message: format!("failed to parse topic '{}': {}", s, e),
+                            })
+                        })
                         .collect()
                 })
-                .collect(),
-        }
+                .collect::<Result<_, _>>()?,
+        })
     }
 }
 
@@ -754,31 +799,59 @@ impl From<Web3Log> for interface::Web3Log {
     }
 }
 
-impl From<interface::Web3Log> for Web3Log {
-    fn from(p_log: interface::Web3Log) -> Self {
-        Self {
-            address: Address::from_slice(&p_log.address),
-            topics: p_log
-                .topics
-                .into_iter()
-                .map(|b| B256::from_slice(&b))
-                .collect(),
+impl TryFrom<interface::Web3Log> for Web3Log {
+    type Error = ConversionError;
+    fn try_from(p_log: interface::Web3Log) -> Result<Self, Self::Error> {
+        let address = Address::try_from(p_log.address.as_slice()).map_err(|e| {
+            ConversionError::InvalidValue {
+                field: "address".to_string(),
+                message: e.to_string(),
+            }
+        })?;
+        let topics = p_log
+            .topics
+            .into_iter()
+            .map(|b| {
+                B256::try_from(b.as_slice()).map_err(|e| ConversionError::InvalidValue {
+                    field: "topics".to_string(),
+                    message: e.to_string(),
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let block_hash = if p_log.block_hash.is_empty() {
+            None
+        } else {
+            Some(B256::try_from(p_log.block_hash.as_slice()).map_err(|e| {
+                ConversionError::InvalidValue {
+                    field: "block_hash".to_string(),
+                    message: e.to_string(),
+                }
+            })?)
+        };
+        let transaction_hash = if p_log.transaction_hash.is_empty() {
+            None
+        } else {
+            Some(
+                B256::try_from(p_log.transaction_hash.as_slice()).map_err(|e| {
+                    ConversionError::InvalidValue {
+                        field: "transaction_hash".to_string(),
+                        message: e.to_string(),
+                    }
+                })?,
+            )
+        };
+
+        Ok(Self {
+            address,
+            topics,
             data: p_log.data.into(),
-            block_hash: if p_log.block_hash.is_empty() {
-                None
-            } else {
-                Some(B256::from_slice(&p_log.block_hash))
-            },
+            block_hash,
             block_number: if p_log.block_number == 0 && p_log.block_hash.is_empty() {
                 None
             } else {
                 Some(p_log.block_number)
-            }, // Heuristic for optional
-            transaction_hash: if p_log.transaction_hash.is_empty() {
-                None
-            } else {
-                Some(B256::from_slice(&p_log.transaction_hash))
             },
+            transaction_hash,
             transaction_index: if p_log.transaction_index == 0 && p_log.transaction_hash.is_empty()
             {
                 None
@@ -789,9 +862,9 @@ impl From<interface::Web3Log> for Web3Log {
                 None
             } else {
                 Some(p_log.log_index)
-            }, // Heuristic for optional
+            },
             removed: p_log.removed,
-        }
+        })
     }
 }
 
@@ -805,15 +878,18 @@ pub enum EventPayload<'a> {
     _Phantom(std::marker::PhantomData<&'a ()>), // Future event types
 }
 
-impl From<interface::EventPayload> for EventPayload<'_> {
-    fn from(p_payload: interface::EventPayload) -> Self {
+impl TryFrom<interface::EventPayload> for EventPayload<'_> {
+    type Error = ConversionError;
+    fn try_from(p_payload: interface::EventPayload) -> Result<Self, Self::Error> {
         match p_payload.payload {
             Some(interface::event_payload::Payload::Web3Log(log)) => {
-                EventPayload::Web3Log(Web3Log::from(log))
+                Ok(EventPayload::Web3Log(Web3Log::try_from(log)?))
             }
-            Some(interface::event_payload::Payload::LaunchEvent(_)) => EventPayload::Launch,
-            Some(interface::event_payload::Payload::HttpRequest(_)) => EventPayload::HttpRequest,
-            None => panic!("EventPayload proto is empty"), // Or handle as error
+            Some(interface::event_payload::Payload::LaunchEvent(_)) => Ok(EventPayload::Launch),
+            Some(interface::event_payload::Payload::HttpRequest(_)) => {
+                Ok(EventPayload::HttpRequest)
+            }
+            None => Err(ConversionError::MissingField("payload".to_string())),
         }
     }
 }

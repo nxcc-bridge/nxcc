@@ -143,7 +143,7 @@ async fn test_generate_secrets_workflow() {
         requester_env_report: Some(getter_env_report.clone().into()),
     });
     let get_resp = secrets_grpc.get_secrets(get_req).await.unwrap();
-    let secrets_box_get = SecretsBox::from(get_resp.into_inner().secrets_box.unwrap());
+    let secrets_box_get = SecretsBox::try_from(get_resp.into_inner().secrets_box.unwrap()).unwrap();
     assert_eq!(secrets_box_get.contained_secret_ids.len(), 1);
     assert_eq!(secrets_box_get.contained_secret_ids[0], secret_id_gen);
 

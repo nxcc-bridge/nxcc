@@ -372,18 +372,25 @@ impl RunnerService {
         worker_manifest: WorkerManifest,
         worker_bundle: WorkerBundle,
     ) -> Result<String, RunnerError> {
+        let payload = worker_bundle
+            .payload()
+            .map_err(|e| RunnerError::Deserialization(e.to_string()))?;
         info!(
             "Requesting to run worker in VM '{}' (manifest user_data: {:?}, bundle payload size: \
              {})",
             vm_id,
             worker_manifest.userdata,
-            worker_bundle.payload().executable.len()
+            payload.executable.len()
         );
 
         let mut worker_secrets_for_vm = HashMap::new();
         if !worker_manifest.identities.is_empty() {
-            let bundle_payload_hash = worker_bundle.hash_signed_payload();
-            let dsse_signature = worker_bundle.get_dsse_signature();
+            let bundle_payload_hash = worker_bundle
+                .hash_signed_payload()
+                .map_err(|e| RunnerError::Deserialization(e.to_string()))?;
+            let dsse_signature = worker_bundle
+                .get_dsse_signature()
+                .map_err(|e| RunnerError::Deserialization(e.to_string()))?;
 
             let worker_consumer_info = ConsumerInfo {
                 bundle_hash: bundle_payload_hash,
@@ -429,7 +436,7 @@ impl RunnerService {
         match client
             .start_worker(
                 worker_type_id, // This is the 'type' id for the VM
-                worker_bundle.payload().executable,
+                payload.executable,
                 untrusted_config,
                 trusted_config,
             )
