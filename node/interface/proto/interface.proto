@@ -65,6 +65,9 @@ message Web3EventConfig {
   // List of topic filters. Up to 4. Order matters.
   // If fewer than 4 are provided, subsequent topic positions are wildcards.
   repeated ProtoTopicFilter topics = 3;
+  // Explicit gateways (WebSocket RPC URLs) to connect to for this event.
+  // If empty, the daemon will use a default gateway based on chain_id.
+  repeated string gateways = 4;
 }
 
 message ProtoTopicFilter {

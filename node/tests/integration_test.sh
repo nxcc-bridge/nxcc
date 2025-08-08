@@ -52,6 +52,8 @@ ANVIL_RPC_URL_1="http://127.0.0.1:8545"
 ANVIL_CHAIN_ID_1=31337
 ANVIL_RPC_URL_2="http://127.0.0.1:8546"
 ANVIL_CHAIN_ID_2=1338
+ANVIL_WS_URL_1="ws://127.0.0.1:8545"
+ANVIL_WS_URL_2="ws://127.0.0.1:8546"
 DEPLOYER_PK="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"      # Anvil default[0]
 WORKER_SENDER_PK="0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d" # Anvil default[1]
 
@@ -257,17 +259,14 @@ echo "--- Starting Original Secret Sharing Test Workflow ---"
 echo "Step 1: Alice receives work order (triggers secret generation)..."
 grpcurl_submit_work_order "$alice_DAEMON_SOCK" "$GRPCURL_SUBMIT_ORIG_WO_PAYLOAD_FILE"
 
-# Alice's daemon log for the VM output
-ALICE_VM_LOG="$alice_DIR/vm.log"
-
 # Wait for Alice's worker to execute and log output
 echo "Waiting for Alice's worker to log derived bits..."
 ALICE_DERIVED_BITS=""
 for i in $( # Poll for up to 5 seconds
 	seq 1 5
 ); do
-	if [ -f "$ALICE_VM_LOG" ]; then
-		ALICE_DERIVED_BITS=$(grep "DERIVED_BASE64:" "$ALICE_VM_LOG" |
+	if [ -f "$alice_VM_LOG" ]; then
+		ALICE_DERIVED_BITS=$(grep "DERIVED_BASE64:" "$alice_VM_LOG" |
 			tail -n 1 |
 			sed -E 's/.*DERIVED_BASE64: ([A-Za-z0-9+/=]*).*/\1/')
 	fi
@@ -280,7 +279,7 @@ done
 
 if [ -z "$ALICE_DERIVED_BITS" ]; then
 	echo "ERROR: Alice's worker did not log derived bits."
-	cat "$ALICE_VM_LOG" # Print log for debugging
+	cat "$alice_VM_LOG" # Print log for debugging
 	exit 1
 fi
 
@@ -288,17 +287,14 @@ fi
 echo "Step 2: Bob receives the same work order (triggers P2P secret request to Alice)..."
 grpcurl_submit_work_order "$bob_DAEMON_SOCK" "$GRPCURL_SUBMIT_ORIG_WO_PAYLOAD_FILE"
 
-# Bob's daemon log for the VM output
-BOB_VM_LOG="$bob_DIR/vm.log"
-
 # Wait for Bob's worker to execute and log output
 echo "Waiting for Bob's worker to log derived bits..."
 BOB_DERIVED_BITS=""
 for i in $( # Poll for up to 20 seconds (longer for P2P)
 	seq 1 20
 ); do
-	if [ -f "$BOB_VM_LOG" ]; then
-		BOB_DERIVED_BITS=$(grep "DERIVED_BASE64:" "$BOB_VM_LOG" |
+	if [ -f "$bob_VM_LOG" ]; then
+		BOB_DERIVED_BITS=$(grep "DERIVED_BASE64:" "$bob_VM_LOG" |
 			tail -n 1 |
 			sed -E 's/.*DERIVED_BASE64: ([A-Za-z0-9+/=]*).*/\1/')
 	fi
@@ -311,7 +307,7 @@ done
 
 if [ -z "$BOB_DERIVED_BITS" ]; then
 	echo "ERROR: Bob's worker did not log derived bits."
-	cat "$BOB_VM_LOG" # Print log for debugging
+	cat "$bob_VM_LOG" # Print log for debugging
 	exit 1
 fi
 
@@ -421,6 +417,8 @@ jq -n \
 	--argjson chain_id_2 "$ANVIL_CHAIN_ID_2" \
 	--arg contract_address_2 "$CONTRACT_ADDRESS_2" \
 	--arg other_event_sig "$OTHER_EVENT_SIGNATURE" \
+ 	--arg anvil_ws_url_1 "$ANVIL_WS_URL_1" \
+ 	--arg anvil_ws_url_2 "$ANVIL_WS_URL_2" \
 	'{
  id: $id,
  worker: $worker_manifest[0],
@@ -431,14 +429,16 @@ jq -n \
                 "kind": "web3_event",
                 "chain": $chain_id_1,
                 "address": [$contract_address_1],
-                "topics": [[$value_changed_sig]]
+                "topics": [[$value_changed_sig]],
+                "gateways": [$anvil_ws_url_1]
             },
             {
                 "handler": "otherEvent",
                 "kind": "web3_event",
                 "chain": $chain_id_2,
                 "address": [$contract_address_2],
-                "topics": [[$other_event_sig]]
+                "topics": [[$other_event_sig]],
+                "gateways": [$anvil_ws_url_2]
             }
         ]
     }' >"$EVENT_WORK_ORDER_PAYLOAD_FILE"

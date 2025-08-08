@@ -154,6 +154,7 @@ pub fn create_cross_chain_work_order(
             chain: 31337,
             address: vec![*contract_address],
             topics: vec![vec![TestEvents::ValueChanged::SIGNATURE_HASH]],
+            gateways: vec![chain1_url.replace("http", "ws")],
         }),
     };
 
@@ -177,6 +178,7 @@ pub fn create_event_counter_work_order(
             chain: 31337,
             address: vec![*contract_address],
             topics: vec![vec![TestEvents::ValueChanged::SIGNATURE_HASH]],
+            gateways: vec![chain_url.replace("http", "ws")],
         }),
     };
 

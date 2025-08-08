@@ -4,7 +4,6 @@ use alloy_primitives::{Address, U256};
 use alloy_provider::{DynProvider, Provider, ProviderBuilder};
 use alloy_sol_types::sol;
 use alloy_transport_http::Http;
-use reqwest::Client;
 use tokio::sync::RwLock;
 use tracing::debug;
 use url::Url;
@@ -12,66 +11,118 @@ use url::Url;
 use crate::error::AppError;
 
 sol!(
-    #[sol(rpc)] // Add rpc attribute for contract calls
+    #[sol(rpc)]
     Identity,
-    "src/web3/Identity.json"
+    "src/web3/Identity.json",
 );
+
+/// Abstraction over one or more gateways for a chain.
+/// Currently it connects to all provided URLs and uses the first provider,
+/// but the structure allows future consensus or redundancy strategies.
+#[derive(Debug, Clone)]
+pub struct EventGateway {
+    urls: Vec<String>,
+    providers: Arc<RwLock<Vec<DynProvider>>>,
+}
+
+impl EventGateway {
+    pub fn new(urls: Vec<String>) -> Self {
+        Self {
+            urls,
+            providers: Arc::new(RwLock::new(Vec::new())),
+        }
+    }
+
+    pub fn urls(&self) -> &[String] {
+        &self.urls
+    }
+
+    pub async fn provider(&self) -> Result<DynProvider, AppError> {
+        {
+            let providers = self.providers.read().await;
+            if let Some(p) = providers.first() {
+                return Ok(p.clone());
+            }
+        }
+
+        let mut providers = self.providers.write().await;
+        if providers.is_empty() {
+            for rpc_url in &self.urls {
+                let url = rpc_url.parse::<Url>().map_err(|e| {
+                    AppError::Service(format!("Invalid RPC URL {}: {}", rpc_url, e))
+                })?;
+                let provider = ProviderBuilder::new()
+                    .on_ws(alloy_provider::WsConnect::new(url))
+                    .await
+                    .map_err(|_| {
+                        AppError::Service(format!("Failed to connect provider to {rpc_url}"))
+                    })?;
+                providers.push(provider.erased());
+            }
+        }
+
+        providers
+            .first()
+            .cloned()
+            .ok_or_else(|| AppError::Service("No gateways available".to_string()))
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct GatewayManager {
-    providers: Arc<RwLock<HashMap<u64, DynProvider>>>,
+    gateways: Arc<RwLock<HashMap<u64, Arc<EventGateway>>>>,
 }
 
 impl GatewayManager {
     pub fn new() -> Self {
         Self {
-            providers: Arc::new(RwLock::new(HashMap::new())),
+            gateways: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
-    pub async fn get_provider(&self, chain_id: u64) -> Result<DynProvider, AppError> {
-        let providers = self.providers.read().await;
-
-        if let Some(provider) = providers.get(&chain_id) {
-            return Ok(provider.clone());
+    pub async fn get_gateway(&self, chain_id: u64) -> Result<Arc<EventGateway>, AppError> {
+        {
+            let gateways = self.gateways.read().await;
+            if let Some(g) = gateways.get(&chain_id) {
+                return Ok(g.clone());
+            }
         }
 
-        drop(providers); // Release read lock before acquiring write lock
-
-        let mut providers = self.providers.write().await;
-
-        // Check again in case another thread added it while we were waiting
-        if let Some(provider) = providers.get(&chain_id) {
-            return Ok(provider.clone());
+        let mut gateways = self.gateways.write().await;
+        if let Some(g) = gateways.get(&chain_id) {
+            return Ok(g.clone());
         }
 
-        // Create a new provider based on chain_id
         let rpc_url = self.get_rpc_url_for_chain(chain_id)?;
-        let url = rpc_url
-            .parse::<Url>()
-            .map_err(|e| AppError::Service(format!("Invalid RPC URL {}: {}", rpc_url, e)))?;
-        let provider = ProviderBuilder::new()
-            .on_ws(alloy_provider::WsConnect::new(url))
-            .await
-            .map_err(|e| AppError::Service(format!("Failed to connect provider to {rpc_url}")))?;
+        let gateway = Arc::new(EventGateway::new(vec![rpc_url]));
+        gateways.insert(chain_id, gateway.clone());
+        Ok(gateway)
+    }
 
-        providers.insert(chain_id, provider.clone().erased());
-        Ok(provider.erased())
+    /// Returns a gateway for a specific event. If `urls` is empty, the default
+    /// gateway for `chain_id` is used. Otherwise a new gateway with the provided
+    /// URLs is created.
+    pub async fn gateways_for_event(
+        &self,
+        chain_id: u64,
+        urls: &[String],
+    ) -> Result<Arc<EventGateway>, AppError> {
+        if urls.is_empty() {
+            self.get_gateway(chain_id).await
+        } else {
+            Ok(Arc::new(EventGateway::new(urls.to_vec())))
+        }
     }
 
     fn get_rpc_url_for_chain(&self, chain_id: u64) -> Result<String, AppError> {
-        // In a real implementation, this would come from configuration
-        // For now, we'll use hardcoded values for common chains
         match chain_id {
             0 => Ok("mock://gateway.example.com".to_string()),
             1 => Ok("wss://eth.llamarpc.com".to_string()),
             5 => Ok("wss://rpc.ankr.com/eth_goerli".to_string()),
-            1337 | 31337 => Ok("ws://anvil:8545".to_string()), // Ganache/Anvil default
-            1338 => Ok("ws://127.0.0.1:8546".to_string()), // For integration test's second anvil
+            1337 | 31337 => Ok("ws://127.0.0.1:8545".to_string()), // Ganache/Anvil default
             43113 => Ok("wss://avalanche-fuji.drpc.org".to_string()),
             43114 => Ok("wss://0xrpc.io/avax".to_string()),
             11155111 => Ok("wss://rpc.sepolia.org".to_string()),
-            // Add more chains as needed
             _ => Err(AppError::Service(format!(
                 "No RPC URL configured for chain ID {}",
                 chain_id
@@ -87,7 +138,6 @@ impl GatewayManager {
     ) -> Result<String, AppError> {
         let rpc_url = self.get_rpc_url_for_chain(chain_id)?;
         if rpc_url.starts_with("mock://") {
-            // Return a dummy URL rather than calling the contract
             debug!("Using mock policy URL for chain_id={chain_id}");
             return Ok("mock://policy.example.com".to_string());
         }
@@ -97,7 +147,7 @@ impl GatewayManager {
             .map_err(|e| AppError::Service(format!("Invalid RPC URL {}: {}", rpc_url, e)))?;
         let provider = ProviderBuilder::new().on_http(url);
 
-        let identity_contract = Identity::new(identity_address, provider.clone()); // Provider is likely Arc-wrapped internally
+        let identity_contract = Identity::new(identity_address, provider.clone());
         let policy_url: String = identity_contract
             .tokenURI(identity_id)
             .call()
@@ -109,5 +159,28 @@ impl GatewayManager {
              {policy_url}"
         );
         Ok(policy_url)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn default_gateway_urls() {
+        let manager = GatewayManager::new();
+        let gw = manager.get_gateway(31337).await.unwrap();
+        assert_eq!(gw.urls(), &["ws://127.0.0.1:8545".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn custom_gateways_override() {
+        let manager = GatewayManager::new();
+        let urls = vec![
+            "ws://example.com".to_string(),
+            "ws://backup.example.com".to_string(),
+        ];
+        let gw = manager.gateways_for_event(31337, &urls).await.unwrap();
+        assert_eq!(gw.urls(), urls);
     }
 }

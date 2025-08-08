@@ -28,8 +28,6 @@ pub fn web3_event_config_to_alloy_filter(config: &Web3EventConfig) -> Filter {
                 topics_array[i] = FilterSet::from_iter(topic_values.clone());
             }
         } else {
-            // This warning will lack work_order_id, but it's better than nothing.
-            // The caller can log the full config for better context if needed.
             warn!("Web3EventConfig has more than 4 topic groups, ignoring extras.");
             break;
         }
@@ -53,9 +51,7 @@ pub async fn start_web3_event_listener(
 ) {
     info!(
         "Starting Web3 event listener for work_order_id: {}, enclave_worker_id: {}, config: {:?}",
-        work_order_id,
-        enclave_worker_id,
-        config // Use enclave_worker_id for logging
+        work_order_id, enclave_worker_id, config
     );
 
     let filter = web3_event_config_to_alloy_filter(&config);
@@ -64,8 +60,22 @@ pub async fn start_web3_event_listener(
         work_order_id, filter
     );
 
+    let gateway = match gateway_manager
+        .gateways_for_event(config.chain, &config.gateways)
+        .await
+    {
+        Ok(g) => g,
+        Err(e) => {
+            error!(
+                "Failed to resolve gateways for work_order_id: {}, chain_id {}: {}",
+                work_order_id, config.chain, e
+            );
+            return;
+        }
+    };
+
     loop {
-        let provider = match gateway_manager.get_provider(config.chain).await {
+        let provider = match gateway.provider().await {
             Ok(p) => p,
             Err(e) => {
                 error!(
@@ -73,7 +83,14 @@ pub async fn start_web3_event_listener(
                      after delay.",
                     work_order_id, config.chain, e
                 );
-                tokio::select! { biased; _ = tokio::time::sleep(RECONNECT_DELAY) => continue, Ok(()) = shutdown_rx.recv() => { info!("Shutdown (work_order_id: {}). Terminating.", work_order_id); break; } }
+                tokio::select! {
+                    biased;
+                    _ = tokio::time::sleep(RECONNECT_DELAY) => continue,
+                    Ok(()) = shutdown_rx.recv() => {
+                        info!("Shutdown (work_order_id: {}). Terminating.", work_order_id);
+                        break;
+                    }
+                }
             }
         };
 
@@ -110,8 +127,6 @@ pub async fn start_web3_event_listener(
                                     };
                                     if let Err(e) = daemon_event_tx.send(event_delivery).await {
                                         error!("Failed to send Web3 event to daemon queue for work_order_id {}: {}", work_order_id, e);
-                                        // If sending to queue fails, this listener might be orphaned or the daemon is shutting down.
-                                        // Consider breaking the loop or specific error handling.
                                     }
                                 }
                                 None => {
@@ -128,15 +143,28 @@ pub async fn start_web3_event_listener(
                     "Failed to subscribe to logs for work_order_id: {}: {}. Retrying after delay.",
                     work_order_id, e
                 );
-                tokio::select! { biased; _ = tokio::time::sleep(RECONNECT_DELAY) => continue, Ok(()) = shutdown_rx.recv() => { info!("Shutdown while waiting to resubscribe (work_order_id: {}). Terminating.", work_order_id); break; } }
+                tokio::select! {
+                    biased;
+                    _ = tokio::time::sleep(RECONNECT_DELAY) => continue,
+                    Ok(()) = shutdown_rx.recv() => {
+                        info!("Shutdown while waiting to resubscribe (work_order_id: {}). Terminating.", work_order_id);
+                        break;
+                    }
+                }
             }
         }
-        // If log_stream ended (None) or subscription failed and we didn't 'continue'
         warn!(
             "Log stream for work_order_id: {} requires reconnection. Delaying.",
             work_order_id
         );
-        tokio::select! { biased; _ = tokio::time::sleep(RECONNECT_DELAY) => {}, Ok(()) = shutdown_rx.recv() => { info!("Shutdown while delaying reconnect (work_order_id: {}). Terminating.", work_order_id); break; } }
+        tokio::select! {
+            biased;
+            _ = tokio::time::sleep(RECONNECT_DELAY) => {},
+            Ok(()) = shutdown_rx.recv() => {
+                info!("Shutdown while delaying reconnect (work_order_id: {}). Terminating.", work_order_id);
+                break;
+            }
+        }
     }
     info!(
         "Web3 event listener stopped for work_order_id: {}, worker_id: {}",

@@ -65,6 +65,9 @@ setup_node() {
 	NODE_DAEMON_SOCK="$SOCK_DIR/d.sock"
 	NODE_ENCLAVE_SOCK="$SOCK_DIR/e.sock"
 	NODE_VM_SOCK="$SOCK_DIR/v.sock"
+	NODE_VM_ID="policy-vm-${NODE_NAME}"
+	NODE_VM_LOG="$NODE_DIR/vm.log"
+	NODE_DAEMON_LOG="$NODE_DIR/daemon.log"
 	NODE_IDENTITY="$NODE_DIR/identity.key"
 	NODE_POLICY_CACHE="$NODE_DIR/policy_cache"
 
@@ -81,13 +84,11 @@ setup_node() {
 
 	# Start VM
 	echo "Starting $NODE_NAME VM (nxcc-workerd-vm)..."
-	# Logs now stream to console, and verbose mode is enabled
-	"$WORKERD_VM_BIN" --server-mode uds --server-uds-path "$NODE_VM_SOCK" --verbose &
+	"$WORKERD_VM_BIN" --server-mode uds --server-uds-path "$NODE_VM_SOCK" --verbose 2>&1 | tee "$NODE_VM_LOG" &
 	NODE_VM_PID=$!
 
 	# Start Enclave
 	echo "Starting $NODE_NAME Enclave..."
-	# Logs now stream to console, and verbose mode is enabled
 	RUST_LOG=nxcc_platform_enclave=debug "$ENCLAVE_BIN" --grpc-mode uds --grpc-uds-path "$NODE_ENCLAVE_SOCK" --verbose &
 	NODE_ENCLAVE_PID=$!
 	sleep 1
@@ -111,8 +112,7 @@ setup_node() {
 		DAEMON_ARGS+=("--bootstrap-peers" "$BOOTSTRAP_PEERS")
 	fi
 
-	# Logs now stream to console, and RUST_LOG is set for detailed output
-	RUST_LOG=info,nxcc_daemon=debug,nxcc_lib=debug "$DAEMON_BIN" "${DAEMON_ARGS[@]}" &
+	RUST_LOG=info,nxcc_daemon=debug,nxcc_lib=debug "$DAEMON_BIN" "${DAEMON_ARGS[@]}" 2>&1 | tee "$NODE_DAEMON_LOG" &
 	NODE_DAEMON_PID=$!
 	sleep 1
 
@@ -124,6 +124,8 @@ setup_node() {
 	eval "${NODE_NAME}_ENCLAVE_SOCK=\"$NODE_ENCLAVE_SOCK\""
 	eval "${NODE_NAME}_VM_SOCK=\"$NODE_VM_SOCK\""
 	eval "${NODE_NAME}_VM_ID=\"$NODE_VM_ID\""
+	eval "${NODE_NAME}_VM_LOG=\"$NODE_VM_LOG\""
+	eval "${NODE_NAME}_DAEMON_LOG=\"$NODE_DAEMON_LOG\""
 	eval "${NODE_NAME}_IDENTITY=\"$NODE_IDENTITY\""
 	eval "${NODE_NAME}_POLICY_CACHE=\"$NODE_POLICY_CACHE\""
 	eval "${NODE_NAME}_PEER_ID=\"$NODE_PEER_ID\""

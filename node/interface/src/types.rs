@@ -698,6 +698,9 @@ pub struct Web3Event {
     /// - `topics: [vec!["0x...".parse().unwrap()]]` -> topic0 specific, rest wildcard.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub topics: Vec<Vec<B256>>,
+    /// Explicit WebSocket gateways to use instead of the default for this chain.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gateways: Vec<String>,
 }
 
 impl TryFrom<interface::Web3EventConfig> for Web3Event {
@@ -731,6 +734,7 @@ impl TryFrom<interface::Web3EventConfig> for Web3Event {
                         .collect()
                 })
                 .collect::<Result<_, _>>()?,
+            gateways: p.gateways,
         })
     }
 }
@@ -747,6 +751,7 @@ impl From<Web3Event> for interface::Web3EventConfig {
                     values: topic_values.iter().map(|t| format!("{t:#x}")).collect(),
                 })
                 .collect(),
+            gateways: value.gateways,
         }
     }
 }
