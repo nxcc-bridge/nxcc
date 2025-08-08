@@ -33,3 +33,60 @@ pub static CHAINS: Lazy<HashMap<u64, Chain>> = Lazy::new(|| {
 pub fn get_chain(chain_id: u64) -> Option<&'static Chain> {
     CHAINS.get(&chain_id)
 }
+
+/// The type of RPC endpoint to query for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RpcType {
+    /// HTTPS endpoints.
+    Https,
+    /// Websocket endpoints. Both `wss://` and `ws://` URLs are stored in this list.
+    /// When fetching, secure `wss://` URLs are preferred over `ws://` URLs.
+    Wss,
+}
+
+/// Returns an iterator over RPC URLs for the given `chain_id` and [`RpcType`].
+///
+/// The iterator yields URLs in the order they are defined in the chainlist data,
+/// which is already prioritized (e.g. `wss://` before `ws://`).
+///
+/// Returns `None` if the chain is unknown or there are no URLs of that type.
+pub fn get_rpcs_for_chain(
+    chain_id: u64,
+    rpc_type: RpcType,
+) -> Option<impl Iterator<Item = &'static str>> {
+    fn as_str(s: &String) -> &str {
+        s.as_str()
+    }
+
+    let chain = get_chain(chain_id)?;
+
+    match rpc_type {
+        RpcType::Https => {
+            if chain.rpcs.https.is_empty() {
+                None
+            } else {
+                Some(chain.rpcs.https.iter().map(as_str))
+            }
+        }
+        RpcType::Wss => {
+            if chain.rpcs.wss.is_empty() {
+                None
+            } else {
+                Some(chain.rpcs.wss.iter().map(as_str))
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn first_wss_rpc_is_secure_if_available() {
+        // Ethereum mainnet has secure websocket endpoints and should return one.
+        let mut urls = get_rpcs_for_chain(1, RpcType::Wss).expect("wss urls");
+        let url = urls.next().expect("wss url");
+        assert!(url.starts_with("wss://"));
+    }
+}

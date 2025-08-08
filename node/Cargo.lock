@@ -4160,6 +4160,7 @@ dependencies = [
  "futures-util",
  "hyper-util",
  "libp2p",
+ "nxcc-chainlist",
  "nxcc-interface",
  "percent-encoding",
  "prost",

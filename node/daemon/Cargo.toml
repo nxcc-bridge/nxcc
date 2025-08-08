@@ -20,6 +20,7 @@ tonic = { version = "0.13.1", features = ["transport"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 nxcc-interface = { path = "../interface" }
+nxcc-chainlist = { path = "../chainlist" }
 hyper-util = "0.1.11"
 ciborium = "0.2.2"
 alloy-primitives = "1.0.0"

@@ -9,6 +9,7 @@ use tracing::debug;
 use url::Url;
 
 use crate::error::AppError;
+use nxcc_chainlist::{RpcType, get_rpcs_for_chain};
 
 sol!(
     #[sol(rpc)]
@@ -117,16 +118,13 @@ impl GatewayManager {
     fn get_rpc_url_for_chain(&self, chain_id: u64) -> Result<String, AppError> {
         match chain_id {
             0 => Ok("mock://gateway.example.com".to_string()),
-            1 => Ok("wss://eth.llamarpc.com".to_string()),
-            5 => Ok("wss://rpc.ankr.com/eth_goerli".to_string()),
             1337 | 31337 => Ok("ws://127.0.0.1:8545".to_string()), // Ganache/Anvil default
-            43113 => Ok("wss://avalanche-fuji.drpc.org".to_string()),
-            43114 => Ok("wss://0xrpc.io/avax".to_string()),
-            11155111 => Ok("wss://rpc.sepolia.org".to_string()),
-            _ => Err(AppError::Service(format!(
-                "No RPC URL configured for chain ID {}",
-                chain_id
-            ))),
+            _ => get_rpcs_for_chain(chain_id, RpcType::Wss)
+                .and_then(|mut urls| urls.next())
+                .map(|url| url.to_string())
+                .ok_or_else(|| {
+                    AppError::Service(format!("No RPC URL configured for chain ID {}", chain_id))
+                }),
         }
     }
 
@@ -182,5 +180,13 @@ mod tests {
         ];
         let gw = manager.gateways_for_event(31337, &urls).await.unwrap();
         assert_eq!(gw.urls(), urls);
+    }
+
+    #[tokio::test]
+    async fn chainlist_resolves_known_chain() {
+        let manager = GatewayManager::new();
+        let gw = manager.get_gateway(1).await.unwrap();
+        let url = gw.urls().first().unwrap();
+        assert!(url.starts_with("wss://") || url.starts_with("ws://"));
     }
 }
