@@ -11,8 +11,7 @@ use alloy_rpc_types::BlockNumberOrTag;
 use clap::Parser;
 use futures::stream::{self, StreamExt};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-// We only need SourceChain from the crate now, as we define Chain and RpcEndpoints locally.
-use nxcc_chainlist::types::SourceChain;
+use nxcc_chainlist::types::{Chain as LibraryChain, RpcEndpoints, SourceChain};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -21,27 +20,17 @@ use url::Url;
 
 const CHAINS_URL: &str = "https://chainlist.org/rpcs.json";
 const CONCURRENCY_LIMIT: usize = 100;
-const RPC_TIMEOUT: Duration = Duration::from_secs(10);
+const RPC_TIMEOUT: Duration = Duration::from_millis(500);
 const OUTPUT_DIR: &str = "chains";
 
 const BLOCK_TIME_SAMPLE_SIZE: u64 = 20;
 const BLOCK_FETCH_CONCURRENCY: usize = 10;
 
-// --- New Struct Definitions ---
-// These are defined locally to add the `last_updated` field to the Chain struct.
-
-/// Represents the RPC endpoints for a chain, categorized by protocol.
-#[derive(Serialize, Deserialize, Debug, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct RpcEndpoints {
-    pub https: Vec<String>,
-    pub wss: Vec<String>,
-}
-
-/// Represents a single chain with its metadata and curated RPC endpoints.
+/// Represents a single chain with its metadata and curated RPC endpoints,
+/// including the last_updated timestamp for internal binary use.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
-pub struct Chain {
+pub struct GeneratedChain {
     pub name: String,
     pub chain_id: u64,
     pub rpcs: RpcEndpoints,
@@ -63,7 +52,7 @@ struct Cli {
     file: Option<String>,
 
     /// Skip checking chains that have been updated within this many hours.
-    #[arg(long, default_value = "24")]
+    #[arg(long, default_value = "72")]
     freshness_hours: u64,
 }
 
@@ -96,9 +85,6 @@ struct ScoredRpc {
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
-    // Before running, you will need to add `clap` and `serde` to your Cargo.toml:
-    // `cargo add clap --features derive`
-    // `cargo add serde --features derive`
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
@@ -141,6 +127,44 @@ async fn main() -> eyre::Result<()> {
     fs::create_dir_all(OUTPUT_DIR)?;
     info!("Output will be written to the '{}' directory.", OUTPUT_DIR);
 
+    let mut oldest_last_updated = u64::MAX;
+    if Path::new(OUTPUT_DIR).exists() {
+        for entry in fs::read_dir(OUTPUT_DIR)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("json") {
+                if let Ok(content) = fs::read_to_string(&path) {
+                    if let Ok(existing_chain) = serde_json::from_str::<GeneratedChain>(&content) {
+                        oldest_last_updated = oldest_last_updated.min(existing_chain.last_updated);
+                    }
+                }
+            }
+        }
+    }
+
+    let are_all_chains_fresh = if oldest_last_updated == u64::MAX {
+        info!("No existing chain files found. Performing a full scan.");
+        false
+    } else {
+        let now_ts = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)?
+            .as_secs();
+        let age = Duration::from_secs(now_ts.saturating_sub(oldest_last_updated));
+        if age < freshness_duration {
+            info!(
+                "All chain files are fresh (oldest is {:?} old). Will only check for new chains.",
+                age
+            );
+            true
+        } else {
+            info!(
+                "Stale chain files detected (oldest is {:?} old). Performing a full refresh.",
+                age
+            );
+            false
+        }
+    };
+
     let m = MultiProgress::new();
     let main_pb_style = ProgressStyle::default_bar()
         .template("{spinner:.green} [{elapsed_precise}] Chains: {pos}/{len} | {wide_msg}")
@@ -151,31 +175,13 @@ async fn main() -> eyre::Result<()> {
 
     // 2. for each chain
     for &chain_id in &sorted_chain_ids {
-        // --- NEW LOGIC: Check for existing, fresh file ---
         let chain_file_path_str = format!("{}/{}.json", OUTPUT_DIR, chain_id);
         let chain_file_path = Path::new(&chain_file_path_str);
 
-        if chain_file_path.exists() {
-            if let Ok(content) = fs::read_to_string(chain_file_path) {
-                if let Ok(existing_chain) = serde_json::from_str::<Chain>(&content) {
-                    let now_ts = SystemTime::now()
-                        .duration_since(SystemTime::UNIX_EPOCH)?
-                        .as_secs();
-                    let age =
-                        Duration::from_secs(now_ts.saturating_sub(existing_chain.last_updated));
-
-                    if age < freshness_duration {
-                        info!(
-                            "Chain {} ({}) is fresh (updated {:?} ago). Skipping.",
-                            chain_id, existing_chain.name, age
-                        );
-                        main_pb.inc(1);
-                        continue;
-                    }
-                }
-            }
+        if are_all_chains_fresh && chain_file_path.exists() {
+            main_pb.inc(1);
+            continue;
         }
-        // --- End of new logic ---
 
         let sources = chains_by_id.get(&chain_id).unwrap();
         let chain_name = &sources[0].name;
@@ -204,21 +210,34 @@ async fn main() -> eyre::Result<()> {
         rpc_pb.finish_and_clear();
 
         // 2b. test the block time and block time variance
-        if let Some(chain) =
+        let chain_to_write = if let Some(chain) =
             process_single_chain_results(chain_id, chain_name.clone(), results).await
         {
-            // 2c. write out the valid RPCs to a file
-            write_chain_to_file(&chain)?;
+            chain
         } else {
             info!(
-                "No valid RPCs found for chain {} ({}) after processing.",
+                "No valid RPCs found for chain {} ({}). Writing empty file to prevent re-checks.",
                 chain_id, chain_name
             );
-        }
+            let last_updated = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)?
+                .as_secs();
+            GeneratedChain {
+                chain_id,
+                name: chain_name.clone(),
+                rpcs: RpcEndpoints::default(),
+                average_block_time_ms: None,
+                block_time_variance_ms: None,
+                last_updated,
+            }
+        };
+        write_chain_to_file(&chain_to_write)?;
         main_pb.inc(1);
     }
 
     main_pb.finish_with_message("All chains processed.");
+
+    collect_chains_to_file().await?;
 
     info!(
         "Chainlist generation finished in {:.2?}.",
@@ -524,7 +543,7 @@ async fn process_single_chain_results(
     chain_id: u64,
     name: String,
     results: Vec<RpcTestResult>,
-) -> Option<Chain> {
+) -> Option<GeneratedChain> {
     let successful_results: Vec<_> = results
         .into_iter()
         .filter_map(|r| r.block_number.map(|block| (r, block)))
@@ -604,7 +623,7 @@ async fn process_single_chain_results(
         .expect("Time went backwards, unable to get current timestamp.")
         .as_secs();
 
-    Some(Chain {
+    Some(GeneratedChain {
         chain_id,
         name,
         rpcs,
@@ -614,11 +633,54 @@ async fn process_single_chain_results(
     })
 }
 
-fn write_chain_to_file(chain: &Chain) -> eyre::Result<()> {
+fn write_chain_to_file(chain: &GeneratedChain) -> eyre::Result<()> {
     let path_str = format!("{}/{}.json", OUTPUT_DIR, chain.chain_id);
     let output_path = Path::new(&path_str);
 
     let json_str = serde_json::to_string_pretty(chain)?;
     fs::write(output_path, json_str)?;
+    Ok(())
+}
+
+async fn collect_chains_to_file() -> eyre::Result<()> {
+    info!("Collecting all chains into src/chains.json...");
+
+    let mut all_chains: Vec<LibraryChain> = Vec::new();
+
+    for entry in fs::read_dir(OUTPUT_DIR)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("json") {
+            let content = fs::read_to_string(&path)?;
+            let chain: GeneratedChain = match serde_json::from_str(&content) {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!("Failed to parse chain file {:?}: {}. Skipping.", path, e);
+                    continue;
+                }
+            };
+
+            // Convert GeneratedChain to LibraryChain (which does not have last_updated)
+            all_chains.push(LibraryChain {
+                chain_id: chain.chain_id,
+                name: chain.name,
+                rpcs: chain.rpcs,
+                average_block_time_ms: chain.average_block_time_ms,
+                block_time_variance_ms: chain.block_time_variance_ms,
+            });
+        }
+    }
+
+    all_chains.sort_by_key(|c| c.chain_id);
+
+    let final_json_path = Path::new("src/chains.json");
+    let json_str = serde_json::to_string_pretty(&all_chains)?;
+    fs::write(final_json_path, json_str)?;
+
+    info!(
+        "Successfully wrote {} chains to src/chains.json",
+        all_chains.len()
+    );
+
     Ok(())
 }
