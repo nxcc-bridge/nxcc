@@ -1,13 +1,13 @@
 /**
  * Default NXCC Policy Worker
- * 
+ *
  * This is a basic policy that accepts all authorization requests.
  * It demonstrates the policy worker interface using the NXCC SDK.
- * 
+ *
  * Customize this policy to implement your authorization logic.
  */
 
-import { policy } from '@nxcc/sdk';
+import { policy } from "@nxcc/sdk";
 
 export default policy((requests) => {
   // Default policy: approve all requests

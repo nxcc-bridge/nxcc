@@ -14,24 +14,72 @@ Your worker's entrypoint must be a module that exports a default object with an 
 import { worker } from "@nxcc/sdk";
 
 export default worker({
+  // Launch handlers can return void - automatically becomes 204 No Content
   async launch(eventPayload, { userdata }) {
-    console.log("Worker launched!", eventPayload);
-    return new Response("Launch event handled.");
+    console.log("Worker launched!", eventPayload, userdata);
+    // No return needed - automatically returns 204
   },
 
+  // Fetch handlers: return objects are automatically JSON stringified with 200
   async fetch(request, { userdata }) {
     console.log(
       "HTTP request received:",
       request.method,
       new URL(request.url).pathname,
     );
-    return new Response("Hello from nXCC worker!");
+
+    // Return object automatically becomes JSON response with 200 status
+    return {
+      message: "Hello from nXCC worker!",
+      method: request.method,
+      path: new URL(request.url).pathname,
+    };
   },
 
-  // Add custom event handlers as needed
+  // Custom event handlers - return values are automatically converted
   async myCustomEvent(eventPayload, { userdata }) {
     console.log("Custom event received:", eventPayload);
-    return new Response("Custom event handled.");
+
+    // Return object automatically becomes JSON response with 200 status
+    return { handled: true, timestamp: Date.now(), payload: eventPayload };
+  },
+});
+```
+
+### Automatic Response Conversion
+
+The nXCC worker SDK automatically converts different return types from your handlers into appropriate HTTP responses:
+
+- **`Response` objects**: Returned as-is, giving you full control over status codes and headers
+- **Objects/Arrays**: Automatically JSON stringified with `200 OK` status and `Content-Type: application/json` header
+- **`undefined`/`null`/void**: Automatically returns `204 No Content` status
+- **Errors**: Automatically converted to `500 Internal Server Error` with the error message
+
+This means you can focus on your business logic without manually constructing Response objects for common cases:
+
+```typescript
+export default worker({
+  async fetch(request, { userdata }) {
+    // Return an object - becomes JSON with 200 status
+    return { message: "Hello", timestamp: Date.now() };
+  },
+
+  async launch(eventPayload, context) {
+    console.log("Worker started");
+    // No return - automatically becomes 204 No Content
+  },
+
+  async customHandler(eventPayload, context) {
+    // Still works - returned as-is for full control
+    return new Response("Custom response", {
+      status: 201,
+      headers: { "X-Custom": "value" },
+    });
+  },
+
+  async errorHandler(eventPayload, context) {
+    throw new Error("Something went wrong");
+    // Automatically becomes 500 with error message
   },
 });
 ```

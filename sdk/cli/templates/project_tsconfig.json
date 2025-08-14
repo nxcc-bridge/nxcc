@@ -9,18 +9,9 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "lib": [
-      "esnext",
-      "webworker"
-    ],
-    "types": [
-      "@cloudflare/workers-types"
-    ]
+    "lib": ["esnext", "webworker"],
+    "types": ["@cloudflare/workers-types"]
   },
-  "include": [
-    "workers/**/*.ts"
-  ],
-  "exclude": [
-    "node_modules"
-  ]
+  "include": ["workers/**/*.ts"],
+  "exclude": ["node_modules"]
 }

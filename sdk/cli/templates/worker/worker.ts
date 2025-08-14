@@ -1,13 +1,26 @@
-import { worker } from '@nxcc/sdk';
+import { worker } from "@nxcc/sdk";
 
 export default worker({
   async launch(eventPayload, { userdata }) {
-    console.log('Worker launched!', eventPayload);
-    return new Response('Launch event handled.');
+    console.log("Worker launched!", eventPayload, userdata);
   },
 
   async fetch(request, { userdata }) {
-    console.log('HTTP request received:', request.method, new URL(request.url).pathname);
-    return new Response('Hello from nXCC worker!');
-  }
+    return {
+      message: "Hello from nXCC worker!",
+      path: new URL(request.url).pathname,
+    };
+  },
+
+  async handleTransfer(eventPayload, { userdata }) {
+    const { from, to, value } = eventPayload.args;
+    const { transactionHash, blockNumber } = eventPayload;
+
+    console.log(`USDC Transfer detected:`);
+    console.log(`  From: ${from}`);
+    console.log(`  To: ${to}`);
+    console.log(`  Amount: ${(Number(value) / 1e6).toFixed(2)} USDC`);
+    console.log(`  Tx: ${transactionHash}`);
+    console.log(`  Block: ${blockNumber}`);
+  },
 });
