@@ -31,7 +31,7 @@ nxcc init [directory]
 
 - **`[directory]`** (optional): The directory to create the project in. Defaults to the current directory.
 
-This command creates a basic project structure with a sample worker, a default policy, manifests, and TypeScript configuration, ready for you to start building.
+This command creates a basic project structure with a sample worker, a default policy using the NXCC SDK, manifests, and TypeScript configuration, ready for you to start building.
 
 ### `nxcc bundle`
 

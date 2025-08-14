@@ -3,8 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "tsc && esbuild workers/my-worker.ts --bundle --outfile=dist/my-worker.js --format=esm",
+    "build": "tsc && esbuild workers/my-worker.ts --bundle --outfile=dist/my-worker.js --format=esm && esbuild policies/default-policy.ts --bundle --outfile=dist/default-policy.js --format=esm",
     "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@nxcc/sdk": "^0.1.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240403.0",
