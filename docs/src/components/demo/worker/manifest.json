@@ -1,0 +1,25 @@
+{
+  "bundle": {
+    "source": "../dist/nft-mover.js"
+  },
+  "identities": [],
+  "userdata": {
+    "name": "NFT Cross-Chain Mover",
+    "version": "1.0.0",
+    "description": "Demo worker for moving NFTs between chains",
+    "supportedChains": ["ethereum", "polygon", "arbitrum", "optimism"],
+    "permissions": {
+      "allow_fetch": true,
+      "max_memory": "128MB",
+      "max_execution_time": "30s"
+    },
+    "triggers": [
+      {
+        "type": "event",
+        "contract": "DemoNFT",
+        "event": "NFTMoved",
+        "chains": ["ethereum", "polygon", "arbitrum", "optimism"]
+      }
+    ]
+  }
+}
