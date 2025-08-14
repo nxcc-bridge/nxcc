@@ -1,6 +1,35 @@
 // NXCC Worker for moving NFTs between chains
-export default {
-  async fetch(request: Request, env: any, ctx: any): Promise<Response> {
+import { worker } from "@nxcc/sdk";
+
+export default worker({
+  async launch(eventPayload, { userdata }) {
+    console.log("NFT mover worker launched with event:", eventPayload);
+
+    // Handle blockchain events that trigger NFT moves
+    if (eventPayload?.event === "NFTMoved") {
+      const { tokenId, fromChain, toChain, ownerAddress } = eventPayload.data;
+      console.log(
+        `Processing NFT move: Token ${tokenId} from ${fromChain} to ${toChain}`,
+      );
+
+      // Process the cross-chain NFT move
+      const result = await moveNFT(tokenId, fromChain, toChain, ownerAddress);
+
+      return new Response(
+        JSON.stringify({
+          status: "processed",
+          result,
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    return new Response("Event handled");
+  },
+
+  async fetch(request, { userdata }) {
     const url = new URL(request.url);
 
     if (url.pathname === "/move-nft" && request.method === "POST") {
@@ -44,34 +73,7 @@ export default {
 
     return new Response("Not Found", { status: 404 });
   },
-
-  async launch(event_payload: any, env: any): Promise<Response> {
-    console.log("NFT mover worker launched with event:", event_payload);
-
-    // Handle blockchain events that trigger NFT moves
-    if (event_payload?.event === "NFTMoved") {
-      const { tokenId, fromChain, toChain, ownerAddress } = event_payload.data;
-      console.log(
-        `Processing NFT move: Token ${tokenId} from ${fromChain} to ${toChain}`,
-      );
-
-      // Process the cross-chain NFT move
-      const result = await moveNFT(tokenId, fromChain, toChain, ownerAddress);
-
-      return new Response(
-        JSON.stringify({
-          status: "processed",
-          result,
-        }),
-        {
-          headers: { "Content-Type": "application/json" },
-        },
-      );
-    }
-
-    return new Response("Event handled");
-  },
-};
+});
 
 async function moveNFT(
   tokenId: string,

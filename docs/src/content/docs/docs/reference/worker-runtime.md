@@ -11,26 +11,48 @@ Your worker's entrypoint must be a module that exports a default object with an 
 
 ```typescript
 // worker.ts
-export default {
-  async fetch(request: Request, env: any, ctx: any): Promise<Response> {
-    console.log("Worker invoked!");
+import { worker } from "@nxcc/sdk";
 
-    // The request body contains the event payload.
-    // For non-HTTP events, it's a JSON object describing the trigger.
-    const eventPayload = await request.json();
-
-    // ... your logic here ...
-
-    return new Response("Hello from nXCC!");
+export default worker({
+  async launch(eventPayload, { userdata }) {
+    console.log("Worker launched!", eventPayload);
+    return new Response("Launch event handled.");
   },
-};
+
+  async fetch(request, { userdata }) {
+    console.log(
+      "HTTP request received:",
+      request.method,
+      new URL(request.url).pathname,
+    );
+    return new Response("Hello from nXCC worker!");
+  },
+
+  // Add custom event handlers as needed
+  async myCustomEvent(eventPayload, { userdata }) {
+    console.log("Custom event received:", eventPayload);
+    return new Response("Custom event handled.");
+  },
+});
 ```
+
+### How Worker Invocation Works
+
+The nXCC runtime uses two different mechanisms to invoke your worker:
+
+1. **Event-based invocation** (via `invoke_worker`): The runtime creates a POST request with a JSON payload containing:
+   - `handler`: The name of the event handler to invoke (e.g., `"launch"`, `"web3_event"`)
+   - `event_payload`: The specific event data for that trigger type
+
+2. **HTTP invocation** (via `invoke_http`): The runtime passes through the original HTTP request directly to your `fetch` handler.
+
+Your worker should detect which invocation type is being used and route accordingly.
 
 ### `fetch` Handler Arguments
 
 - **`request`** (`Request`): A standard [Fetch API `Request`](https://developer.mozilla.org/en-US/docs/Web/API/Request) object.
-  - For `http_request` triggers, this is the original incoming HTTP request.
-  - For all other triggers (e.g., `web3_event`, `launch`), the nXCC node constructs a `POST` request where the body contains a JSON payload describing the event.
+  - For HTTP invocations, this is the original incoming HTTP request.
+  - For event invocations, this is a POST request with a JSON body containing the handler name and event payload.
 - **`env`** (`any`): An object containing environment variables, secrets, and user-configured data. See below for details.
 - **`ctx`** (`any`): An execution context object provided by the `workerd` runtime.
 

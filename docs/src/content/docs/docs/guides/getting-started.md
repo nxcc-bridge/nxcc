@@ -300,6 +300,7 @@ Create a new file `workers/cross-chain-worker.ts` with the following code:
 
 ```typescript
 // workers/cross-chain-worker.ts
+import { worker } from "@nxcc/sdk";
 import {
   createPublicClient,
   http,
@@ -317,11 +318,10 @@ const contractAbi = [
   parseAbiItem("event ValueChanged(uint256 indexed newValue, bytes data)"),
 ];
 
-export default {
-  async fetch(request: Request, env: any): Promise<Response> {
-    // The 'env' object contains secrets and userdata.
-    // 'USER_CONFIG' is from the manifest's userdata.
-    const { rpcUrl, contractAddress, signerPrivateKey } = env.USER_CONFIG;
+export default worker({
+  async fetch(eventPayload, { userdata }) {
+    // The userdata contains configuration from the manifest.
+    const { rpcUrl, contractAddress, signerPrivateKey } = userdata;
 
     if (!rpcUrl || !contractAddress || !signerPrivateKey) {
       return new Response(
@@ -329,9 +329,6 @@ export default {
         { status: 500 },
       );
     }
-
-    // The event payload from the nXCC node is the request body.
-    const eventPayload = await request.json();
 
     // Decode the event log.
     const decodedLog = decodeEventLog({
@@ -384,7 +381,7 @@ export default {
       );
     }
   },
-};
+});
 ```
 
 ### Step 8.2: Configure the Worker Manifest
