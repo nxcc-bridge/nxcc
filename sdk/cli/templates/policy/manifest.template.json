@@ -1,0 +1,10 @@
+{
+  "bundle": {
+    "source": "./dist/default-policy.js"
+  },
+  "userdata": {
+    "description": "Default policy that accepts all authorization requests",
+    "version": "1.0.0"
+  },
+  "identities": []
+}
