@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "Bash(mv:*)",
+      "Bash(../sdk/cli/dist/nxcc init)",
+      "Bash(node:*)",
+      "Bash(rm:*)",
+      "Bash(cd:*)",
+      "Bash(pnpm:*)",
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
