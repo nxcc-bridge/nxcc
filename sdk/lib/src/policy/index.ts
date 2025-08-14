@@ -19,19 +19,19 @@ export type PolicyHandler = (requests: PolicyExecutionRequest[]) => boolean[] | 
 
 /**
  * Creates a policy worker that handles the NXCC policy execution protocol.
- * 
+ *
  * @param handler - Function that receives policy execution requests and returns authorization decisions
  * @returns A worker object compatible with the Cloudflare Workers runtime
- * 
+ *
  * @example
  * ```typescript
  * import { policy } from '@nxcc/sdk';
- * 
+ *
  * // Allow-all policy
  * export default policy((requests) => {
  *   return requests.map(() => true);
  * });
- * 
+ *
  * // Custom authorization logic
  * export default policy((requests) => {
  *   return requests.map(request => {
@@ -63,7 +63,9 @@ export function policy(handler: PolicyHandler) {
 
         // Validate that the handler returned the correct number of decisions
         if (!Array.isArray(decisions) || decisions.length !== contextsArray.length) {
-          throw new Error(`Policy handler must return an array of ${contextsArray.length} boolean decisions`);
+          throw new Error(
+            `Policy handler must return an array of ${contextsArray.length} boolean decisions`,
+          );
         }
 
         return new Response(JSON.stringify(decisions), {

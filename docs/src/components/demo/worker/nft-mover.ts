@@ -2,72 +2,89 @@
 export default {
   async fetch(request: Request, env: any, ctx: any): Promise<Response> {
     const url = new URL(request.url);
-    
-    if (url.pathname === '/move-nft' && request.method === 'POST') {
+
+    if (url.pathname === "/move-nft" && request.method === "POST") {
       try {
-        const { tokenId, fromChain, toChain, ownerAddress } = await request.json();
-        
+        const { tokenId, fromChain, toChain, ownerAddress } =
+          await request.json();
+
         // Simulate NFT move logic
         // In a real implementation, this would:
         // 1. Verify the NFT burn event on the source chain
         // 2. Mint a new NFT on the target chain
         // 3. Maintain cross-chain state consistency
-        
+
         const result = await moveNFT(tokenId, fromChain, toChain, ownerAddress);
-        
+
         return new Response(JSON.stringify(result), {
-          headers: { 'Content-Type': 'application/json' }
+          headers: { "Content-Type": "application/json" },
         });
       } catch (error) {
-        return new Response(JSON.stringify({ error: (error as Error).message }), {
-          status: 500,
-          headers: { 'Content-Type': 'application/json' }
-        });
+        return new Response(
+          JSON.stringify({ error: (error as Error).message }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
       }
     }
-    
-    if (url.pathname === '/status' && request.method === 'GET') {
-      return new Response(JSON.stringify({ 
-        status: 'active',
-        supportedChains: ['ethereum', 'polygon', 'arbitrum', 'optimism']
-      }), {
-        headers: { 'Content-Type': 'application/json' }
-      });
+
+    if (url.pathname === "/status" && request.method === "GET") {
+      return new Response(
+        JSON.stringify({
+          status: "active",
+          supportedChains: ["ethereum", "polygon", "arbitrum", "optimism"],
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+        },
+      );
     }
-    
-    return new Response('Not Found', { status: 404 });
+
+    return new Response("Not Found", { status: 404 });
   },
 
   async launch(event_payload: any, env: any): Promise<Response> {
-    console.log('NFT mover worker launched with event:', event_payload);
-    
+    console.log("NFT mover worker launched with event:", event_payload);
+
     // Handle blockchain events that trigger NFT moves
-    if (event_payload?.event === 'NFTMoved') {
+    if (event_payload?.event === "NFTMoved") {
       const { tokenId, fromChain, toChain, ownerAddress } = event_payload.data;
-      console.log(`Processing NFT move: Token ${tokenId} from ${fromChain} to ${toChain}`);
-      
+      console.log(
+        `Processing NFT move: Token ${tokenId} from ${fromChain} to ${toChain}`,
+      );
+
       // Process the cross-chain NFT move
       const result = await moveNFT(tokenId, fromChain, toChain, ownerAddress);
-      
-      return new Response(JSON.stringify({
-        status: 'processed',
-        result
-      }), {
-        headers: { 'Content-Type': 'application/json' }
-      });
+
+      return new Response(
+        JSON.stringify({
+          status: "processed",
+          result,
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+        },
+      );
     }
-    
-    return new Response('Event handled');
-  }
+
+    return new Response("Event handled");
+  },
 };
 
-async function moveNFT(tokenId: string, fromChain: string, toChain: string, ownerAddress: string) {
+async function moveNFT(
+  tokenId: string,
+  fromChain: string,
+  toChain: string,
+  ownerAddress: string,
+) {
   // Simulate cross-chain NFT transfer
   const moveId = `move_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  
+
   // Simulate processing time
-  await new Promise(resolve => setTimeout(resolve, 2000));
-  
+  await new Promise((resolve) => setTimeout(resolve, 2000));
+
   return {
     success: true,
     moveId,
@@ -77,6 +94,6 @@ async function moveNFT(tokenId: string, fromChain: string, toChain: string, owne
     ownerAddress,
     timestamp: new Date().toISOString(),
     newTokenId: tokenId, // In practice, might be different on target chain
-    transactionHash: `0x${Math.random().toString(16).substr(2, 64)}`
+    transactionHash: `0x${Math.random().toString(16).substr(2, 64)}`,
   };
 }

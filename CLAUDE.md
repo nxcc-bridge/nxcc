@@ -83,6 +83,12 @@ cargo fmt -- --check
 cd docs && pnpm lint
 ```
 
+## Development
+
+* Always run tests, linters, and formatters after completing a set of changes.
+* Always add unit tests (and integration tests, if necessary) when adding new functionality.
+* When fixing a bug, always add regression test(s).
+
 ## Architecture Overview
 
 This is a Rust workspace implementing the NXCC (Network eXecutable Cross-Chain) platform - a confidential computing system that enables secure cross-chain applications through trusted execution environments.

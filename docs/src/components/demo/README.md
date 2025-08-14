@@ -25,7 +25,7 @@ The demo is accessible at `/demo` on the docs site. It's statically imported as 
 ## Supported Chains
 
 - Ethereum
-- Polygon  
+- Polygon
 - Arbitrum
 - Optimism
 
