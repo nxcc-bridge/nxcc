@@ -50,12 +50,15 @@ describe("init command", () => {
       expect(exists).toBe(true);
     }
 
+    // Replace the SDK dependency with local path for testing
+    const packageJsonPath = path.join(projectPath, "package.json");
+    const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf-8"));
+    const sdkPath = path.resolve(__dirname, "../../../lib");
+    packageJson.dependencies["@nxcc/sdk"] = `file:${sdkPath}`;
+    await fs.writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2));
+
     // Install dependencies
     execSync("npm install", { cwd: projectPath, stdio: "inherit" });
-
-    // Install local SDK for testing
-    const sdkPath = path.resolve(__dirname, "../../../lib");
-    execSync(`npm install "${sdkPath}"`, { cwd: projectPath, stdio: "inherit" });
 
     // Build project - this should not throw
     expect(() => {
@@ -82,12 +85,15 @@ describe("init command", () => {
     // Initialize project
     await initCommand(projectPath);
 
+    // Replace the SDK dependency with local path for testing
+    const packageJsonPath = path.join(projectPath, "package.json");
+    const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf-8"));
+    const sdkPath = path.resolve(__dirname, "../../../lib");
+    packageJson.dependencies["@nxcc/sdk"] = `file:${sdkPath}`;
+    await fs.writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2));
+
     // Install dependencies
     execSync("npm install", { cwd: projectPath, stdio: "inherit" });
-
-    // Install local SDK for testing
-    const sdkPath = path.resolve(__dirname, "../../../lib");
-    execSync(`npm install "${sdkPath}"`, { cwd: projectPath, stdio: "inherit" });
 
     // TypeScript compilation should succeed
     expect(() => {
