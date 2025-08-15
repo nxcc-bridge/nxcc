@@ -27,6 +27,7 @@ LIB_DIR="$(dirname "$0")/lib"
 
 # Source all the functional components.
 # common.sh must be first as others depend on it.
+# shellcheck disable=SC1091  # Library files are sourced dynamically
 source "${LIB_DIR}/common.sh"
 source "${LIB_DIR}/build.sh"
 source "${LIB_DIR}/ci.sh"

@@ -21,7 +21,7 @@ build_local_image() {
   local build_mode="${BUILD_MODE:-debug}"
   local build_args=""
   if [[ "$build_mode" == "debug" ]]; then
-    build_args="--build-arg BUILD_MODE="
+    build_args=""  # Don't pass BUILD_MODE arg, let Dockerfile default to debug
     info "Building in debug mode for faster development builds"
   else
     build_args="--build-arg BUILD_MODE=release"
@@ -58,22 +58,40 @@ build_local_image() {
       info "Building for platform: $build_platforms"
     fi
     
-    docker buildx build \
-      --platform "$build_platforms" \
-      --load \
-      --tag "$image_name" \
-      $build_args \
-      --file "$dockerfile_path" \
-      --quiet \
-      "$build_context"
+    if [[ -n "$build_args" ]]; then
+      docker buildx build \
+        --platform "$build_platforms" \
+        --load \
+        --tag "$image_name" \
+        $build_args \
+        --file "$dockerfile_path" \
+        --quiet \
+        "$build_context"
+    else
+      docker buildx build \
+        --platform "$build_platforms" \
+        --load \
+        --tag "$image_name" \
+        --file "$dockerfile_path" \
+        --quiet \
+        "$build_context"
+    fi
   else
     info "Docker buildx not available, using standard docker build..."
-    docker build \
-      --tag "$image_name" \
-      $build_args \
-      --file "$dockerfile_path" \
-      --quiet \
-      "$build_context"
+    if [[ -n "$build_args" ]]; then
+      docker build \
+        --tag "$image_name" \
+        $build_args \
+        --file "$dockerfile_path" \
+        --quiet \
+        "$build_context"
+    else
+      docker build \
+        --tag "$image_name" \
+        --file "$dockerfile_path" \
+        --quiet \
+        "$build_context"
+    fi
   fi
 
   success "Local image built successfully: $image_name"
@@ -102,7 +120,7 @@ build_gcp_image() {
   local build_mode="${BUILD_MODE:-release}"
   local build_args=""
   if [[ "$build_mode" == "debug" ]]; then
-    build_args="--build-arg BUILD_MODE="
+    build_args=""  # Don't pass BUILD_MODE arg, let Dockerfile default to debug
     info "Building in debug mode for faster development builds"
   else
     build_args="--build-arg BUILD_MODE=release"
@@ -148,20 +166,36 @@ build_gcp_image() {
       info "Multi-architecture build: $build_platforms"
     fi
     
-    docker buildx build \
-      --platform "$build_platforms" \
-      --push \
-      --tag "$full_image" \
-      $build_args \
-      --file "$dockerfile_path" \
-      "$build_context"
+    if [[ -n "$build_args" ]]; then
+      docker buildx build \
+        --platform "$build_platforms" \
+        --push \
+        --tag "$full_image" \
+        $build_args \
+        --file "$dockerfile_path" \
+        "$build_context"
+    else
+      docker buildx build \
+        --platform "$build_platforms" \
+        --push \
+        --tag "$full_image" \
+        --file "$dockerfile_path" \
+        "$build_context"
+    fi
   else
     info "Docker buildx not available, building for current architecture only..."
-    docker build \
-      --tag "$full_image" \
-      $build_args \
-      --file "$dockerfile_path" \
-      "$build_context"
+    if [[ -n "$build_args" ]]; then
+      docker build \
+        --tag "$full_image" \
+        $build_args \
+        --file "$dockerfile_path" \
+        "$build_context"
+    else
+      docker build \
+        --tag "$full_image" \
+        --file "$dockerfile_path" \
+        "$build_context"
+    fi
     
     info "Pushing image to Artifact Registry..."
     docker push "$full_image"

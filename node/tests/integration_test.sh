@@ -58,6 +58,7 @@ DEPLOYER_PK="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 WORKER_SENDER_PK="0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d" # Anvil default[1]
 
 # Path to the JS worker script for the test
+# shellcheck disable=SC2034  # TEST_WORKER_JS_PATH may be used by future tests
 TEST_WORKER_JS_PATH="$SCRIPT_DIR/policy/test_worker_integration.js"
 DSSE_WORK_ORDER_PAYLOAD_TYPE="application/vnd.nxcc.workorderpayload.v1+json"
 
@@ -142,6 +143,7 @@ cleanup() {
 	echo "Cleanup finished."
 
 	# Force exit to ensure no lingering processes
+	# shellcheck disable=SC3048  # SIGINT/SIGTERM prefixes are widely supported
 	trap - EXIT SIGINT SIGTERM
 }
 
@@ -152,10 +154,10 @@ trap cleanup EXIT INT TERM
 echo "--- Building JS Workers ---"
 if [ ! -d "$JS_WORKER_DIR/node_modules" ]; then
 	echo "Installing JS dependencies..."
-	(cd "$JS_WORKER_DIR" && npm install)
+	(cd "$JS_WORKER_DIR" && pnpm install)
 fi
 echo "Building JS bundles..."
-(cd "$JS_WORKER_DIR" && npm run build)
+(cd "$JS_WORKER_DIR" && pnpm run build)
 
 POLICY_WORKER_JS_BUNDLE_PATH="$JS_WORKER_DIR/dist/test_worker_integration.js"
 EVENT_HANDLER_WORKER_JS_BUNDLE_PATH="$JS_WORKER_DIR/dist/event_handler_worker.js"
@@ -229,6 +231,8 @@ jq -n \
 # ==============================================================================
 # --- Node 1 (Alice) Setup ---
 echo "--- Setting up Node 1 (Alice) on P2P port $NODE1_P2P_PORT and HTTP port $NODE1_HTTP_PORT ---"
+# setup_node sets dynamic variables like alice_DAEMON_SOCK, alice_VM_ID, alice_VM_SOCK, etc.
+# shellcheck disable=SC2034  # Variables are set dynamically by setup_node
 setup_node "$NODE1_NAME" "$TEST_DIR" "$NODE1_P2P_PORT" "" \
 	"$DAEMON_BIN" "$ENCLAVE_BIN" "$WORKERD_VM_BIN" "127.0.0.1:$NODE1_HTTP_PORT"
 
@@ -236,10 +240,14 @@ setup_node "$NODE1_NAME" "$TEST_DIR" "$NODE1_P2P_PORT" "" \
 sleep 2
 
 # Attach VM to Enclave via Daemon
+# shellcheck disable=SC2154  # alice_* variables are set by setup_node
 grpcurl_attach_vm "$alice_DAEMON_SOCK" "$alice_VM_ID" "$alice_VM_SOCK"
 
 # --- Node 2 (Bob) Setup ---
 echo "--- Setting up Node 2 (Bob) on P2P port $NODE2_P2P_PORT and HTTP port $NODE2_HTTP_PORT ---"
+# setup_node sets dynamic variables like bob_DAEMON_SOCK, bob_VM_ID, bob_VM_SOCK, etc.
+# alice_MULTIADDR was set by the previous setup_node call
+# shellcheck disable=SC2154  # alice_MULTIADDR is set by setup_node function
 setup_node "$NODE2_NAME" "$TEST_DIR" "$NODE2_P2P_PORT" "$alice_MULTIADDR" \
 	"$DAEMON_BIN" "$ENCLAVE_BIN" "$WORKERD_VM_BIN" "127.0.0.1:$NODE2_HTTP_PORT"
 
@@ -247,6 +255,7 @@ setup_node "$NODE2_NAME" "$TEST_DIR" "$NODE2_P2P_PORT" "$alice_MULTIADDR" \
 sleep 1
 
 # Attach VM to Enclave via Daemon
+# shellcheck disable=SC2154  # bob_* variables are set by setup_node
 grpcurl_attach_vm "$bob_DAEMON_SOCK" "$bob_VM_ID" "$bob_VM_SOCK"
 
 # Sleep after VM attachment and before starting the test workflow
@@ -262,6 +271,7 @@ grpcurl_submit_work_order "$alice_DAEMON_SOCK" "$GRPCURL_SUBMIT_ORIG_WO_PAYLOAD_
 # Wait for Alice's worker to execute and log output
 echo "Waiting for Alice's worker to log derived bits..."
 ALICE_DERIVED_BITS=""
+# shellcheck disable=SC2034,SC2154  # i is unused, alice_* vars set by setup_node
 for i in $( # Poll for up to 5 seconds
 	seq 1 5
 ); do
@@ -285,11 +295,13 @@ fi
 
 # 2. Bob receives the same work order
 echo "Step 2: Bob receives the same work order (triggers P2P secret request to Alice)..."
+# shellcheck disable=SC2154  # bob_DAEMON_SOCK is set by setup_node
 grpcurl_submit_work_order "$bob_DAEMON_SOCK" "$GRPCURL_SUBMIT_ORIG_WO_PAYLOAD_FILE"
 
 # Wait for Bob's worker to execute and log output
 echo "Waiting for Bob's worker to log derived bits..."
 BOB_DERIVED_BITS=""
+# shellcheck disable=SC2034,SC2154  # i is unused, bob_* vars set by setup_node
 for i in $( # Poll for up to 20 seconds (longer for P2P)
 	seq 1 20
 ); do
@@ -338,6 +350,7 @@ if ! command -v forge >/dev/null 2>&1; then
 fi
 (cd "$CONTRACTS_DIR" && forge build --force --via-ir) # Use via-ir for potentially smaller bytecode
 TEST_EVENTS_BYTECODE=$(jq -r .bytecode.object <"$SCRIPT_DIR/out/TestEvents.sol/TestEvents.json")
+# shellcheck disable=SC2034  # TEST_EVENTS_ABI is extracted but may be used later in tests
 TEST_EVENTS_ABI=$(jq .abi <"$SCRIPT_DIR/out/TestEvents.sol/TestEvents.json")
 TEST_EVENTS_ABI_STRING=$(jq -c .abi <"$SCRIPT_DIR/out/TestEvents.sol/TestEvents.json")
 echo "Deploying contract to chain 1 ($ANVIL_CHAIN_ID_1)..."
@@ -461,6 +474,7 @@ jq -n \
 	'{work_order_dsse_bytes: $work_order_dsse_bytes}' >"$GRPCURL_SUBMIT_EVENT_WO_PAYLOAD_FILE"
 
 echo "Submitting event-listening work order to Alice and Bob..."
+# shellcheck disable=SC2154  # alice_DAEMON_SOCK and bob_DAEMON_SOCK are set by setup_node
 grpcurl_submit_work_order "$alice_DAEMON_SOCK" "$GRPCURL_SUBMIT_EVENT_WO_PAYLOAD_FILE"
 grpcurl_submit_work_order "$bob_DAEMON_SOCK" "$GRPCURL_SUBMIT_EVENT_WO_PAYLOAD_FILE"
 
@@ -493,10 +507,12 @@ if [ "$CONTRACT_UPDATED_SUCCESSFULLY" != "true" ]; then
 	echo "Expected value: $NEW_VALUE_1, Got: $CURRENT_VALUE"
 	echo "Expected data: $DATA_1, Got: $CURRENT_DATA"
 	echo "Alice daemon log:"
+	# shellcheck disable=SC2154  # alice_* and bob_* vars are set by setup_node
 	cat "$alice_DAEMON_LOG" || true
 	echo "Alice VM log:"
 	cat "$alice_VM_LOG" || true
 	echo "Bob daemon log:"
+	# shellcheck disable=SC2154  # bob_DAEMON_LOG is set by setup_node function
 	cat "$bob_DAEMON_LOG" || true
 	echo "Bob VM log:"
 	cat "$bob_VM_LOG" || true
@@ -512,6 +528,7 @@ cast send --rpc-url "$ANVIL_RPC_URL_2" --private-key "$DEPLOYER_PK" "$CONTRACT_A
 
 echo "Polling contract on chain 1 for update..."
 CONTRACT_UPDATED_SUCCESSFULLY=false
+# shellcheck disable=SC2034  # i is intentionally unused in polling loop
 for i in $( # Poll for updates
 	seq 1 10
 ); do
@@ -532,10 +549,12 @@ if [ "$CONTRACT_UPDATED_SUCCESSFULLY" != "true" ]; then
 	echo "Expected value: $NEW_VALUE_2, Got: $CURRENT_VALUE"
 	echo "Expected data: $DATA_2, Got: $CURRENT_DATA"
 	echo "Alice daemon log:"
+	# shellcheck disable=SC2154  # alice_* and bob_* vars are set by setup_node
 	cat "$alice_DAEMON_LOG" || true
 	echo "Alice VM log:"
 	cat "$alice_VM_LOG" || true
 	echo "Bob daemon log:"
+	# shellcheck disable=SC2154  # bob_DAEMON_LOG is set by setup_node function
 	cat "$bob_DAEMON_LOG" || true
 	echo "Bob VM log:"
 	cat "$bob_VM_LOG" || true
@@ -647,6 +666,7 @@ cat "$HTTP_RESPONSE_FILE"
 if [ "$HTTP_STATUS_CODE" -ne 200 ]; then
 	echo "ERROR (HTTP Worker Test): Worker returned status $HTTP_STATUS_CODE, expected 200."
 	echo "Alice daemon log:"
+	# shellcheck disable=SC2154  # alice_* and bob_* vars are set by setup_node
 	cat "$alice_DAEMON_LOG" || true
 	echo "Alice VM log:"
 	cat "$alice_VM_LOG" || true

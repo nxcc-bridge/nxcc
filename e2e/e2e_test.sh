@@ -42,7 +42,7 @@ SKIP_CLUSTER_SETUP="false"
 SKIP_CLEANUP="false"
 FORCE_CLEANUP="false"
 TEST_STAGING="false"
-USE_DEBUG_BUILD="true"
+# Debug build flag is handled via BUILD_MODE export
 TEMP_PROJECT_DIR=""
 
 # Export configuration for helper scripts
@@ -129,12 +129,12 @@ parse_args() {
                 shift
                 ;;
             --debug)
-                USE_DEBUG_BUILD="true"
+                # Set debug mode via BUILD_MODE
                 export BUILD_MODE=""
                 shift
                 ;;
             --release)
-                USE_DEBUG_BUILD="false"
+                # Set release mode via BUILD_MODE
                 export BUILD_MODE="release"
                 shift
                 ;;

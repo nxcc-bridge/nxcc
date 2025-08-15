@@ -19,17 +19,17 @@ ensure_sdk_lib() {
     if [[ ! -d "dist" ]] || [[ ! -f "dist/index.js" ]] || [[ ! -f "dist/index.d.ts" ]]; then
         verbose_log "SDK lib not built, building now..."
         
-        # Run npm install and build for SDK lib
-        verbose_log "Running npm install in SDK lib..."
-        local npm_install_output
-        if ! npm_install_output=$(npm install 2>&1); then
-            error "npm install failed in SDK lib:\n$npm_install_output"
+        # Run pnpm install and build for SDK lib
+        verbose_log "Running pnpm install in SDK lib..."
+        local pnpm_install_output
+        if ! pnpm_install_output=$(pnpm install 2>&1); then
+            error "pnpm install failed in SDK lib:\n$pnpm_install_output"
         fi
         
         verbose_log "Building SDK lib..."
-        local npm_build_output
-        if ! npm_build_output=$(npm run build 2>&1); then
-            error "npm run build failed in SDK lib:\n$npm_build_output"
+        local pnpm_build_output
+        if ! pnpm_build_output=$(pnpm run build 2>&1); then
+            error "pnpm run build failed in SDK lib:\n$pnpm_build_output"
         fi
         verbose_log "SDK lib built successfully"
     else
@@ -47,7 +47,7 @@ init_test_project() {
     # Ensure SDK lib is built first
     ensure_sdk_lib "$project_root"
     
-    cd "$temp_dir"
+    cd "$temp_dir" || error "Failed to change to temp directory"
     
     # Initialize project using NXCC CLI
     nxcc init .
@@ -61,12 +61,21 @@ init_test_project() {
         rm -f package.json.bak
     fi
     
-    # Install SDK locally from the project
-    verbose_log "Installing @nxcc/sdk from local path: $project_root/sdk/lib"
-    npm install "$project_root/sdk/lib"
+    # Remove the SDK dependency from package.json first to avoid registry lookup
+    if command_exists jq; then
+        jq 'del(.dependencies["@nxcc/sdk"])' package.json > package.json.tmp && mv package.json.tmp package.json
+    else
+        # Fallback if jq is not available
+        sed -i.bak '/"@nxcc\/sdk": /d' package.json
+        rm -f package.json.bak
+    fi
     
-    # Install other dependencies
-    npm install
+    # Install all dependencies first
+    pnpm install
+    
+    # Now install SDK locally from the project
+    verbose_log "Installing @nxcc/sdk from local path: $project_root/sdk/lib"
+    pnpm install "file:$project_root/sdk/lib"
     
     success "Test project initialized at $temp_dir"
 }
@@ -78,7 +87,7 @@ create_echo_worker() {
     
     log "Creating echo worker for HTTP testing..."
     
-    cd "$project_dir"
+    cd "$project_dir" || error "Failed to change to project directory"
     
     # Create echo worker with comprehensive HTTP handling
     cat > workers/echo-worker.ts << EOF
@@ -241,20 +250,20 @@ build_project() {
     
     log "Building project..."
     
-    cd "$project_dir"
+    cd "$project_dir" || error "Failed to change to project directory"
     
     # Install esbuild if not available
-    local npm_list_output
-    if ! npm_list_output=$(npm list esbuild 2>&1); then
+    local pnpm_list_output
+    if ! pnpm_list_output=$(pnpm list esbuild 2>&1); then
         verbose_log "esbuild not found, installing..."
-        verbose_log "npm list output: $npm_list_output"
-        npm install --save-dev esbuild@^0.21.4
+        verbose_log "pnpm list output: $pnpm_list_output"
+        pnpm install --save-dev esbuild@^0.21.4
     else
         verbose_log "esbuild already installed"
     fi
     
     # Build TypeScript
-    if ! npm run build; then
+    if ! pnpm run build; then
         error "Failed to build TypeScript project"
     fi
     
@@ -275,7 +284,7 @@ deploy_worker() {
     
     log "Deploying worker to $env environment..."
     
-    cd "$project_dir"
+    cd "$project_dir" || error "Failed to change to project directory"
     
     # Deploy using direct nxcc command with port forwarding
     local port="${E2E_TEST_PORT:-6922}"

@@ -75,6 +75,7 @@ setup() {
   if [[ "$(uname -m)" == "arm64" || "$(uname -m)" == "aarch64" ]]; then
     BUILD_ARGS="$BUILD_ARGS --build-arg WORKERD_ARCH=linux-arm64"
   fi
+  # shellcheck disable=SC2086  # BUILD_ARGS needs word splitting
   docker build $BUILD_ARGS -t "$NODE_IMAGE" "$NODE_DIR"
 
   info "Building test contracts..."
@@ -84,7 +85,7 @@ setup() {
   (cd "$BENCH_DIR" && cargo build --release)
 
   info "Building benchmark JS workers..."
-  (cd "$BENCH_DIR/workers" && npm install && npm run build)
+  (cd "$BENCH_DIR/workers" && pnpm install && pnpm run build)
 
   if ! docker network inspect "$DOCKER_NETWORK" >/dev/null 2>&1; then
     info "Creating Docker network: $DOCKER_NETWORK"

@@ -6,18 +6,29 @@
 # --- Configuration ---
 # GCP CI/CD and GKE Cluster Config
 readonly SERVICE_ACCOUNT_NAME="nxcc-ci-cd-runner"
+export SERVICE_ACCOUNT_NAME
 readonly WIF_POOL_ID="nxcc-ci-pool"
+export WIF_POOL_ID
 readonly WIF_PROVIDER_ID="nxcc-git-provider"
+export WIF_PROVIDER_ID
 readonly AR_REPO_NAME="nxcc-images"
+export AR_REPO_NAME
 readonly GKE_CLUSTER_NAME="nxcc"
+export GKE_CLUSTER_NAME
 
 # Local KinD Cluster Config
 readonly KIND_CLUSTER_NAME="nxcc-debug"
+export KIND_CLUSTER_NAME
 readonly LOCAL_IMAGE_NAME="nxcc-node-local" # Expected name of the local image for 'debug'
+export LOCAL_IMAGE_NAME
 readonly LOCAL_IMAGE_TAG="latest"
+export LOCAL_IMAGE_TAG
 
 # Helm Chart Config
-readonly HELM_CHART_PATH="$(dirname "$(realpath "$0")")/charts/nxcc-node"
+# Split declaration and assignment to avoid masking return values
+HELM_CHART_PATH="$(dirname "$(realpath "$0")")/charts/nxcc-node"
+readonly HELM_CHART_PATH
+export HELM_CHART_PATH
 
 # --- GCP Locations ---
 # Override with environment variables if needed.

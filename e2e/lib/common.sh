@@ -64,7 +64,7 @@ check_dependencies() {
     local missing_deps=()
     
     # Check for required tools
-    for dep in docker kind kubectl curl jq node npm; do
+    for dep in docker kind kubectl curl jq node pnpm; do
         if ! command_exists "$dep"; then
             missing_deps+=("$dep")
         fi
@@ -90,17 +90,17 @@ ensure_nxcc_cli() {
             error "Failed to change to SDK lib directory: $project_root/sdk/lib"
         fi
         
-        # Run npm install and build for SDK lib
-        verbose_log "Running npm install in SDK lib..."
-        local npm_install_output
-        if ! npm_install_output=$(npm install 2>&1); then
-            error "npm install failed in SDK lib:\n$npm_install_output"
+        # Run pnpm install and build for SDK lib
+        verbose_log "Running pnpm install in SDK lib..."
+        local pnpm_install_output
+        if ! pnpm_install_output=$(pnpm install 2>&1); then
+            error "pnpm install failed in SDK lib:\n$pnpm_install_output"
         fi
         
         verbose_log "Building SDK lib..."
-        local npm_build_output
-        if ! npm_build_output=$(npm run build 2>&1); then
-            error "npm run build failed in SDK lib:\n$npm_build_output"
+        local pnpm_build_output
+        if ! pnpm_build_output=$(pnpm run build 2>&1); then
+            error "pnpm run build failed in SDK lib:\n$pnpm_build_output"
         fi
         verbose_log "SDK lib built successfully"
         
@@ -110,27 +110,27 @@ ensure_nxcc_cli() {
             error "Failed to change to CLI directory: $project_root/sdk/cli"
         fi
         
-        # Run npm install with error handling
-        verbose_log "Running npm install..."
-        local npm_install_output
-        if ! npm_install_output=$(npm install 2>&1); then
-            error "npm install failed:\n$npm_install_output"
+        # Run pnpm install with error handling
+        verbose_log "Running pnpm install..."
+        local pnpm_install_output
+        if ! pnpm_install_output=$(pnpm install 2>&1); then
+            error "pnpm install failed:\n$pnpm_install_output"
         fi
-        verbose_log "npm install completed successfully"
+        verbose_log "pnpm install completed successfully"
         
-        # Run npm build with error handling
-        verbose_log "Running npm run build..."
-        local npm_build_output
-        if ! npm_build_output=$(npm run build 2>&1); then
-            error "npm run build failed:\n$npm_build_output"
+        # Run pnpm build with error handling
+        verbose_log "Running pnpm run build..."
+        local pnpm_build_output
+        if ! pnpm_build_output=$(pnpm run build 2>&1); then
+            error "pnpm run build failed:\n$pnpm_build_output"
         fi
-        verbose_log "npm run build completed successfully"
+        verbose_log "pnpm run build completed successfully"
         
         # Check if dist/index.js was created
         local dist_dir="$project_root/sdk/cli/dist"
         local index_js="$dist_dir/index.js"
         if [[ ! -f "$index_js" ]]; then
-            error "Build completed but $index_js was not created. Build output:\n$npm_build_output"
+            error "Build completed but $index_js was not created. Build output:\n$pnpm_build_output"
         fi
         verbose_log "Build output file exists: $index_js"
         
@@ -148,7 +148,7 @@ ensure_nxcc_cli() {
         export PATH="$dist_dir:$PATH"
         
         # Return to project root
-        cd "$project_root"
+        cd "$project_root" || error "Failed to change to project root directory"
         
         # Final verification
         verbose_log "Verifying nxcc command is available..."
@@ -260,7 +260,7 @@ test_http_endpoint() {
     local retries="${5:-3}"
     local delay="${6:-2}"
     
-    for i in $(seq 1 $retries); do
+    for i in $(seq 1 "$retries"); do
         verbose_log "Testing $method $url (attempt $i/$retries)..."
         
         local response
@@ -284,7 +284,7 @@ test_http_endpoint() {
         if [[ "$response" == "FAILED" ]]; then
             warn "$method $url failed (attempt $i/$retries)"
             if [[ $i -lt $retries ]]; then
-                sleep $delay
+                sleep "$delay"
                 continue
             fi
             return 1
@@ -299,7 +299,7 @@ test_http_endpoint() {
             else
                 warn "$method $url response did not match expected pattern: $expected_pattern"
                 if [[ $i -lt $retries ]]; then
-                    sleep $delay
+                    sleep "$delay"
                     continue
                 fi
                 return 1
@@ -477,7 +477,7 @@ quick_worker_deploy() {
     local project_dir="$2" 
     local manifest_file="${3:-workers/manifest.template.json}"
     
-    cd "$project_dir"
+    cd "$project_dir" || error "Failed to change to project directory"
     
     case "$env" in
         local|debug)

@@ -23,6 +23,7 @@ if [ "$APP_VERBOSE" = "true" ]; then
   vm_cli_args="$vm_cli_args --verbose"
 fi
 echo "Starting nxcc-workerd-vm with args: $vm_cli_args"
+# shellcheck disable=SC2086
 nxcc-workerd-vm $vm_cli_args &
 
 # --- Start Enclave ---
@@ -31,6 +32,7 @@ if [ "$APP_VERBOSE" = "true" ]; then
   enclave_cli_args="$enclave_cli_args --verbose"
 fi
 echo "Starting nxcc-platform-enclave with args: $enclave_cli_args"
+# shellcheck disable=SC2086
 nxcc-platform-enclave $enclave_cli_args &
 
 # Wait for dependent services to be ready before starting the daemon.
@@ -73,6 +75,7 @@ if [ -n "$DAEMON_EXTRA_ARGS" ]; then
 fi
 
 echo "Starting nxcc-daemon with args:$daemon_cli_args"
+# shellcheck disable=SC2086
 nxcc-daemon $daemon_cli_args &
 
 echo "All components started. Waiting for processes to exit..."

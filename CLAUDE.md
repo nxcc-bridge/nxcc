@@ -66,7 +66,7 @@ pnpm lint               # Check formatting
 ```bash
 cd benchmarks
 cargo build             # Build Rust benchmarking tools
-cd workers && npm run build  # Build JavaScript workers
+cd workers && pnpm run build  # Build JavaScript workers
 ```
 
 **CLI SDK** (`sdk/cli/`):

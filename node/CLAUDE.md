@@ -47,7 +47,7 @@ cargo test -p nxcc-daemon
 ### Development Tools
 - Use `grpcurl` for interacting with gRPC services during development
 - Integration tests use `foundry` (forge/cast/anvil) for smart contract testing
-- JavaScript workers are built with `npm run build` in the `tests/js_workers` directory
+- JavaScript workers are built with `pnpm run build` in the `tests/js_workers` directory
 
 ## Architecture Overview
 

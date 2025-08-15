@@ -9,6 +9,7 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 TESTS_DIR="$SCRIPT_DIR/tests"
 
 # Source helper utilities used by integration tests
+# shellcheck disable=SC1091  # utils.sh is sourced dynamically
 . "$TESTS_DIR/utils.sh"
 
 # Minimal grpcurl helpers

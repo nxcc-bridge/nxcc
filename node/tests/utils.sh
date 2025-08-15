@@ -1,4 +1,5 @@
 #!/bin/sh
+# shellcheck disable=SC3043  # 'local' is not POSIX but widely supported
 
 # Function to create a temporary directory with proper OS handling
 create_tmp_dir() {
@@ -96,6 +97,7 @@ setup_node() {
 	# Start Daemon
 	echo "Starting $NODE_NAME Daemon..."
 	# Use an array for robustness instead of a simple string with eval
+	# shellcheck disable=SC3030  # Arrays are not POSIX but widely supported
 	DAEMON_ARGS=(
 		"--uds-path" "$NODE_DAEMON_SOCK"
 		"--enclave-uds-path" "$NODE_ENCLAVE_SOCK"
@@ -109,9 +111,11 @@ setup_node() {
 
 	# Add bootstrap peers if provided
 	if [ -n "$BOOTSTRAP_PEERS" ]; then
+		# shellcheck disable=SC3024,SC3030  # Arrays and += are not POSIX but widely supported
 		DAEMON_ARGS+=("--bootstrap-peers" "$BOOTSTRAP_PEERS")
 	fi
 
+	# shellcheck disable=SC3054  # Array expansion is not POSIX but widely supported
 	RUST_LOG=info,nxcc_daemon=debug,nxcc_lib=debug "$DAEMON_BIN" "${DAEMON_ARGS[@]}" 2>&1 | tee "$NODE_DAEMON_LOG" &
 	NODE_DAEMON_PID=$!
 	sleep 1

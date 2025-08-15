@@ -53,11 +53,11 @@ grpcurl_submit_work_order() {
 
 	echo "Calling SubmitWorkOrder on $_daemon_sock with payload from $_payload_file..." >&2
 
-	cat $_payload_file | grpcurl \
+	grpcurl \
 		-proto "$DAEMON_PROTO" \
 		-import-path "$PROTO_DIR" \
 		-plaintext -unix \
-		-d "@" \
+		-d "@$_payload_file" \
 		"unix://$_daemon_sock" \
 		daemon.WorkOrder/SubmitWorkOrder
 	_grp_exit_code=$?

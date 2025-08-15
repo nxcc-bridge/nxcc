@@ -18,7 +18,7 @@ cicd_setup() {
     GIT_REPO="nxcc-bridge/nxcc"
     info "Using default repository: ${GIT_REPO}"
   else
-    read -p "Enter the Git repository (OWNER/REPO) [nxcc-bridge/nxcc]: " GIT_REPO
+    read -r -p "Enter the Git repository (OWNER/REPO) [nxcc-bridge/nxcc]: " GIT_REPO
     GIT_REPO="${GIT_REPO:-nxcc-bridge/nxcc}"
     info "Configuring for repository: ${GIT_REPO}"
   fi
