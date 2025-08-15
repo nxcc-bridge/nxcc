@@ -32,8 +32,8 @@ readonly C_RED='\033[0;31m'
 readonly C_RESET='\033[0m'
 
 # --- Global Variables for Resolved Identity ---
-GCP_ACCOUNT=""
-PROJECT_ID=""
+RESOLVED_GCP_ACCOUNT=""
+RESOLVED_PROJECT_ID=""
 
 # --- Helper Functions ---
 info() { echo -e "${C_BLUE}INFO:${C_RESET} $1"; }
@@ -54,32 +54,40 @@ check_deps() {
 
 ################################################################################
 # Resolves the GCP Account and Project ID to use for all subsequent commands.
-# Populates the global GCP_ACCOUNT and PROJECT_ID variables.
+# Populates the global RESOLVED_GCP_ACCOUNT and RESOLVED_PROJECT_ID variables.
 ################################################################################
 resolve_gcp_identity() {
   # If already resolved, do nothing.
-  if [[ -n "${GCP_ACCOUNT}" && -n "${PROJECT_ID}" ]]; then
+  if [[ -n "${RESOLVED_GCP_ACCOUNT}" && -n "${RESOLVED_PROJECT_ID}" ]]; then
     return 0
   fi
 
   # If running in a CI environment, assume auth is handled externally (e.g., WIF).
   if [[ -n "${CI}" ]]; then
     info "CI environment detected. Assuming pre-configured GCP identity."
-    PROJECT_ID=$(gcloud config get-value project 2>/dev/null)
-    if [[ -z "${PROJECT_ID}" ]]; then
+    RESOLVED_PROJECT_ID=$(gcloud config get-value project 2>/dev/null)
+    if [[ -z "${RESOLVED_PROJECT_ID}" ]]; then
       error "GCP Project ID not found in gcloud config. Ensure the 'google-github-actions/auth' step runs first."
     fi
-    GCP_ACCOUNT="[Service Account via WIF]"
-    success "Using project from CI environment: ${C_YELLOW}${PROJECT_ID}${C_RESET}"
+    RESOLVED_GCP_ACCOUNT="[Service Account via WIF]"
+    success "Using project from CI environment: ${C_YELLOW}${RESOLVED_PROJECT_ID}${C_RESET}"
     return
   fi
 
   info "Resolving GCP identity..."
 
   # --- Step 1: Resolve GCP Account ---
-  if [[ -n "${GCP_ACCOUNT_OVERRIDE}" ]]; then
-    GCP_ACCOUNT="${GCP_ACCOUNT_OVERRIDE}"
+  # Check if account is provided via environment variable
+  if [[ -n "${GCP_ACCOUNT:-}" ]]; then
     info "Using account from GCP_ACCOUNT environment variable: ${GCP_ACCOUNT}"
+    # Verify the account is authenticated and set it as active
+    if gcloud auth list --format="value(account)" | grep -q "^${GCP_ACCOUNT}$"; then
+      gcloud config set account "${GCP_ACCOUNT}"
+      info "Set ${GCP_ACCOUNT} as active account"
+      RESOLVED_GCP_ACCOUNT="${GCP_ACCOUNT}"
+    else
+      error "Account ${GCP_ACCOUNT} is not authenticated. Please run 'gcloud auth login ${GCP_ACCOUNT}' first."
+    fi
   else
     local accounts=()
     while IFS= read -r line; do
@@ -90,16 +98,16 @@ resolve_gcp_identity() {
       info "No active GCP account found. Opening browser for authentication..."
       gcloud auth login
       gcloud auth application-default login
-      GCP_ACCOUNT=$(gcloud config get-value account)
-      success "Logged in successfully as: ${GCP_ACCOUNT}"
+      RESOLVED_GCP_ACCOUNT=$(gcloud config get-value account)
+      success "Logged in successfully as: ${RESOLVED_GCP_ACCOUNT}"
     elif [[ ${#accounts[@]} -eq 1 ]]; then
-      GCP_ACCOUNT="${accounts[0]}"
-      info "Automatically selected the only available GCP account: ${GCP_ACCOUNT}"
+      RESOLVED_GCP_ACCOUNT="${accounts[0]}"
+      info "Automatically selected the only available GCP account: ${RESOLVED_GCP_ACCOUNT}"
     else
       warn "Multiple GCP accounts found. Please choose which one to use:"
       select account in "${accounts[@]}"; do
         if [[ -n "$account" ]]; then
-          GCP_ACCOUNT="$account"
+          RESOLVED_GCP_ACCOUNT="$account"
           break
         else
           echo "Invalid selection. Please try again."
@@ -107,22 +115,22 @@ resolve_gcp_identity() {
       done
     fi
   fi
-  success "Using account: ${C_YELLOW}${GCP_ACCOUNT}${C_RESET}"
+  success "Using account: ${C_YELLOW}${RESOLVED_GCP_ACCOUNT}${C_RESET}"
 
   # --- Step 2: Resolve Project ID ---
   if [[ -n "${GCP_PROJECT_ID}" ]]; then
-    PROJECT_ID="${GCP_PROJECT_ID}"
-    info "Using project ID from GCP_PROJECT_ID environment variable: ${PROJECT_ID}"
+    RESOLVED_PROJECT_ID="${GCP_PROJECT_ID}"
+    info "Using project ID from GCP_PROJECT_ID environment variable: ${RESOLVED_PROJECT_ID}"
   else
-    PROJECT_ID=$(gcloud config get-value project --account="${GCP_ACCOUNT}" 2>/dev/null)
-    if [[ -n "${PROJECT_ID}" ]]; then
-      info "Inferred project ID from gcloud config for account ${GCP_ACCOUNT}: ${PROJECT_ID}"
+    RESOLVED_PROJECT_ID=$(gcloud config get-value project --account="${RESOLVED_GCP_ACCOUNT}" 2>/dev/null)
+    if [[ -n "${RESOLVED_PROJECT_ID}" ]]; then
+      info "Inferred project ID from gcloud config for account ${RESOLVED_GCP_ACCOUNT}: ${RESOLVED_PROJECT_ID}"
     else
       error "Could not determine GCP Project ID.
 Please set it by one of the following methods:
 1. Export the environment variable: export GCP_PROJECT_ID=\"your-project-id\"
-2. Set it in your gcloud config: gcloud config set project \"your-project-id\" --account=\"${GCP_ACCOUNT}\""
+2. Set it in your gcloud config: gcloud config set project \"your-project-id\" --account=\"${RESOLVED_GCP_ACCOUNT}\""
     fi
   fi
-  success "Using project: ${C_YELLOW}${PROJECT_ID}${C_RESET}"
+  success "Using project: ${C_YELLOW}${RESOLVED_PROJECT_ID}${C_RESET}"
 }

@@ -65,7 +65,7 @@ k8s_deploy() {
       # Default to 'latest' for staging, but allow override for prod tags.
       local image_tag="${IMAGE_TAG_OVERRIDE:-latest}"
 
-      helm_set_args+=(--set image.repository="${GCP_AR_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO_NAME}/node")
+      helm_set_args+=(--set image.repository="${GCP_AR_LOCATION}-docker.pkg.dev/${RESOLVED_PROJECT_ID}/${AR_REPO_NAME}/node")
       helm_set_args+=(--set image.tag="${image_tag}")
 
       if [ "$env" == "staging" ]; then

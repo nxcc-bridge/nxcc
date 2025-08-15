@@ -14,20 +14,30 @@ LIB_DIR="$(dirname "$0")/lib"
 # Source all the functional components.
 # common.sh must be first as others depend on it.
 source "${LIB_DIR}/common.sh"
+source "${LIB_DIR}/build.sh"
 source "${LIB_DIR}/ci.sh"
 source "${LIB_DIR}/cluster.sh"
 source "${LIB_DIR}/k8s.sh"
+source "${LIB_DIR}/test.sh"
 
 
 ################################################################################
 # Displays usage information.
 ################################################################################
 usage() {
-  echo "Usage: $0 <command> <subcommand> [args]"
+  echo "Usage: $0 [-y] <command> <subcommand> [args]"
   echo
   echo "Manages cloud (GCP) and local (KinD) resources for the nXCC application."
   echo
+  echo "Options:"
+  echo "  -y  Automatically answer 'yes' to all interactive confirmation prompts."
+  echo
   echo "Commands:"
+  echo "  build <local|gcp>"
+  echo "    Builds Docker images with correct architecture."
+  echo "      local:    Builds for local KinD deployment (multi-arch)."
+  echo "      gcp:      Builds and pushes to GCP Artifact Registry."
+  echo
   echo "  ci <setup|teardown>"
   echo "    Manages GCP resources for CI/CD (Service Account, WIF, Artifact Registry)."
   echo "      setup:    Creates and configures all CI/CD resources."
@@ -46,6 +56,10 @@ usage() {
   echo "      destroy:     Uninstalls the application from the specified environment."
   echo "      dump-debug:  Dumps diagnostic information for a failed deployment."
   echo
+  echo "  test <env>"
+  echo "    Tests HTTP connectivity to the deployed NXCC node."
+  echo "      <env>: debug | staging | prod"
+  echo
   echo "Environment Notes:"
   echo "  - 'debug' environment is intended for the 'kind' cluster."
   echo "  - 'staging' and 'prod' environments are intended for the 'gke' cluster."
@@ -59,6 +73,14 @@ usage() {
 # Main execution block.
 ################################################################################
 main() {
+  local auto_yes=false
+  
+  # Parse -y flag
+  if [[ "$1" == "-y" ]]; then
+    auto_yes=true
+    shift
+  fi
+  
   local command="${1-}"
   local subcommand="${2-}"
   local env="${3-}"
@@ -69,16 +91,38 @@ main() {
   fi
 
   case "$command" in
+    build)
+      case "$subcommand" in
+        local)
+          build_local_image
+          ;;
+        gcp)
+          build_gcp_image
+          ;;
+        *)
+          error "Invalid subcommand for 'build'. Use 'local' or 'gcp'."
+          ;;
+      esac
+      ;;
+
     ci)
       check_deps gcloud
       resolve_gcp_identity # CI commands always need GCP identity
       case "$subcommand" in
         setup)
-          cicd_setup
+          if [[ "$auto_yes" == true ]]; then
+            AUTO_YES=true cicd_setup
+          else
+            cicd_setup
+          fi
           ;;
         teardown)
-          read -p "Are you sure you want to delete all CI/CD resources in project ${PROJECT_ID}? [y/N] " -n 1 -r; echo
-          if [[ $REPLY =~ ^[Yy]$ ]]; then cicd_teardown; else info "Teardown cancelled."; fi
+          if [[ "$auto_yes" == true ]]; then
+            cicd_teardown
+          else
+            read -p "Are you sure you want to delete all CI/CD resources in project ${RESOLVED_PROJECT_ID}? [y/N] " -n 1 -r; echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then cicd_teardown; else info "Teardown cancelled."; fi
+          fi
           ;;
         *)
           error "Invalid subcommand for 'ci'. Use 'setup' or 'teardown'."
@@ -99,12 +143,20 @@ main() {
         destroy)
           case "$env" in
             gke)
-              read -p "Are you sure you want to delete the GKE cluster '${GKE_CLUSTER_NAME}'? [y/N] " -n 1 -r; echo
-              if [[ $REPLY =~ ^[Yy]$ ]]; then cluster_destroy_gke; else info "Cluster deletion cancelled."; fi
+              if [[ "$auto_yes" == true ]]; then
+                cluster_destroy_gke
+              else
+                read -p "Are you sure you want to delete the GKE cluster '${GKE_CLUSTER_NAME}'? [y/N] " -n 1 -r; echo
+                if [[ $REPLY =~ ^[Yy]$ ]]; then cluster_destroy_gke; else info "Cluster deletion cancelled."; fi
+              fi
               ;;
             kind)
-              read -p "Are you sure you want to delete the KinD cluster '${KIND_CLUSTER_NAME}'? [y/N] " -n 1 -r; echo
-              if [[ $REPLY =~ ^[Yy]$ ]]; then cluster_destroy_kind; else info "Cluster deletion cancelled."; fi
+              if [[ "$auto_yes" == true ]]; then
+                cluster_destroy_kind
+              else
+                read -p "Are you sure you want to delete the KinD cluster '${KIND_CLUSTER_NAME}'? [y/N] " -n 1 -r; echo
+                if [[ $REPLY =~ ^[Yy]$ ]]; then cluster_destroy_kind; else info "Cluster deletion cancelled."; fi
+              fi
               ;;
             "") error "Missing environment for 'cluster destroy'. Use 'gke' or 'kind'." ;;
             *) error "Invalid environment for 'cluster destroy'. Use 'gke' or 'kind'." ;;
@@ -125,8 +177,12 @@ main() {
         destroy)
           if [[ -z "$env" ]]; then error "Missing environment for 'k8s destroy'. Use 'debug', 'staging', or 'prod'."; fi
           local release_to_destroy="nxcc-node-${env}"
-          read -p "Are you sure you want to uninstall the application '${release_to_destroy}' from the '${env}' environment? [y/N] " -n 1 -r; echo
-          if [[ $REPLY =~ ^[Yy]$ ]]; then k8s_destroy "$env"; else info "Application uninstall cancelled."; fi
+          if [[ "$auto_yes" == true ]]; then
+            k8s_destroy "$env"
+          else
+            read -p "Are you sure you want to uninstall the application '${release_to_destroy}' from the '${env}' environment? [y/N] " -n 1 -r; echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then k8s_destroy "$env"; else info "Application uninstall cancelled."; fi
+          fi
           ;;
         dump-debug)
           if [[ -z "$env" ]]; then error "Missing environment for 'k8s dump-debug'. Use 'debug', 'staging', or 'prod'."; fi
@@ -136,6 +192,11 @@ main() {
           error "Invalid subcommand for 'k8s'. Use 'deploy', 'destroy', or 'dump-debug'."
           ;;
       esac
+      ;;
+
+    test)
+      if [[ -z "$subcommand" ]]; then error "Missing environment for 'test'. Use 'debug', 'staging', or 'prod'."; fi
+      test_connectivity "$subcommand"
       ;;
 
     *)
