@@ -8,14 +8,18 @@
   },
   "scripts": {
     "build": "tsc && chmod +x dist/index.js",
+    "prepack": "pnpm build",
+    "prepare": "pnpm build",
     "start": "ts-node src/index.ts",
     "test": "jest",
     "lint": "prettier --check .",
     "format": "prettier --write ."
   },
   "files": [
-    "dist",
-    "templates"
+    "dist/**/*",
+    "templates/**/*",
+    "package.json",
+    "README.md"
   ],
   "keywords": [
     "nxcc"
