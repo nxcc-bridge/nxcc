@@ -43,7 +43,10 @@ describe("init command", () => {
 
     for (const file of expectedFiles) {
       const filePath = path.join(projectPath, file);
-      const exists = await fs.access(filePath).then(() => true).catch(() => false);
+      const exists = await fs
+        .access(filePath)
+        .then(() => true)
+        .catch(() => false);
       expect(exists).toBe(true);
     }
 
@@ -60,14 +63,14 @@ describe("init command", () => {
     }).not.toThrow();
 
     // Verify build outputs exist
-    const buildOutputs = [
-      "dist/my-worker.js",
-      "dist/default-policy.js",
-    ];
+    const buildOutputs = ["dist/my-worker.js", "dist/default-policy.js"];
 
     for (const output of buildOutputs) {
       const outputPath = path.join(projectPath, output);
-      const exists = await fs.access(outputPath).then(() => true).catch(() => false);
+      const exists = await fs
+        .access(outputPath)
+        .then(() => true)
+        .catch(() => false);
       expect(exists).toBe(true);
     }
   });
@@ -102,7 +105,7 @@ describe("init command", () => {
     // Check worker manifest template
     const workerManifest = await fs.readFile(
       path.join(projectPath, "workers/manifest.template.json"),
-      "utf-8"
+      "utf-8",
     );
     const workerManifestObj = JSON.parse(workerManifest);
     expect(workerManifestObj.bundle).toBeDefined();
@@ -112,7 +115,7 @@ describe("init command", () => {
     // Check policy manifest template
     const policyManifest = await fs.readFile(
       path.join(projectPath, "policies/manifest.template.json"),
-      "utf-8"
+      "utf-8",
     );
     const policyManifestObj = JSON.parse(policyManifest);
     expect(policyManifestObj.bundle).toBeDefined();

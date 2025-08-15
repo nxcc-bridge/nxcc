@@ -29,7 +29,7 @@ describe("Project initialization type safety", () => {
         const from = args?.from as string;
         const to = args?.to as string;
         const value = args?.value as string;
-        
+
         const transactionHash = eventPayload.transactionHash as string;
         const blockNumber = eventPayload.blockNumber as number;
 
@@ -39,7 +39,7 @@ describe("Project initialization type safety", () => {
         console.log(`  Amount: ${(Number(value) / 1e6).toFixed(2)} USDC`);
         console.log(`  Tx: ${transactionHash}`);
         console.log(`  Block: ${blockNumber}`);
-        
+
         return { processed: true, userConfig: userdata };
       },
     });
@@ -88,7 +88,7 @@ describe("Project initialization type safety", () => {
     const args = mockEventPayload.args as Record<string, unknown>;
     const nested = mockEventPayload.nested as Record<string, unknown>;
     const data = nested.data as Record<string, unknown>;
-    
+
     expect(args.from).toBe("0x123...");
     expect(data.timestamp).toBeDefined();
   });

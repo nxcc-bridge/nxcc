@@ -1,43 +1,18 @@
-import {
-  createPublicClient,
-  createWalletClient,
-  http,
-  Hex,
-  Address,
-  Chain,
-  defineChain,
-} from "viem";
+import { createPublicClient, createWalletClient, http, Hex, Address } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import IdentityAbi from "../abi/Identity.json";
 
 const identityContractAbi = IdentityAbi.abi;
 
-function getChain(chainId: number, gatewayUrl: string): Chain {
-  // TODO: Add more chains from viem/chains or allow custom chain definitions
-  if (chainId === 31337) {
-    return defineChain({
-      id: 31337,
-      name: "Anvil",
-      nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
-      rpcUrls: {
-        default: { http: [gatewayUrl] },
-      },
-    });
-  }
-  throw new Error(`Chain with id ${chainId} not supported yet.`);
-}
-
-function getClients(gatewayUrl: string, chainId: number, signerKey?: Hex) {
-  const chain = getChain(chainId, gatewayUrl);
+function getClients(gatewayUrl: string, signerKey?: Hex) {
   const transport = http(gatewayUrl);
 
-  const publicClient = createPublicClient({ chain, transport });
+  const publicClient = createPublicClient({ transport });
 
   if (signerKey) {
     const account = privateKeyToAccount(signerKey);
     const walletClient = createWalletClient({
       account,
-      chain,
       transport,
     });
     return { publicClient, walletClient };
@@ -53,7 +28,7 @@ export async function createIdentity(
   signerKey: Hex,
   policyUrl: string,
 ) {
-  const { publicClient, walletClient } = getClients(gatewayUrl, chainId, signerKey);
+  const { publicClient, walletClient } = getClients(gatewayUrl, signerKey);
   if (!walletClient) {
     throw new Error("Signer key is required to create an identity");
   }
@@ -95,7 +70,7 @@ export async function setPolicy(
   policyUrl: string,
   signerKey: Hex,
 ) {
-  const { publicClient, walletClient } = getClients(gatewayUrl, chainId, signerKey);
+  const { publicClient, walletClient } = getClients(gatewayUrl, signerKey);
   if (!walletClient) throw new Error("Signer key is required to set a policy");
 
   const { request } = await publicClient.simulateContract({
@@ -117,7 +92,7 @@ export async function getPolicy(
   contractAddress: Address,
   tokenId: string,
 ) {
-  const { publicClient } = getClients(gatewayUrl, chainId);
+  const { publicClient } = getClients(gatewayUrl);
 
   const policyUrl = await publicClient.readContract({
     address: contractAddress,

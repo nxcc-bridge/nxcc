@@ -1,0 +1,65 @@
+name: SDK Checks
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "sdk/**"
+      - ".github/workflows/sdk-checks.yaml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "sdk/**"
+      - ".github/workflows/sdk-checks.yaml"
+  workflow_dispatch:
+
+jobs:
+  sdk-checks:
+    name: SDK Lint and Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Install CLI dependencies
+        working-directory: sdk/cli
+        run: pnpm install
+
+      - name: Install SDK dependencies
+        working-directory: sdk/lib
+        run: pnpm install
+
+      - name: Build CLI
+        working-directory: sdk/cli
+        run: pnpm build
+
+      - name: Build SDK
+        working-directory: sdk/lib
+        run: pnpm build
+
+      - name: Lint CLI
+        working-directory: sdk/cli
+        run: pnpm lint
+
+      - name: Lint SDK
+        working-directory: sdk/lib
+        run: pnpm lint
+
+      - name: Test CLI
+        working-directory: sdk/cli
+        run: pnpm test
+
+      - name: Test SDK
+        working-directory: sdk/lib
+        run: pnpm test

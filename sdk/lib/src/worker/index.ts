@@ -11,7 +11,10 @@ export interface WorkerContext {
  * Handler function type for worker events.
  * Receives event payload and context, can return various types that will be automatically converted.
  */
-export type WorkerHandler<T = any> = (eventPayload: Record<string, unknown>, context: WorkerContext) => Promise<T> | T;
+export type WorkerHandler<T = any> = (
+  eventPayload: Record<string, unknown>,
+  context: WorkerContext,
+) => Promise<T> | T;
 
 /**
  * HTTP handler function type for worker HTTP requests.
