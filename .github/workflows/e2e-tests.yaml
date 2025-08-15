@@ -1,7 +1,10 @@
 name: End-to-End Tests
 
 on:
-  push:
+  workflow_run:
+    workflows: ["Build and Publish Node Docker Image"]
+    types:
+      - completed
     branches:
       - main
   pull_request:
@@ -24,6 +27,8 @@ jobs:
     name: Run KinD E2E Tests
     runs-on: ubuntu-latest
     timeout-minutes: 55
+    # Only run if docker build was successful (or on PR/manual trigger)
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
 
     steps:
       - name: Checkout repository
@@ -54,7 +59,22 @@ jobs:
       - name: Install pnpm
         run: npm install -g pnpm
 
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract short SHA
+        id: sha
+        run: echo "short=${GITHUB_SHA:0:7}" >> $GITHUB_OUTPUT
+
       - name: Run E2E tests
+        env:
+          # Pass pre-built image info for CI optimization (use short SHA to match build workflow)
+          E2E_PREBUILT_IMAGE: ghcr.io/${{ github.repository_owner }}/node:${{ steps.sha.outputs.short }}
+          E2E_CI_MODE: "true"
         run: |
           cd e2e
           ./e2e_test.sh --verbose --debug

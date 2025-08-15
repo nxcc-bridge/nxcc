@@ -5,6 +5,9 @@
 
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
+# Source infra common.sh for LOCAL_IMAGE_NAME and LOCAL_IMAGE_TAG constants
+source "$(dirname "${BASH_SOURCE[0]}")/../../infra/lib/common.sh"
+
 # Setup local kind cluster
 setup_local_cluster() {
     local project_root="$1"
@@ -17,14 +20,35 @@ setup_local_cluster() {
     
     log "Setting up local kind cluster..."
     
-    # Build local image first with timeout
-    verbose_log "Building local Docker image..."
-    local build_timeout="${E2E_DOCKER_BUILD_TIMEOUT:-900}"
-    if ! (cd "$project_root" && timeout "$build_timeout" ./infra/infra.sh build local); then
-        if [[ $? -eq 124 ]]; then
-            error "Docker build timed out after ${build_timeout} seconds"
-        else
-            error "Docker build failed"
+    # Handle Docker image preparation based on CI mode
+    if [[ "${E2E_CI_MODE:-false}" == "true" && -n "${E2E_PREBUILT_IMAGE:-}" ]]; then
+        verbose_log "Using pre-built Docker image from CI: $E2E_PREBUILT_IMAGE"
+        
+        # Pull and retag the pre-built image for local use
+        verbose_log "Pulling pre-built image..."
+        if ! docker pull "$E2E_PREBUILT_IMAGE"; then
+            error "Failed to pull pre-built image: $E2E_PREBUILT_IMAGE"
+        fi
+        
+        # Get the local image name from common.sh or infra/lib/common.sh
+        local local_image="${LOCAL_IMAGE_NAME:-nxcc-node-local}:${LOCAL_IMAGE_TAG:-latest}"
+        verbose_log "Retagging to local image name: $local_image"
+        if ! docker tag "$E2E_PREBUILT_IMAGE" "$local_image"; then
+            error "Failed to retag image to: $local_image"
+        fi
+        
+        success "Pre-built Docker image prepared for local deployment"
+    else
+        # Build local image first with timeout (existing behavior)
+        verbose_log "Building local Docker image..."
+        local build_timeout="${E2E_DOCKER_BUILD_TIMEOUT:-900}"
+        
+        if ! (cd "$project_root" && timeout "$build_timeout" ./infra/infra.sh build local); then
+            if [[ $? -eq 124 ]]; then
+                error "Docker build timed out after ${build_timeout} seconds"
+            else
+                error "Docker build failed"
+            fi
         fi
     fi
     

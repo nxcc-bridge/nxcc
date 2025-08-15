@@ -53,9 +53,9 @@ usage() {
   echo "      local:    Builds for local KinD deployment (debug mode default)."
   echo "      gcp:      Builds and pushes to GCP Artifact Registry (release mode default)."
   echo "    Environment variables:"
-  echo "      BUILD_MODE=debug|release       Build mode (debug faster, release optimized)"
-  echo "      BUILD_SINGLE_ARCH=true         Single architecture build for speed"
-  echo "      BUILD_PLATFORMS=linux/amd64    Override target platforms"
+  echo "      BUILD_MODE=debug|release              Build mode (debug faster, release optimized)"
+  echo "      BUILD_PLATFORMS=linux/amd64          Target platforms (defaults to linux/amd64)"
+  echo "                                            Use linux/amd64,linux/arm64 for multi-arch"
   echo
   echo "  ci <setup|teardown>"
   echo "    Manages GCP resources for CI/CD (Service Account, WIF, Artifact Registry)."

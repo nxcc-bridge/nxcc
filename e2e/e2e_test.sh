@@ -21,6 +21,7 @@
 #   --test-staging              Also test staging deployment after local
 #   --verbose                   Enable verbose logging
 #   --force-cleanup             Force cleanup of cluster resources
+#   --cache-from REPO           Use upstream cache from specified repository
 #   --help                      Show this help message
 
 set -e
@@ -50,7 +51,7 @@ export E2E_VERBOSE="false"
 export E2E_TEST_TEXT="Hello from NXCC E2E Test!"
 export E2E_PROJECT_ROOT="$PROJECT_ROOT"
 export BUILD_MODE="debug"  # Always use debug builds for faster e2e testing
-export BUILD_SINGLE_ARCH="true"  # Use single arch builds for faster e2e testing
+export BUILD_PLATFORMS="linux/amd64"  # Use single arch builds for faster e2e testing
 
 # Timeout configurations (in seconds)
 export E2E_WORKER_DEPLOY_TIMEOUT="300"  # 5 minutes for worker deployment
@@ -76,6 +77,7 @@ Options:
     --force-cleanup             Force cleanup of cluster resources
     --debug                     Use debug builds for faster development (default)
     --release                   Use release builds for production testing
+    --cache-from REPO           Use upstream cache from specified repository
     --help                      Show this help message
 
 Examples:
@@ -84,6 +86,9 @@ Examples:
 
     # Run with release builds for performance testing
     $0 --release
+
+    # Use upstream cache for faster builds
+    $0 --cache-from ghcr.io/my-org/node:latest
 
     # Test existing local cluster without setup/cleanup
     $0 --skip-cluster-setup --skip-cleanup
@@ -137,6 +142,10 @@ parse_args() {
                 # Set release mode via BUILD_MODE
                 export BUILD_MODE="release"
                 shift
+                ;;
+            --cache-from)
+                export BUILD_CACHE_FROM="$2"
+                shift 2
                 ;;
             --help)
                 show_help
