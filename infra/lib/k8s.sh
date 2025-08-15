@@ -67,13 +67,28 @@ k8s_deploy() {
       # CI (KinD) specific overrides
       # 1. Disable topology spread as KinD runs on a single node without zone labels.
       helm_set_args+=(--set seed.topologySpread.enabled=false)
-      # 2. Reduce resource requests/limits to fit within typical CI runner constraints.
-      helm_set_args+=(--set seed.resources.requests.cpu=250m)
-      helm_set_args+=(--set seed.resources.requests.memory=256Mi)
-      helm_set_args+=(--set seed.resources.limits.memory=512Mi)
-      helm_set_args+=(--set worker.resources.requests.cpu=500m)
-      helm_set_args+=(--set worker.resources.requests.memory=512Mi)
-      helm_set_args+=(--set worker.resources.limits.memory=1Gi)
+      
+      # 2. Resource configuration - use minimal resources for GitHub Actions
+      if [[ "${E2E_MINIMAL_RESOURCES:-false}" == "true" ]]; then
+        # Ultra-minimal resources for GitHub Actions (<1 CPU total)
+        info "Using minimal resource configuration for CI environment"
+        helm_set_args+=(--set seed.resources.requests.cpu=25m)
+        helm_set_args+=(--set seed.resources.requests.memory=64Mi)
+        helm_set_args+=(--set seed.resources.limits.cpu=50m)
+        helm_set_args+=(--set seed.resources.limits.memory=128Mi)
+        helm_set_args+=(--set worker.resources.requests.cpu=50m)
+        helm_set_args+=(--set worker.resources.requests.memory=128Mi)
+        helm_set_args+=(--set worker.resources.limits.cpu=100m)
+        helm_set_args+=(--set worker.resources.limits.memory=256Mi)
+      else
+        # Standard KinD resources for local development
+        helm_set_args+=(--set seed.resources.requests.cpu=250m)
+        helm_set_args+=(--set seed.resources.requests.memory=256Mi)
+        helm_set_args+=(--set seed.resources.limits.memory=512Mi)
+        helm_set_args+=(--set worker.resources.requests.cpu=500m)
+        helm_set_args+=(--set worker.resources.requests.memory=512Mi)
+        helm_set_args+=(--set worker.resources.limits.memory=1Gi)
+      fi
       ;;
     staging|prod)
       # For GKE cluster. Identity must be resolved.
