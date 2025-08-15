@@ -36,20 +36,16 @@ jobs:
       - name: Install pnpm
         run: npm install -g pnpm
 
-      - name: Install CLI dependencies
-        working-directory: sdk/cli
+      - name: Install workspace dependencies
+        working-directory: sdk
         run: pnpm install
 
-      - name: Install SDK dependencies
+      - name: Build SDK (dependency first)
         working-directory: sdk/lib
-        run: pnpm install
+        run: pnpm build
 
       - name: Build CLI
         working-directory: sdk/cli
-        run: pnpm build
-
-      - name: Build SDK
-        working-directory: sdk/lib
         run: pnpm build
 
       - name: Lint CLI
