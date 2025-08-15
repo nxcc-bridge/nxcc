@@ -11,20 +11,26 @@ use nxcc_interface::{
 use tonic::transport::Channel;
 use tracing::{debug, info, warn};
 
-use crate::{config::EnclaveConfig, error::AppError};
+use crate::{config::EnclaveConfig, error::AppError, http_server::VmRegistry};
 
 /// Service responsible for managing worker execution via the enclave's Runner service.
 #[derive(Clone)]
 pub struct RunnerService {
     client: RunnerClient<Channel>,
     enclave_config: EnclaveConfig, // Needed for default_vm_id
+    vm_registry: VmRegistry,
 }
 
 impl RunnerService {
-    pub fn new(client: RunnerClient<Channel>, enclave_config: EnclaveConfig) -> Self {
+    pub fn new(
+        client: RunnerClient<Channel>,
+        enclave_config: EnclaveConfig,
+        vm_registry: VmRegistry,
+    ) -> Self {
         Self {
             client,
             enclave_config,
+            vm_registry,
         }
     }
 
@@ -55,6 +61,10 @@ impl RunnerService {
         let attached = resp.into_inner().attached;
         if attached {
             info!("Successfully attached default VM.");
+            // Register the VM in our local registry
+            self.vm_registry
+                .add_vm(self.enclave_config.default_vm_id.clone())
+                .await;
         } else {
             warn!("Failed to attach default VM (enclave reported not attached).");
         }

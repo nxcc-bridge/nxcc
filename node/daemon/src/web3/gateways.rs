@@ -4,12 +4,12 @@ use alloy_primitives::{Address, U256};
 use alloy_provider::{DynProvider, Provider, ProviderBuilder};
 use alloy_sol_types::sol;
 use alloy_transport_http::Http;
+use nxcc_chainlist::{RpcType, get_rpcs_for_chain};
 use tokio::sync::RwLock;
 use tracing::debug;
 use url::Url;
 
 use crate::error::AppError;
-use nxcc_chainlist::{RpcType, get_rpcs_for_chain};
 
 sol!(
     #[sol(rpc)]

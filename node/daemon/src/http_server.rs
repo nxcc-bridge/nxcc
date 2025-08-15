@@ -1,11 +1,16 @@
-use std::{collections::HashMap, future::Future, net::SocketAddr, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    future::Future,
+    net::SocketAddr,
+    sync::Arc,
+};
 
 use axum::{
     body::{Body, Bytes},
     extract::{Json, State},
     http::{self, Request, StatusCode},
     response::{IntoResponse, Response},
-    routing::{Router, any, post},
+    routing::{Router, any, get, post},
 };
 use nxcc_interface::types::DsseEnvelope;
 use tokio::sync::RwLock;
@@ -17,6 +22,39 @@ use crate::{
     services::work_order_orchestrator::WorkOrderOrchestrator,
 };
 
+/// Registry for tracking attached VMs
+#[derive(Debug, Clone, Default)]
+pub struct VmRegistry {
+    /// Set of attached VM IDs
+    attached_vms: Arc<RwLock<HashSet<String>>>,
+}
+
+impl VmRegistry {
+    pub fn new() -> Self {
+        Self {
+            attached_vms: Arc::new(RwLock::new(HashSet::new())),
+        }
+    }
+
+    /// Add a VM ID to the registry
+    pub async fn add_vm(&self, vm_id: String) {
+        let mut vms = self.attached_vms.write().await;
+        vms.insert(vm_id);
+    }
+
+    /// Remove a VM ID from the registry
+    pub async fn remove_vm(&self, vm_id: &str) {
+        let mut vms = self.attached_vms.write().await;
+        vms.remove(vm_id);
+    }
+
+    /// Get a list of all attached VM IDs
+    pub async fn list_vms(&self) -> Vec<String> {
+        let vms = self.attached_vms.read().await;
+        vms.iter().cloned().collect()
+    }
+}
+
 /// Shared application state available to all handlers.
 struct AppState {
     enclave_client: EnclaveClient,
@@ -24,6 +62,10 @@ struct AppState {
     /// e.g., "my-worker" -> "enclave_worker_id_123"
     http_mounts: Arc<RwLock<HashMap<String, String>>>,
     work_order_orchestrator: Arc<WorkOrderOrchestrator>,
+    /// Local peer identity for P2P networking
+    local_key: libp2p::identity::Keypair,
+    /// Registry of attached VMs
+    vm_registry: VmRegistry,
 }
 
 #[derive(serde::Serialize)]
@@ -35,6 +77,14 @@ struct ApiErrorResponse {
 struct SubmitWorkOrderSuccessResponse {
     work_order_id: String,
     message: String,
+}
+
+#[derive(serde::Serialize)]
+struct StatusResponse {
+    health: String,
+    peer_id: String,
+    connected_peers: Vec<String>,
+    vm_ids: Vec<String>,
 }
 
 /// A wrapper for `AppError` to provide an `IntoResponse` implementation for the API layer.
@@ -210,12 +260,36 @@ async fn submit_work_order_handler(
     ))
 }
 
+/// Handles status requests, returning node health and P2P information.
+async fn status_handler(State(state): State<Arc<AppState>>) -> Result<impl IntoResponse, ApiError> {
+    info!("Received status request");
+
+    // Get peer ID from local key
+    let peer_id = state.local_key.public().to_peer_id().to_string();
+
+    // Get VM list from local registry
+    let vm_ids = state.vm_registry.list_vms().await;
+
+    // For now, we'll return a placeholder for connected peers
+    // In a full implementation, we'd need access to the swarm's connection state
+    let connected_peers = Vec::<String>::new(); // TODO: Implement peer list retrieval
+
+    Ok(Json(StatusResponse {
+        health: "ok".to_string(),
+        peer_id,
+        connected_peers,
+        vm_ids,
+    }))
+}
+
 /// Configures and starts the HTTP server.
 pub async fn start_http_server(
     config: &HttpConfig,
     http_mounts: Arc<RwLock<HashMap<String, String>>>,
     enclave_client: EnclaveClient,
     work_order_orchestrator: Arc<WorkOrderOrchestrator>,
+    local_key: libp2p::identity::Keypair,
+    vm_registry: VmRegistry,
     shutdown_signal: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), anyhow::Error> {
     let worker_base_path = config.base_mount_path.trim_end_matches('/');
@@ -227,6 +301,8 @@ pub async fn start_http_server(
         enclave_client,
         http_mounts,
         work_order_orchestrator,
+        local_key,
+        vm_registry,
     });
 
     // --- Router Configuration ---
@@ -235,7 +311,9 @@ pub async fn start_http_server(
 
     // Conditionally add the `/api` routes
     if config.api_enabled {
-        let mut api_router = Router::new().route("/work-orders", post(submit_work_order_handler));
+        let mut api_router = Router::new()
+            .route("/work-orders", post(submit_work_order_handler))
+            .route("/status", get(status_handler));
 
         // Conditionally add CORS layer to the API router
         if !config.api_cors_allowed_origins.is_empty() {

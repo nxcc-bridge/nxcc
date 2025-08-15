@@ -14,6 +14,7 @@ use crate::{
     config::GrpcConfig,
     error::AppError,
     grpc::{debug::DebugGrpc, enclave_client::EnclaveClient, work_orders::WorkOrderGrpcService},
+    http_server::VmRegistry,
     services::{secrets::SecretsService, work_order_orchestrator::WorkOrderOrchestrator},
 };
 
@@ -22,6 +23,7 @@ pub async fn start_grpc_server(
     secrets_service: std::sync::Arc<SecretsService>,
     work_order_orchestrator: Arc<WorkOrderOrchestrator>,
     enclave_client: EnclaveClient,
+    vm_registry: VmRegistry,
     mut shutdown: tokio::sync::broadcast::Receiver<()>,
 ) -> Result<(), AppError> {
     match config.mode.as_str() {
@@ -41,6 +43,7 @@ pub async fn start_grpc_server(
                 .add_service(DebugServer::new(DebugGrpc::new(
                     enclave_client.clone(),
                     work_order_orchestrator.clone(),
+                    vm_registry.clone(),
                 )))
                 .add_service(WorkOrderServer::new(WorkOrderGrpcService::new(
                     work_order_orchestrator,
@@ -94,6 +97,7 @@ pub async fn start_grpc_server(
                 let svc = DebugServer::new(DebugGrpc::new(
                     enclave_client.clone(),
                     work_order_orchestrator.clone(),
+                    vm_registry.clone(),
                 ));
                 let wo_svc = WorkOrderServer::new(WorkOrderGrpcService::new(
                     work_order_orchestrator,
@@ -130,6 +134,7 @@ pub async fn start_grpc_server(
                 .add_service(DebugServer::new(DebugGrpc::new(
                     enclave_client.clone(),
                     work_order_orchestrator.clone(),
+                    vm_registry.clone(),
                 )))
                 .add_service(WorkOrderServer::new(WorkOrderGrpcService::new(
                     work_order_orchestrator,

@@ -11,19 +11,26 @@ use tonic::{Request, Response, Status};
 use tracing::{debug, error, info};
 
 use crate::{
-    grpc::enclave_client::EnclaveClient, services::work_order_orchestrator::WorkOrderOrchestrator,
+    grpc::enclave_client::EnclaveClient, http_server::VmRegistry,
+    services::work_order_orchestrator::WorkOrderOrchestrator,
 };
 
 pub struct DebugGrpc {
     enclave_client: EnclaveClient,
     orchestrator: Arc<WorkOrderOrchestrator>,
+    vm_registry: VmRegistry,
 }
 
 impl DebugGrpc {
-    pub fn new(enclave_client: EnclaveClient, orchestrator: Arc<WorkOrderOrchestrator>) -> Self {
+    pub fn new(
+        enclave_client: EnclaveClient,
+        orchestrator: Arc<WorkOrderOrchestrator>,
+        vm_registry: VmRegistry,
+    ) -> Self {
         Self {
             enclave_client,
             orchestrator,
+            vm_registry,
         }
     }
 }
@@ -46,8 +53,14 @@ impl Debug for DebugGrpc {
 
         tracing::info!("AttachVm debug request: vm_id='{vm_id}', uds_path='{uds_path}'");
 
-        match self.enclave_client.attach_vm(vm_id, uds_path).await {
-            Ok(attached) => Ok(Response::new(AttachVmResponse { success: true })),
+        match self.enclave_client.attach_vm(vm_id.clone(), uds_path).await {
+            Ok(attached) => {
+                if attached {
+                    // Register the VM in our local registry
+                    self.vm_registry.add_vm(vm_id).await;
+                }
+                Ok(Response::new(AttachVmResponse { success: attached }))
+            }
             Err(e) => {
                 tracing::error!("AttachVm failed: {e}");
                 Err(Status::internal(e))

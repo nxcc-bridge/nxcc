@@ -16,6 +16,13 @@ cargo build --release
 cargo build -p nxcc-daemon -p nxcc-platform-enclave -p nxcc-workerd-vm
 ```
 
+### Linting & Formatting the Project
+
+```
+cargo +nightly fmt
+cargo clippy --all-features --profile test
+```
+
 ### Running the System
 ```bash
 # Start a single NXCC node locally

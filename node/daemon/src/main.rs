@@ -21,7 +21,7 @@ use tracing_subscriber::{EnvFilter, FmtSubscriber as Subscriber, fmt::format::Fm
 
 use crate::{
     config::{Config, EnclaveConfig},
-    http_server::start_http_server,
+    http_server::{VmRegistry, start_http_server},
     identity::{create_ephemeral_identity, get_or_create_identity},
     network::NetworkManager,
     policy::PolicyManager,
@@ -83,10 +83,14 @@ async fn main() -> anyhow::Result<()> {
                 )
             });
 
+    // Create VM registry for tracking attached VMs
+    let vm_registry = VmRegistry::new();
+
     // Instantiate services
     let runner_service = Arc::new(RunnerService::new(
         enclave_client.runner(),
         config.enclave.clone(),
+        vm_registry.clone(),
     ));
     let gateway_manager = Arc::new(GatewayManager::new());
     let policy_manager = Arc::new(PolicyManager::new(gateway_manager.clone(), &config).await?);
@@ -106,7 +110,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let mut network = NetworkManager::new(
-        local_key,
+        local_key.clone(),
         config.clone(),
         secrets_service.clone(),
         secrets_rx,
@@ -134,12 +138,14 @@ async fn main() -> anyhow::Result<()> {
         let secrets_service_clone = secrets_service.clone();
         let work_order_orchestrator_for_grpc = work_order_orchestrator.clone();
         let enclave_client_for_grpc_server = enclave_client.clone();
+        let vm_registry_for_grpc = vm_registry.clone();
         tokio::spawn(async move {
             if let Err(e) = grpc::start_grpc_server(
                 &grpc_config,
                 secrets_service_clone,
                 work_order_orchestrator_for_grpc,
                 enclave_client_for_grpc_server,
+                vm_registry_for_grpc,
                 shutdown_rx,
             )
             .await
@@ -155,6 +161,8 @@ async fn main() -> anyhow::Result<()> {
     let mut shutdown_rx_for_http = shutdown_tx.subscribe();
     let http_mounts_for_server = http_mounts.clone();
     let work_order_orchestrator_for_http = work_order_orchestrator.clone();
+    let local_key_for_http = local_key.clone();
+    let vm_registry_for_http = vm_registry.clone();
 
     tokio::spawn(async move {
         if let Err(e) = start_http_server(
@@ -162,6 +170,8 @@ async fn main() -> anyhow::Result<()> {
             http_mounts_for_server,
             enclave_client_for_http,
             work_order_orchestrator_for_http,
+            local_key_for_http,
+            vm_registry_for_http,
             async move {
                 shutdown_rx_for_http.recv().await.ok();
             },
