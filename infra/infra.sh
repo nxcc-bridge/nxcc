@@ -4,6 +4,20 @@
 #
 # This script is the main entrypoint. It sources its functionality from the
 # scripts in the ./lib/ directory.
+#
+# IDEMPOTENCY GUARANTEE:
+# All operations in this script are designed to be idempotent and safe to run multiple times:
+#
+# - `cluster create <env>`: Checks if cluster exists before creating, skips if already present
+# - `k8s deploy <env>`: Helm upgrade --install ensures idempotent deployments  
+# - `build <target>`: Docker builds are layer-cached and idempotent
+# - `ci setup`: Creates resources only if they don't exist, updates policies if needed
+#
+# This allows the script to be used safely in automation, CI/CD pipelines, and development
+# workflows without fear of duplicate resource creation or deployment conflicts.
+#
+# For e2e testing and development, you can run the same commands multiple times to ensure
+# your environment reaches the desired state regardless of starting conditions.
 
 set -e
 set -o pipefail
@@ -34,9 +48,13 @@ usage() {
   echo
   echo "Commands:"
   echo "  build <local|gcp>"
-  echo "    Builds Docker images with correct architecture."
-  echo "      local:    Builds for local KinD deployment (multi-arch)."
-  echo "      gcp:      Builds and pushes to GCP Artifact Registry."
+  echo "    Builds Docker images for Intel TDX TEE (defaults to amd64)."
+  echo "      local:    Builds for local KinD deployment (debug mode default)."
+  echo "      gcp:      Builds and pushes to GCP Artifact Registry (release mode default)."
+  echo "    Environment variables:"
+  echo "      BUILD_MODE=debug|release       Build mode (debug faster, release optimized)"
+  echo "      BUILD_SINGLE_ARCH=true         Single architecture build for speed"
+  echo "      BUILD_PLATFORMS=linux/amd64    Override target platforms"
   echo
   echo "  ci <setup|teardown>"
   echo "    Manages GCP resources for CI/CD (Service Account, WIF, Artifact Registry)."

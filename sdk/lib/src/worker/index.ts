@@ -3,7 +3,7 @@
  * Contains userdata from the worker configuration and other environment data.
  */
 export interface WorkerContext {
-  userdata: any;
+  userdata: Record<string, unknown>;
   env: any;
 }
 
@@ -11,7 +11,7 @@ export interface WorkerContext {
  * Handler function type for worker events.
  * Receives event payload and context, can return various types that will be automatically converted.
  */
-export type WorkerHandler<T = any> = (eventPayload: any, context: WorkerContext) => Promise<T> | T;
+export type WorkerHandler<T = any> = (eventPayload: Record<string, unknown>, context: WorkerContext) => Promise<T> | T;
 
 /**
  * HTTP handler function type for worker HTTP requests.
@@ -27,7 +27,7 @@ export type WorkerHttpHandler<T = any> = (
  * Receives event payload and context, can return void or other types.
  */
 export type WorkerLaunchHandler = (
-  eventPayload: any,
+  eventPayload: Record<string, unknown>,
   context: WorkerContext,
 ) => Promise<void | any> | void | any;
 
@@ -35,7 +35,7 @@ export type WorkerLaunchHandler = (
  * Custom event handler - typically doesn't return anything meaningful (void/undefined becomes 204).
  */
 export type CustomEventHandler = (
-  eventPayload: any,
+  eventPayload: Record<string, unknown>,
   context: WorkerContext,
 ) => Promise<void | any> | void | any;
 

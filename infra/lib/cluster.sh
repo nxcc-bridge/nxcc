@@ -87,6 +87,10 @@ cluster_create_kind() {
     kind create cluster --name "${KIND_CLUSTER_NAME}"
     success "KinD cluster created."
   fi
+  
+  # Ensure kubectl context is set to the kind cluster
+  info "Setting kubectl context to KinD cluster..."
+  kubectl config use-context "kind-${KIND_CLUSTER_NAME}"
 
   info "Attempting to load local Docker image '${LOCAL_IMAGE_NAME}:${LOCAL_IMAGE_TAG}' into the cluster..."
   info "Note: This assumes you have already built the image (e.g., 'docker build -t ${LOCAL_IMAGE_NAME}:${LOCAL_IMAGE_TAG} .')."

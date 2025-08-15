@@ -35,6 +35,12 @@ cargo build && sh node/tests/integration_test.sh
 
 # Run specific workspace tests
 cargo test -p nxcc-daemon
+
+# Run end-to-end tests (local environment)
+cd e2e && ./e2e_test.sh
+
+# Run end-to-end tests (staging environment - requires GCP setup)
+cd e2e && ./e2e_test.sh --env staging
 ```
 
 ### Component-Specific Commands

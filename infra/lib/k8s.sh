@@ -15,6 +15,23 @@ k8s_deploy() {
   local helm_set_args=()
   # Use HELM_TIMEOUT if set, otherwise default to 5m.
   local helm_timeout="${HELM_TIMEOUT:-5m}"
+  
+  # Verify kubectl context is correct for the environment
+  local current_context
+  current_context=$(kubectl config current-context)
+  case "$env" in
+    debug)
+      if [[ "$current_context" != "kind-nxcc-debug" ]]; then
+        warn "Kubectl context is '$current_context', expected 'kind-nxcc-debug'. Switching context..."
+        kubectl config use-context "kind-nxcc-debug"
+      fi
+      ;;
+    staging|prod)
+      if [[ "$current_context" != *"nxcc"* ]]; then
+        warn "Kubectl context is '$current_context', may not be correct for GKE deployment"
+      fi
+      ;;
+  esac
 
   info "Starting application deployment to '${env}' environment..."
   check_deps helm kubectl
@@ -98,6 +115,15 @@ k8s_deploy() {
     "${helm_set_args[@]}"
 
   success "Application deployment to '${env}' complete."
+  
+  # Wait for pods to be ready
+  info "Waiting for pods to be ready in namespace '${namespace}'..."
+  if kubectl wait --for=condition=ready pod --all -n "${namespace}" --timeout=300s; then
+    success "All pods in namespace '${namespace}' are ready."
+  else
+    warn "Some pods in namespace '${namespace}' may not be ready. Check status manually."
+  fi
+  
   info "Use 'kubectl get all -n ${namespace}' to check status."
 }
 

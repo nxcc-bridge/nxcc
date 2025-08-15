@@ -7,8 +7,15 @@ FROM alpine:3.20 AS workerd-downloader
 RUN apk add --no-cache curl gzip
 
 ARG WORKERD_VERSION=v1.20250520.0
+ARG TARGETARCH
 ARG WORKERD_ARCH=linux-64
-RUN curl -sSL "https://github.com/cloudflare/workerd/releases/download/${WORKERD_VERSION}/workerd-${WORKERD_ARCH}.gz" | gunzip > /opt/workerd
+# Set workerd architecture based on target platform
+RUN case "${TARGETARCH}" in \
+      arm64) WORKERD_ARCH="linux-arm64" ;; \
+      amd64) WORKERD_ARCH="linux-64" ;; \
+      *) WORKERD_ARCH="linux-64" ;; \
+    esac && \
+    curl -sSL "https://github.com/cloudflare/workerd/releases/download/${WORKERD_VERSION}/workerd-${WORKERD_ARCH}.gz" | gunzip > /opt/workerd
 
 # Stage 1: Builder
 FROM rust:1.85.0-slim-bookworm AS builder
@@ -47,8 +54,8 @@ COPY enclave/Cargo.toml ./enclave/Cargo.toml
 COPY vm/base/Cargo.toml ./vm/base/Cargo.toml
 COPY vm/workerd/Cargo.toml ./vm/workerd/Cargo.toml
 COPY chainlist/Cargo.toml ./chainlist/Cargo.toml
-RUN mkdir -p interface/src daemon/src enclave/src vm/base/src vm/workerd/src chainlist/src && \
-    touch interface/src/lib.rs daemon/src/main.rs enclave/src/main.rs vm/base/src/lib.rs vm/workerd/src/main.rs chainlist/src/main.rs
+RUN mkdir -p interface/src daemon/src enclave/src vm/base/src vm/workerd/src chainlist/src chainlist/src/bin && \
+    touch interface/src/lib.rs daemon/src/main.rs enclave/src/main.rs vm/base/src/lib.rs vm/workerd/src/main.rs chainlist/src/lib.rs chainlist/src/bin/main.rs
 
 # Cache the crates
 RUN cargo metadata --format-version 1 > /dev/null
@@ -59,6 +66,7 @@ COPY interface ./interface
 COPY daemon ./daemon
 COPY enclave ./enclave
 COPY vm ./vm
+COPY chainlist ./chainlist
 
 # Build mode configuration. Set `--build-arg BUILD_MODE=` to do a debug build.
 ARG BUILD_MODE=release
