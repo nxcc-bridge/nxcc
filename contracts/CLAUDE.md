@@ -34,6 +34,12 @@ forge soldeer install
 # Build contracts
 forge build
 
+# Format code (use appropriate formatter for the file types)
+forge fmt
+
+# Check formatting without making changes  
+forge fmt --check
+
 # Run tests
 forge test
 
@@ -136,7 +142,23 @@ This is the Smart Contract component of the nXCC (Network eXecutable Cross-Chain
 2. Follow OpenZeppelin patterns for security
 3. Update tests to cover new functionality
 4. Verify gas usage with `forge test --gas-report`
-5. Run full test suite before committing
+5. Format code using appropriate formatter for the file types
+6. Run full test suite before committing
+
+### Code Quality
+
+After making changes, always run:
+
+```bash
+# Format code (use appropriate formatter for the component/file types)
+forge fmt
+
+# Run tests
+forge test
+
+# Optional: Check gas usage
+forge test --gas-report
+```
 
 ### Testing Best Practices
 
