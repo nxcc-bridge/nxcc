@@ -5,12 +5,47 @@
 
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
+# Ensure SDK lib is built
+ensure_sdk_lib() {
+    local project_root="${1:-$E2E_PROJECT_ROOT}"
+    
+    verbose_log "Ensuring SDK lib is built..."
+    
+    if ! cd "$project_root/sdk/lib"; then
+        error "Failed to change to SDK lib directory: $project_root/sdk/lib"
+    fi
+    
+    # Check if dist directory exists and has files
+    if [[ ! -d "dist" ]] || [[ ! -f "dist/index.js" ]] || [[ ! -f "dist/index.d.ts" ]]; then
+        verbose_log "SDK lib not built, building now..."
+        
+        # Run npm install and build for SDK lib
+        verbose_log "Running npm install in SDK lib..."
+        local npm_install_output
+        if ! npm_install_output=$(npm install 2>&1); then
+            error "npm install failed in SDK lib:\n$npm_install_output"
+        fi
+        
+        verbose_log "Building SDK lib..."
+        local npm_build_output
+        if ! npm_build_output=$(npm run build 2>&1); then
+            error "npm run build failed in SDK lib:\n$npm_build_output"
+        fi
+        verbose_log "SDK lib built successfully"
+    else
+        verbose_log "SDK lib already built"
+    fi
+}
+
 # Initialize new project in temp directory
 init_test_project() {
     local temp_dir="$1"
     local project_root="${2:-$E2E_PROJECT_ROOT}"
     
     log "Initializing test project..."
+    
+    # Ensure SDK lib is built first
+    ensure_sdk_lib "$project_root"
     
     cd "$temp_dir"
     
@@ -209,9 +244,13 @@ build_project() {
     cd "$project_dir"
     
     # Install esbuild if not available
-    if ! npm list esbuild >/dev/null 2>&1; then
-        verbose_log "Installing esbuild..."
+    local npm_list_output
+    if ! npm_list_output=$(npm list esbuild 2>&1); then
+        verbose_log "esbuild not found, installing..."
+        verbose_log "npm list output: $npm_list_output"
         npm install --save-dev esbuild@^0.21.4
+    else
+        verbose_log "esbuild already installed"
     fi
     
     # Build TypeScript

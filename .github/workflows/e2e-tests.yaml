@@ -9,11 +9,15 @@ on:
       - main
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   # Use minimal resource requests for GitHub Actions environment
   E2E_MINIMAL_RESOURCES: "true"
   # GitHub Actions timeout (slightly less than job timeout)
-  E2E_TOTAL_TIMEOUT: "3000"  # 50 minutes
+  E2E_TOTAL_TIMEOUT: "3000" # 50 minutes
 
 jobs:
   e2e-tests:
@@ -25,139 +29,32 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
       - name: Install dependencies
         run: |
           # Install kind
           curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
           chmod +x ./kind
           sudo mv ./kind /usr/local/bin/kind
-          
+
           # Install kubectl
           curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
           chmod +x kubectl
           sudo mv kubectl /usr/local/bin/kubectl
-          
+
           # Install helm
           curl https://get.helm.sh/helm-v3.12.3-linux-amd64.tar.gz | tar -xzO linux-amd64/helm > helm
           chmod +x helm
           sudo mv helm /usr/local/bin/helm
 
-      - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: 1.85.0
-
-      - name: Cache Rust dependencies
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-            node/target
-          key: ${{ runner.os }}-rust-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-rust-
-
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: "22"
 
       - name: Install pnpm
         run: npm install -g pnpm
 
-      - name: Create minimal resource values for testing
-        run: |
-          # Create a values override file with minimal resources for CI
-          mkdir -p /tmp/e2e-overrides
-          cat > /tmp/e2e-overrides/minimal-resources.yaml << 'EOF'
-          # Minimal resource configuration for GitHub Actions CI
-          seed:
-            resources:
-              requests:
-                cpu: 50m      # Very minimal CPU for seed nodes
-                memory: 128Mi  # Minimal memory
-              limits:
-                cpu: 100m
-                memory: 256Mi
-          
-          worker:
-            resources:
-              requests:
-                cpu: 100m     # Minimal CPU for worker nodes  
-                memory: 256Mi  # Minimal memory
-              limits:
-                cpu: 200m
-                memory: 512Mi
-          EOF
-          
-          # Export the path for the e2e test script to use
-          echo "E2E_VALUES_OVERRIDE=/tmp/e2e-overrides/minimal-resources.yaml" >> $GITHUB_ENV
-
-      - name: Build Rust components
-        run: |
-          # Build the Rust workspace first to cache dependencies
-          cargo build --workspace
-        env:
-          # Use debug builds for faster CI execution
-          BUILD_MODE: debug
-
       - name: Run E2E tests
         run: |
           cd e2e
-          # Run with verbose logging and skip cleanup to see logs on failure
           ./e2e_test.sh --verbose --debug
-        env:
-          # Enable verbose logging for debugging CI issues
-          E2E_VERBOSE: "true"
-          # Use debug builds for faster execution
-          BUILD_MODE: debug
-          BUILD_SINGLE_ARCH: "true"
-          # GitHub Actions specific timeouts (shorter than defaults)
-          E2E_WORKER_DEPLOY_TIMEOUT: "600"   # 10 minutes
-          E2E_HTTP_TEST_TIMEOUT: "300"       # 5 minutes  
-          E2E_DOCKER_BUILD_TIMEOUT: "1200"   # 20 minutes
-          HELM_TIMEOUT: "10m"
-
-      - name: Get cluster info on failure
-        if: failure()
-        run: |
-          echo "=== Cluster Info ==="
-          kubectl cluster-info || true
-          
-          echo "=== Node Info ==="
-          kubectl get nodes -o wide || true
-          
-          echo "=== Pod Status ==="
-          kubectl get pods --all-namespaces -o wide || true
-          
-          echo "=== Pod Descriptions ==="
-          kubectl describe pods --all-namespaces || true
-          
-          echo "=== Recent Events ==="
-          kubectl get events --all-namespaces --sort-by='.lastTimestamp' | tail -50 || true
-          
-          echo "=== Docker Images ==="
-          docker images || true
-          
-          echo "=== Kind Cluster Status ==="
-          kind get clusters || true
-
-      - name: Get application logs on failure
-        if: failure()
-        run: |
-          echo "=== NXCC Application Logs ==="
-          kubectl logs -l app.kubernetes.io/name=nxcc-node --all-containers --prefix=true --tail=200 || true
-
-      - name: Cleanup
-        if: always()
-        run: |
-          # Always cleanup kind cluster to free resources
-          kind delete clusters --all || true
-          
-          # Clean up any remaining docker containers/images from the test
-          docker system prune -f || true

@@ -40,7 +40,21 @@ verbose_log() {
 
 # Check if a command exists
 command_exists() {
-    command -v "$1" &> /dev/null
+    local cmd="$1"
+    local verbose_check="${2:-false}"
+    
+    if [[ "$verbose_check" == "true" ]]; then
+        verbose_log "Checking if command '$cmd' exists..."
+        if command -v "$cmd"; then
+            verbose_log "✓ Command '$cmd' found at: $(command -v "$cmd")"
+            return 0
+        else
+            verbose_log "✗ Command '$cmd' not found"
+            return 1
+        fi
+    else
+        command -v "$cmd" &> /dev/null
+    fi
 }
 
 # Check dependencies
@@ -69,17 +83,87 @@ ensure_nxcc_cli() {
     
     if ! command_exists nxcc; then
         log "NXCC CLI not found, attempting to build from source..."
-        cd "$project_root/sdk/cli"
-        npm install
-        npm run build
-        export PATH="$project_root/sdk/cli/dist:$PATH"
-        cd "$project_root"
         
-        if ! command_exists nxcc; then
-            error "Failed to build NXCC CLI"
+        # First, ensure the SDK lib is built since the CLI depends on it
+        verbose_log "Building SDK lib dependency..."
+        if ! cd "$project_root/sdk/lib"; then
+            error "Failed to change to SDK lib directory: $project_root/sdk/lib"
         fi
         
-        success "NXCC CLI built successfully"
+        # Run npm install and build for SDK lib
+        verbose_log "Running npm install in SDK lib..."
+        local npm_install_output
+        if ! npm_install_output=$(npm install 2>&1); then
+            error "npm install failed in SDK lib:\n$npm_install_output"
+        fi
+        
+        verbose_log "Building SDK lib..."
+        local npm_build_output
+        if ! npm_build_output=$(npm run build 2>&1); then
+            error "npm run build failed in SDK lib:\n$npm_build_output"
+        fi
+        verbose_log "SDK lib built successfully"
+        
+        # Change to CLI directory
+        verbose_log "Changing to CLI directory: $project_root/sdk/cli"
+        if ! cd "$project_root/sdk/cli"; then
+            error "Failed to change to CLI directory: $project_root/sdk/cli"
+        fi
+        
+        # Run npm install with error handling
+        verbose_log "Running npm install..."
+        local npm_install_output
+        if ! npm_install_output=$(npm install 2>&1); then
+            error "npm install failed:\n$npm_install_output"
+        fi
+        verbose_log "npm install completed successfully"
+        
+        # Run npm build with error handling
+        verbose_log "Running npm run build..."
+        local npm_build_output
+        if ! npm_build_output=$(npm run build 2>&1); then
+            error "npm run build failed:\n$npm_build_output"
+        fi
+        verbose_log "npm run build completed successfully"
+        
+        # Check if dist/index.js was created
+        local dist_dir="$project_root/sdk/cli/dist"
+        local index_js="$dist_dir/index.js"
+        if [[ ! -f "$index_js" ]]; then
+            error "Build completed but $index_js was not created. Build output:\n$npm_build_output"
+        fi
+        verbose_log "Build output file exists: $index_js"
+        
+        # Create symlink to make nxcc command available
+        verbose_log "Creating symlink for nxcc command..."
+        if [[ ! -f "$dist_dir/nxcc" ]]; then
+            if ! ln -sf "$index_js" "$dist_dir/nxcc"; then
+                error "Failed to create symlink from $dist_dir/nxcc to $index_js"
+            fi
+        fi
+        verbose_log "Symlink created: $dist_dir/nxcc -> $index_js"
+        
+        # Add to PATH
+        verbose_log "Adding $dist_dir to PATH"
+        export PATH="$dist_dir:$PATH"
+        
+        # Return to project root
+        cd "$project_root"
+        
+        # Final verification
+        verbose_log "Verifying nxcc command is available..."
+        if ! command_exists nxcc "true"; then
+            local which_output
+            which_output=$(which nxcc 2>&1 || echo "Command not found")
+            local path_content="PATH=$PATH"
+            local ls_dist
+            ls_dist=$(ls -la "$dist_dir" 2>&1 || echo "Directory listing failed")
+            error "nxcc command still not available after build.\nDetails:\n- which nxcc: $which_output\n- $path_content\n- dist directory contents:\n$ls_dist"
+        fi
+        
+        local nxcc_location
+        nxcc_location=$(which nxcc)
+        success "NXCC CLI built successfully and available at: $nxcc_location"
     else
         verbose_log "NXCC CLI found at: $(which nxcc)"
     fi
@@ -103,7 +187,13 @@ wait_for_pods() {
 # Get worker pod name
 get_worker_pod() {
     local namespace="$1"
-    kubectl get pods -n "$namespace" -l app.kubernetes.io/component=worker -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo ""
+    local pod_name
+    if ! pod_name=$(kubectl get pods -n "$namespace" -l app.kubernetes.io/component=worker -o jsonpath='{.items[0].metadata.name}' 2>&1); then
+        verbose_log "Failed to get worker pod in namespace $namespace: $pod_name"
+        echo ""
+        return 1
+    fi
+    echo "$pod_name"
 }
 
 # Setup port forwarding
@@ -129,7 +219,8 @@ setup_port_forward() {
     verbose_log "Port-forwarding $worker_pod:$daemon_port -> localhost:$test_port"
     
     # Start port-forward in background
-    kubectl port-forward -n "$namespace" pod/"$worker_pod" "$test_port:$daemon_port" >/dev/null 2>&1 &
+    verbose_log "Starting port-forward: kubectl port-forward -n $namespace pod/$worker_pod $test_port:$daemon_port"
+    kubectl port-forward -n "$namespace" pod/"$worker_pod" "$test_port:$daemon_port" &
     local pf_pid=$!
     
     # Store PID for cleanup
@@ -153,8 +244,8 @@ cleanup_port_forward() {
         pf_pid=$(cat "$pid_file")
         if kill -0 "$pf_pid" 2>/dev/null; then
             verbose_log "Stopping port-forward for $env (PID: $pf_pid)..."
-            kill "$pf_pid" 2>/dev/null
-            wait "$pf_pid" 2>/dev/null || true
+            kill "$pf_pid"
+            wait "$pf_pid" || verbose_log "Port-forward process $pf_pid already exited"
         fi
         rm -f "$pid_file"
     fi
@@ -173,10 +264,21 @@ test_http_endpoint() {
         verbose_log "Testing $method $url (attempt $i/$retries)..."
         
         local response
+        local curl_output
         if [[ "$method" == "POST" && -n "$data" ]]; then
-            response=$(curl -s -f -X POST -H "Content-Type: application/json" -d "$data" "$url" 2>/dev/null || echo "FAILED")
+            if ! curl_output=$(curl -s -f -X POST -H "Content-Type: application/json" -d "$data" "$url" 2>&1); then
+                response="FAILED"
+                verbose_log "curl failed: $curl_output"
+            else
+                response="$curl_output"
+            fi
         else
-            response=$(curl -s -f "$url" 2>/dev/null || echo "FAILED")
+            if ! curl_output=$(curl -s -f "$url" 2>&1); then
+                response="FAILED"
+                verbose_log "curl failed: $curl_output"
+            else
+                response="$curl_output"
+            fi
         fi
         
         if [[ "$response" == "FAILED" ]]; then
@@ -259,7 +361,8 @@ with_port_forward() {
     verbose_log "Port-forwarding $worker_pod:6922 -> localhost:$port"
     
     # Start port-forward in background
-    kubectl port-forward -n "$namespace" pod/"$worker_pod" "$port:6922" >/dev/null 2>&1 &
+    verbose_log "Starting port-forward: kubectl port-forward -n $namespace pod/$worker_pod $port:6922"
+    kubectl port-forward -n "$namespace" pod/"$worker_pod" "$port:6922" &
     local pf_pid=$!
     
     # Wait for port-forward to be ready
@@ -274,8 +377,8 @@ with_port_forward() {
     # Cleanup port-forward
     if kill -0 "$pf_pid" 2>/dev/null; then
         verbose_log "Stopping port-forward (PID: $pf_pid)..."
-        kill "$pf_pid" 2>/dev/null
-        wait "$pf_pid" 2>/dev/null || true
+        kill "$pf_pid"
+        wait "$pf_pid" || verbose_log "Port-forward process $pf_pid already exited"
     fi
     
     return $exit_code
@@ -300,12 +403,23 @@ quick_http_test() {
             # Get the actual ingress IP for staging
             log "Getting ingress IP for staging environment..."
             local ingress_ip
-            ingress_ip=$(kubectl get ingress -n staging -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+            local ingress_output
+            if ! ingress_output=$(kubectl get ingress -n staging -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}' 2>&1); then
+                verbose_log "Failed to get ingress IP: $ingress_output"
+                ingress_ip=""
+            else
+                ingress_ip="$ingress_output"
+            fi
             if [[ -z "$ingress_ip" ]]; then
                 # Wait a bit and try again - ingress IPs can take time to provision
                 verbose_log "Ingress IP not ready, waiting 10 seconds..."
                 sleep 10
-                ingress_ip=$(kubectl get ingress -n staging -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+                if ! ingress_output=$(kubectl get ingress -n staging -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}' 2>&1); then
+                    verbose_log "Failed to get ingress IP on retry: $ingress_output"
+                    ingress_ip=""
+                else
+                    ingress_ip="$ingress_output"
+                fi
             fi
             if [[ -z "$ingress_ip" ]]; then
                 warn "No ingress IP found for staging, falling back to port-forward"
@@ -322,12 +436,23 @@ quick_http_test() {
             # Get the actual ingress IP for production
             log "Getting ingress IP for production environment..."
             local ingress_ip
-            ingress_ip=$(kubectl get ingress -n prod -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+            local ingress_output
+            if ! ingress_output=$(kubectl get ingress -n prod -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}' 2>&1); then
+                verbose_log "Failed to get ingress IP: $ingress_output"
+                ingress_ip=""
+            else
+                ingress_ip="$ingress_output"
+            fi
             if [[ -z "$ingress_ip" ]]; then
                 # Wait a bit and try again - ingress IPs can take time to provision
                 verbose_log "Ingress IP not ready, waiting 10 seconds..."
                 sleep 10
-                ingress_ip=$(kubectl get ingress -n prod -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+                if ! ingress_output=$(kubectl get ingress -n prod -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}' 2>&1); then
+                    verbose_log "Failed to get ingress IP on retry: $ingress_output"
+                    ingress_ip=""
+                else
+                    ingress_ip="$ingress_output"
+                fi
             fi
             if [[ -z "$ingress_ip" ]]; then
                 warn "No ingress IP found for prod, falling back to port-forward"

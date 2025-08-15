@@ -15,6 +15,10 @@ on:
       - ".github/workflows/sdk-checks.yaml"
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   sdk-checks:
     name: SDK Lint and Test
