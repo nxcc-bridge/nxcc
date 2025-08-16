@@ -167,6 +167,7 @@ pub async fn execute_policy_with_env_report(
     consumer_info: ConsumerInfo,
 ) {
     let policy_req_internal = PolicyExecutionRequest {
+        attestation_claims: None,
         secret_ids: secret_ids.clone(),
         consumer: consumer_info,
         env_report: client_env_report.clone(),
@@ -269,6 +270,7 @@ pub async fn authorize_self_generation(secrets_service: &Secrets, secret_id: &Se
         node_id: "self-enclave".to_string(), // Identifier for logging/policy
     };
     let request = PolicyExecutionRequest {
+        attestation_claims: None,
         secret_ids: vec![secret_id.clone()],
         consumer: test_consumer_info(), // Default consumer info
         env_report: self_env_report,

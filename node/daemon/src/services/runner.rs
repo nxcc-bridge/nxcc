@@ -180,6 +180,7 @@ impl RunnerService {
             secret_ids: vec![secret_id.clone()],
             consumer: consumer_info.clone(),
             env_report: env_report.clone(),
+            attestation_claims: None, // Claims will be populated by the enclave
         };
 
         let satisfied_contexts_result = self

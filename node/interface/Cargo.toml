@@ -16,6 +16,8 @@ url = { version = "2.5.4", features = ["serde"] } # Added for WorkerManifest
 thiserror = "1.0"
 tonic = { version = "0.13.1", features = ["transport"] }
 alloy-rpc-types = "1.0.6"
+anyhow = "1.0"
+async-trait = "0.1"
 
 [build-dependencies]
 tonic-build = "0.13.1"

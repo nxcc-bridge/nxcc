@@ -54,6 +54,7 @@ pub fn get_rpcs_for_chain(
     chain_id: u64,
     rpc_type: RpcType,
 ) -> Option<impl Iterator<Item = &'static str>> {
+    #[allow(clippy::ptr_arg)]
     fn as_str(s: &String) -> &str {
         s.as_str()
     }

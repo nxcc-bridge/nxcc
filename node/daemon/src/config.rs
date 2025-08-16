@@ -49,6 +49,10 @@ pub struct Config {
     #[serde(default)]
     #[clap(flatten)]
     pub scheduler: SchedulerConfig,
+
+    #[serde(default)]
+    #[clap(flatten)]
+    pub attestation: AttestationConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, clap::Args)]
@@ -180,7 +184,7 @@ impl Default for EnclaveConfig {
 }
 
 fn default_enclave_uds_path() -> String {
-    "/tmp/enclave_grpc.sock".to_string()
+    "/tmp/nxcc_enclave.sock".to_string()
 }
 fn default_default_vm_id() -> String {
     "nxcc/workerd".to_string()
@@ -266,6 +270,77 @@ fn default_min_schedule_interval_ms() -> u64 {
     10
 }
 
+/// Configuration for attestation providers and verification
+#[derive(Debug, Clone, Serialize, Deserialize, clap::Args)]
+pub struct AttestationConfig {
+    /// Enable TDX attestation support
+    #[clap(long, default_value_t = true)]
+    #[serde(default = "default_tdx_enabled")]
+    pub tdx_enabled: bool,
+
+    /// Google Cloud Project ID for GCS attestation verification
+    #[clap(long, env = "NXCC_GCS_PROJECT_ID")]
+    pub gcs_project_id: Option<String>,
+
+    /// Google Cloud Service Account JSON key file path
+    #[clap(long, env = "NXCC_GCS_SERVICE_ACCOUNT_KEY")]
+    pub gcs_service_account_key: Option<PathBuf>,
+
+    /// Prefer local verification over remote when available
+    #[clap(long, default_value_t = true)]
+    #[serde(default = "default_prefer_local_verification")]
+    pub prefer_local_verification: bool,
+
+    /// Maximum age of block hashes for freshness proofs (seconds)
+    #[clap(long, default_value_t = 300)]
+    #[serde(default = "default_max_block_age")]
+    pub max_block_age: u64,
+
+    /// Minimum number of chains required for freshness proof
+    #[clap(long, default_value_t = 2)]
+    #[serde(default = "default_min_chain_count")]
+    pub min_chain_count: usize,
+
+    /// Chain IDs to use for freshness proofs (comma-separated)
+    #[clap(long, value_delimiter = ',')]
+    #[serde(default = "default_freshness_chain_ids")]
+    pub freshness_chain_ids: Vec<u64>,
+}
+
+impl Default for AttestationConfig {
+    fn default() -> Self {
+        Self {
+            tdx_enabled: default_tdx_enabled(),
+            gcs_project_id: None,
+            gcs_service_account_key: None,
+            prefer_local_verification: default_prefer_local_verification(),
+            max_block_age: default_max_block_age(),
+            min_chain_count: default_min_chain_count(),
+            freshness_chain_ids: default_freshness_chain_ids(),
+        }
+    }
+}
+
+fn default_tdx_enabled() -> bool {
+    true
+}
+
+fn default_prefer_local_verification() -> bool {
+    true
+}
+
+fn default_max_block_age() -> u64 {
+    300 // 5 minutes
+}
+
+fn default_min_chain_count() -> usize {
+    2
+}
+
+fn default_freshness_chain_ids() -> Vec<u64> {
+    vec![1, 137, 56, 10] // Ethereum, Polygon, BSC, Optimism
+}
+
 impl Config {
     /// Load from a combination of:
     /// 1. A default struct,
@@ -286,11 +361,27 @@ impl Config {
             .clone()
             .unwrap_or_else(|| "config.toml".into());
 
-        Figment::new()
+        // Load config without CLI overrides first
+        let mut base_config: Config = Figment::new()
             .merge(Serialized::defaults(Config::default()))
             .merge(Toml::file(config_path))
             .merge(Env::prefixed("NXCC_"))
-            .merge(Serialized::defaults(cli))
-            .extract()
+            .extract()?;
+
+        // Apply CLI overrides manually only for explicitly provided values
+        if cli.identity_path.is_some() {
+            base_config.identity_path = cli.identity_path;
+        }
+        if cli.verbose {
+            base_config.verbose = cli.verbose;
+        }
+        if cli.print_peer_id {
+            base_config.print_peer_id = cli.print_peer_id;
+        }
+        if let Some(policy_cache_dir) = cli.policy_cache_dir {
+            base_config.policy_cache_dir = Some(policy_cache_dir);
+        }
+
+        Ok(base_config)
     }
 }

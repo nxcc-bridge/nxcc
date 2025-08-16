@@ -29,6 +29,7 @@ pub fn test_secret_id(id: u64) -> SecretId {
 pub fn test_policy_request(node_id: &str, secret_ids: Vec<SecretId>) -> PolicyExecutionRequest {
     PolicyExecutionRequest {
         secret_ids,
+        attestation_claims: None,
         consumer: ConsumerInfo {
             bundle_hash: vec![1; 32],
             signature: vec![2; 64],

@@ -223,9 +223,41 @@ pub fn decrypt_secrets_box(
     Ok(secrets)
 }
 
-/// Generates a dummy attestation report. In a real TEE, this would query the hardware.
+/// Generates an attestation report using the platform attestation manager.
+/// Falls back to dummy attestation if the manager is not available.
 pub fn generate_attestation(ephemeral_kx_pk: &PublicKey, user_data: Vec<u8>) -> AttestationReport {
-    // TODO: Integrate with actual TEE attestation mechanism
+    use crate::attestation::get_platform_attestation_manager;
+
+    // Try to use the platform attestation manager if initialized
+    if let Some(manager) = std::panic::catch_unwind(|| get_platform_attestation_manager()).ok() {
+        match futures::executor::block_on(async {
+            manager.generate_bound_attestation(&user_data).await
+        }) {
+            Ok(bundle) => {
+                // Convert AttestationBundle to AttestationReport for backward compatibility
+                return AttestationReport {
+                    ephemeral_public_key: ephemeral_kx_pk.as_bytes().to_vec(),
+                    measurement: bundle.raw_attestation.evidence, // Store raw evidence
+                    block_hashes: bundle
+                        .block_hashes
+                        .iter()
+                        .map(|b| b.block_hash.clone())
+                        .collect(),
+                    user_data,
+                };
+            }
+            Err(e) => {
+                log::warn!(
+                    "Failed to generate platform attestation: {}, falling back to dummy",
+                    e
+                );
+            }
+        }
+    } else {
+        log::warn!("Platform attestation manager not initialized, using dummy attestation");
+    }
+
+    // Fallback to dummy attestation
     AttestationReport {
         ephemeral_public_key: ephemeral_kx_pk.as_bytes().to_vec(),
         measurement: vec![0u8; 32],                       // Placeholder

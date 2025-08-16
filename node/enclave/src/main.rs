@@ -1,5 +1,6 @@
 #![allow(warnings)]
 
+mod attestation;
 mod config;
 mod crypto;
 mod grpc;

@@ -461,6 +461,20 @@ pub async fn start_grpc_server(config: &EnclaveConfig) -> Result<(), Box<dyn std
     let secrets_service = Secrets::new();
     let runner_service = Arc::new(RunnerService::new(secrets_service.clone()));
 
+    // Initialize the platform attestation manager with a mock gateway provider
+    let mock_gateway = std::sync::Arc::new(crate::attestation::MockGatewayProvider);
+    let ephemeral_kx_keypair = std::sync::Arc::new(crate::crypto::KeyExchangeKeyPair::generate());
+
+    if let Err(e) = crate::attestation::initialize_platform_attestation_manager(
+        ephemeral_kx_keypair,
+        mock_gateway,
+    ) {
+        tracing::warn!("Failed to initialize platform attestation manager: {}", e);
+        tracing::info!("Continuing with fallback attestation...");
+    } else {
+        tracing::info!("Platform attestation manager initialized successfully");
+    }
+
     // Instantiate gRPC service wrappers
     let secrets_grpc = SecretsGrpcService::new(secrets_service);
     let runner_grpc = EnclaveRunnerGrpcService::new(runner_service);

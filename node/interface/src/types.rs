@@ -9,6 +9,27 @@ use thiserror::Error;
 
 use crate::proto::{enclave, interface};
 
+/// Standardized attestation claims compatible with RATS/IEATS
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StandardizedAttestationClaims {
+    /// Software measurement (e.g., MRTD for TDX)
+    pub software_measurement: Vec<u8>,
+    /// Security version number
+    pub security_version_number: u64,
+    /// Whether debug mode is disabled
+    pub debug_disabled: bool,
+    /// Platform identifier (e.g., "tdx-gcs", "tdx-local")
+    pub platform_id: String,
+    /// Runtime measurements (e.g., RTMRs for TDX)
+    pub runtime_measurements: HashMap<String, Vec<u8>>,
+    /// Timestamp when the attestation was verified
+    pub timestamp: u64,
+    /// User data bound to the attestation
+    pub bound_user_data: Vec<u8>,
+    /// Ephemeral public key used in the attestation
+    pub ephemeral_public_key: Vec<u8>,
+}
+
 #[derive(Debug, Error)]
 pub enum ConversionError {
     #[error("Missing field in protobuf message: {0}")]
@@ -311,6 +332,9 @@ pub struct PolicyExecutionRequest {
     pub secret_ids: Vec<SecretId>,
     pub consumer: ConsumerInfo,
     pub env_report: EnvReport, // The EnvReport of the entity being evaluated
+    /// Standardized attestation claims extracted from the verified env_report
+    /// These are available when the attestation system successfully verifies the report
+    pub attestation_claims: Option<StandardizedAttestationClaims>,
 }
 
 impl TryFrom<interface::PolicyExecutionRequest> for PolicyExecutionRequest {
@@ -330,6 +354,7 @@ impl TryFrom<interface::PolicyExecutionRequest> for PolicyExecutionRequest {
                 .env_report
                 .ok_or(ConversionError::MissingField("env_report".to_string()))?
                 .try_into()?,
+            attestation_claims: None, // Populated by enclave after verification
         })
     }
 }

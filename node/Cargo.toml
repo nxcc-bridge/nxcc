@@ -6,6 +6,7 @@ members = [
     "vm/base",
     "vm/workerd",
     "chainlist",
+    "attestation",
 ]
 resolver = "3"
 

@@ -9,8 +9,9 @@ use nxcc_interface::{
         InvokeWorkerRequest as ProtoInvokeWorkerRequest, TrustedConfig, UntrustedConfig,
     },
     types::{
-        ConsumerInfo, EventPayload, PolicyExecutionReport, PolicyExecutionRequest, VmAddress,
-        Web3Log, WorkerBundle, WorkerManifest,
+        AttestationReport, ConsumerInfo, EventPayload, PolicyExecutionReport,
+        PolicyExecutionRequest, StandardizedAttestationClaims, VmAddress, Web3Log, WorkerBundle,
+        WorkerManifest,
     },
 };
 #[cfg(test)]
@@ -517,13 +518,48 @@ impl RunnerService {
     pub async fn execute_policy(
         &self,
         worker_id: String,
-        contexts: Vec<PolicyExecutionRequest>,
+        mut contexts: Vec<PolicyExecutionRequest>,
     ) -> Result<Vec<PolicyExecutionRequest>, RunnerError> {
         info!(
             "Executing policy worker '{}' for {} contexts",
             worker_id,
             contexts.len()
         );
+
+        // First, enhance contexts with attestation claims by verifying their attestation reports
+        for context in &mut contexts {
+            if let Some(manager) =
+                std::panic::catch_unwind(|| crate::attestation::get_platform_attestation_manager())
+                    .ok()
+            {
+                // Try to verify the attestation and extract standardized claims
+                match self
+                    .verify_attestation_and_extract_claims(&context.env_report.attestation, manager)
+                    .await
+                {
+                    Ok(claims) => {
+                        info!(
+                            "Successfully verified attestation for node {} with platform {}",
+                            context.env_report.node_id, claims.platform_id
+                        );
+                        context.attestation_claims = Some(claims);
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Failed to verify attestation for node {}: {}. Policy will run \
+                             without verified claims.",
+                            context.env_report.node_id, e
+                        );
+                        // Continue without claims - policy can decide whether to allow this
+                    }
+                }
+            } else {
+                debug!(
+                    "Platform attestation manager not available for node {}",
+                    context.env_report.node_id
+                );
+            }
+        }
 
         let vm_id = {
             let worker_map_guard = self.worker_map.read().await;
@@ -606,6 +642,76 @@ impl RunnerService {
             results.len()
         );
         Ok(satisfied_contexts)
+    }
+
+    /// Helper method to verify attestation and extract standardized claims
+    async fn verify_attestation_and_extract_claims(
+        &self,
+        report: &AttestationReport,
+        manager: &crate::attestation::PlatformAttestationManager,
+    ) -> Result<StandardizedAttestationClaims, String> {
+        use nxcc_attestation::{AttestationBundle, RawAttestation, UserDataBinding};
+        use nxcc_interface::types::StandardizedAttestationClaims;
+
+        // Convert AttestationReport to AttestationBundle for verification
+        let raw_attestation = RawAttestation {
+            platform_type: "tdx".to_string(), // Auto-detect or extract from report
+            evidence: report.measurement.clone(),
+            certificates: None,
+        };
+
+        // Reconstruct user data binding from report
+        let user_data_binding = UserDataBinding {
+            original_data: report.user_data.clone(),
+            embedded_hash: report.user_data.clone(),
+            was_hashed: false,
+            ephemeral_key_len: 32, // Standard key length
+        };
+
+        // Reconstruct block info from block hashes
+        let block_hashes = report
+            .block_hashes
+            .iter()
+            .enumerate()
+            .map(|(i, hash)| {
+                nxcc_attestation::BlockInfo {
+                    chain_id: (i + 1) as u64, // Simple mapping
+                    chain_name: format!("Chain {}", i + 1),
+                    block_number: 0, // Would need to be stored in report for full reconstruction
+                    block_hash: hash.clone(),
+                    timestamp: 0, // Would need to be stored in report
+                    fetched_at: 0,
+                }
+            })
+            .collect();
+
+        let bundle = AttestationBundle {
+            raw_attestation,
+            user_data_binding,
+            block_hashes,
+        };
+
+        // Verify using the attestation service
+        match manager
+            .attestation_service()
+            .verify_attestation(&bundle)
+            .await
+        {
+            Ok(claims) => {
+                // Convert nxcc_attestation::StandardizedClaims to interface::StandardizedAttestationClaims
+                Ok(StandardizedAttestationClaims {
+                    software_measurement: claims.software_measurement,
+                    security_version_number: claims.security_version_number,
+                    debug_disabled: claims.debug_disabled,
+                    platform_id: claims.platform_id,
+                    runtime_measurements: claims.runtime_measurements,
+                    timestamp: claims.timestamp,
+                    bound_user_data: claims.bound_user_data,
+                    ephemeral_public_key: claims.ephemeral_public_key,
+                })
+            }
+            Err(e) => Err(format!("Attestation verification failed: {}", e)),
+        }
     }
 
     /// Delivers a batch of asynchronous events to appropriate workers.

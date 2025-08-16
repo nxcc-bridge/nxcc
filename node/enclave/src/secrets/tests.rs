@@ -84,6 +84,7 @@ fn test_store_and_check_authorization() {
 
     // Create and store a policy report with a positive decision, using client_env_report
     let policy_request = PolicyExecutionRequest {
+        attestation_claims: None,
         secret_ids: vec![secret_id.clone()],
         consumer: ConsumerInfo::default(),
         env_report: client_env_report.clone(),
@@ -116,6 +117,7 @@ fn test_store_authorization_with_negative_decision() {
     let client_env_report = test_env_report(node_id, client_attestation.clone());
 
     let policy_request = PolicyExecutionRequest {
+        attestation_claims: None,
         secret_ids: vec![secret_id.clone()],
         consumer: ConsumerInfo::default(),
         env_report: client_env_report.clone(),
@@ -142,6 +144,7 @@ fn test_authorization_expiry() {
     let client_env_report = test_env_report(node_id, client_attestation.clone());
 
     let policy_request = PolicyExecutionRequest {
+        attestation_claims: None,
         secret_ids: vec![secret_id.clone()],
         consumer: ConsumerInfo::default(),
         env_report: client_env_report.clone(),
@@ -196,6 +199,7 @@ fn test_put_secrets_attestation_binding_success() {
 
     // Authorize based on the attestation that will be presented
     let auth_request = PolicyExecutionRequest {
+        attestation_claims: None,
         secret_ids: vec![secret_id.clone()],
         consumer: ConsumerInfo::default(),
         env_report: presented_env_report.clone(),
@@ -256,6 +260,7 @@ fn test_put_secrets_attestation_binding_hash_mismatch() {
     let auth_env_report = test_env_report(sender_node_id, auth_attestation.clone());
 
     let auth_request = PolicyExecutionRequest {
+        attestation_claims: None,
         secret_ids: vec![secret_id.clone()],
         consumer: ConsumerInfo::default(),
         env_report: auth_env_report,
@@ -311,6 +316,7 @@ fn test_put_secrets_existing_is_canonical() {
     let env_report1 = test_env_report(node_id, env_report1_attestation.clone());
 
     let auth_req1 = PolicyExecutionRequest {
+        attestation_claims: None,
         secret_ids: vec![secret_id.clone()],
         consumer: ConsumerInfo::default(),
         env_report: env_report1.clone(),
@@ -359,6 +365,7 @@ fn test_put_secrets_existing_is_canonical() {
     );
     let env_report2 = test_env_report(node_id, env_report2_attestation.clone());
     let auth_req2 = PolicyExecutionRequest {
+        attestation_claims: None,
         secret_ids: vec![secret_id.clone()],
         consumer: ConsumerInfo::default(),
         env_report: env_report2.clone(),
@@ -453,6 +460,7 @@ fn test_put_secrets_expired() {
     let presented_env_report = test_env_report(node_id, presented_attestation.clone());
 
     let auth_req = PolicyExecutionRequest {
+        attestation_claims: None,
         secret_ids: vec![secret_id.clone()],
         consumer: ConsumerInfo::default(),
         env_report: presented_env_report.clone(),
@@ -497,6 +505,7 @@ fn test_put_secrets_older_ignored() {
         test_attestation_report(sender_kx.public_key().as_bytes().to_vec(), bh1.to_vec()),
     );
     let auth_req1 = PolicyExecutionRequest {
+        attestation_claims: None,
         secret_ids: vec![secret_id.clone()],
         consumer: ConsumerInfo::default(),
         env_report: env1.clone(),
@@ -526,6 +535,7 @@ fn test_put_secrets_older_ignored() {
         ),
     );
     let auth_req2 = PolicyExecutionRequest {
+        attestation_claims: None,
         secret_ids: vec![secret_id.clone()],
         consumer: consumer_info_for_auth_req2.clone(), // Use the defined consumer_info
         env_report: env2.clone(),
@@ -584,6 +594,7 @@ fn test_put_secrets_multiple_bundles() {
     };
     // Authorize node1 for secret1 (using attestation1)
     let auth_req1 = PolicyExecutionRequest {
+        attestation_claims: None,
         secret_ids: vec![secret_id1.clone()],
         consumer: consumer_info1.clone(),
         env_report: env_report1.clone(),
@@ -612,6 +623,7 @@ fn test_put_secrets_multiple_bundles() {
     };
     // Authorize node2 for secret2 (using attestation2)
     let auth_req2 = PolicyExecutionRequest {
+        attestation_claims: None,
         secret_ids: vec![secret_id2.clone()],
         consumer: consumer_info2.clone(),
         env_report: env_report2.clone(),
@@ -670,6 +682,7 @@ fn test_get_secrets_authorization_check() {
     let consumer_for_auth_req = ConsumerInfo::default();
     // Authorize requester for secret_id1 only, using their specific attestation
     let auth_req = PolicyExecutionRequest {
+        attestation_claims: None,
         secret_ids: vec![secret_id1.clone()],
         consumer: consumer_for_auth_req.clone(),
         env_report: requester_env_report.clone(),

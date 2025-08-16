@@ -13,4 +13,5 @@ pub mod proto {
     }
 }
 
+pub mod gateway;
 pub mod types;

@@ -54,8 +54,9 @@ COPY enclave/Cargo.toml ./enclave/Cargo.toml
 COPY vm/base/Cargo.toml ./vm/base/Cargo.toml
 COPY vm/workerd/Cargo.toml ./vm/workerd/Cargo.toml
 COPY chainlist/Cargo.toml ./chainlist/Cargo.toml
-RUN mkdir -p interface/src daemon/src enclave/src vm/base/src vm/workerd/src chainlist/src chainlist/src/bin && \
-    touch interface/src/lib.rs daemon/src/main.rs enclave/src/main.rs vm/base/src/lib.rs vm/workerd/src/main.rs chainlist/src/lib.rs chainlist/src/bin/main.rs
+COPY attestation/Cargo.toml ./attestation/Cargo.toml
+RUN mkdir -p interface/src daemon/src enclave/src vm/base/src vm/workerd/src chainlist/src chainlist/src/bin attestation/src && \
+    touch interface/src/lib.rs daemon/src/main.rs enclave/src/main.rs vm/base/src/lib.rs vm/workerd/src/main.rs chainlist/src/lib.rs chainlist/src/bin/main.rs attestation/src/lib.rs
 
 # Cache the crates
 RUN cargo metadata --format-version 1 > /dev/null
@@ -67,6 +68,7 @@ COPY daemon ./daemon
 COPY enclave ./enclave
 COPY vm ./vm
 COPY chainlist ./chainlist
+COPY attestation ./attestation
 
 # Build mode configuration. Set `--build-arg BUILD_MODE=` to do a debug build.
 ARG BUILD_MODE=release
