@@ -6,5 +6,20 @@
   "userdata": {
     "name": "My First nXCC Worker",
     "version": "1.0"
-  }
+  },
+  "events": [
+    {
+      "handler": "launch",
+      "kind": "launch"
+    },
+    {
+      "handler": "fetch",
+      "kind": "http_request"
+    },
+    {
+      "handler": "tick",
+      "kind": "scheduled",
+      "period_ms": 1000
+    }
+  ]
 }

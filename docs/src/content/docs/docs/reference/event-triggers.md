@@ -21,6 +21,11 @@ The `events` array in your manifest contains a list of event trigger objects. Ea
     {
       "handler": "fetch",
       "kind": "http_request"
+    },
+    {
+      "handler": "fetch",
+      "kind": "scheduled",
+      "period_ms": 60000
     }
   ]
 }
@@ -87,3 +92,82 @@ The `web3_event` trigger is the core of nXCC's cross-chain capabilities. It inst
 - `topics`: An array of topic filters, following the [JSON-RPC specification](https://docs.alchemy.com/reference/eth_getlogs#topics-array). The first topic is typically the signature hash of the event. You can generate this using tools like `cast` or `viem`.
 
 When the specified event is detected, the `fetch` handler receives a request with a JSON body containing the full `Web3Log` object, including topics and data. Your worker can then decode this payload to perform its logic.
+
+### `scheduled`
+
+The `scheduled` event trigger enables your worker to run at regular intervals based on a configurable schedule. This is useful for periodic tasks like data aggregation, health checks, or time-based automation.
+
+**Manifest Configuration:**
+
+```json
+{
+  "handler": "fetch",
+  "kind": "scheduled",
+  "period_ms": 60000
+}
+```
+
+**Basic Parameters:**
+
+- `period_ms`: The interval between scheduled executions in milliseconds. The daemon enforces a minimum interval (default: 10ms) to prevent excessive resource usage.
+
+**Advanced Configuration:**
+
+For more control over scheduling behavior, you can specify additional parameters:
+
+```json
+{
+  "handler": "fetch",
+  "kind": "scheduled",
+  "period_ms": 30000,
+  "phase_ms": 5000,
+  "start_at": "2024-01-01T12:00:00Z",
+  "end_at": "2024-12-31T23:59:59Z",
+  "max_occurrences": 100,
+  "policy": {
+    "catch_up": "skip",
+    "max_lateness_ms": 5000,
+    "jitter_budget_ms": 100
+  }
+}
+```
+
+**Advanced Parameters:**
+
+- `phase_ms`: Offset from the start boundary in milliseconds (default: 0).
+- `start_at`: ISO 8601 timestamp when scheduling should begin (default: immediate).
+- `end_at`: ISO 8601 timestamp when scheduling should stop (default: never).
+- `max_occurrences`: Maximum number of times the event should fire (default: unlimited).
+- `policy`: Optional scheduling policy configuration:
+  - `catch_up`: What to do with late/missed ticks. Options: `"skip"` (default), `"coalesce"`, `"queue"`.
+  - `max_lateness_ms`: Drop ticks that are later than this many milliseconds.
+  - `jitter_budget_ms`: Used for monitoring/SLA purposes only.
+
+**Example Use Cases:**
+
+```json
+// Health check every 5 minutes
+{
+  "handler": "fetch",
+  "kind": "scheduled",
+  "period_ms": 300000
+}
+
+// Daily report at midnight UTC
+{
+  "handler": "fetch", 
+  "kind": "scheduled",
+  "period_ms": 86400000,
+  "start_at": "2024-01-01T00:00:00Z"
+}
+
+// Limited-time campaign with 100 executions max
+{
+  "handler": "fetch",
+  "kind": "scheduled", 
+  "period_ms": 3600000,
+  "max_occurrences": 100
+}
+```
+
+When a scheduled event fires, your worker's `fetch` handler receives a request with a JSON body identifying the scheduled event. The worker can maintain state across invocations to track execution count or implement more complex logic.

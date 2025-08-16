@@ -8,6 +8,7 @@ use nxcc_interface::types::{
     ConsumerInfo,
     DSSE_WORK_ORDER_PAYLOAD_TYPE,
     DsseEnvelope,
+    Schedule,
     SecretId,
     SecretRequest,
     Web3Log, // Added Web3Log for potential Launch event structure
@@ -27,7 +28,7 @@ use crate::{
     grpc::enclave_client::EnclaveClient,
     policy::PolicyManager,
     // Assuming daemon_event_tx is passed in main.rs or similar
-    services::secrets::SecretsService,
+    services::{scheduler::SchedulerHandle, secrets::SecretsService},
     web3::{gateways::GatewayManager, listener::start_web3_event_listener},
 };
 
@@ -45,6 +46,7 @@ pub struct WorkOrderOrchestrator {
     runner_service: Arc<super::runner::RunnerService>, // Added runner_service
     policy_manager: Arc<PolicyManager>,
     gateway_manager: Arc<GatewayManager>,
+    scheduler_handle: Arc<SchedulerHandle>,
     pub config: Arc<Config>,
     pub active_work_orders: RwLock<HashMap<String, ActiveWorkOrder>>,
     /// Maps mount path segment (hash of work order) to enclave_worker_id for HTTP routing.
@@ -60,6 +62,7 @@ impl WorkOrderOrchestrator {
         runner_service: Arc<super::runner::RunnerService>,
         policy_manager: Arc<PolicyManager>,
         gateway_manager: Arc<GatewayManager>,
+        scheduler_handle: Arc<SchedulerHandle>,
         config: Arc<Config>,
         http_mounts: Arc<RwLock<HashMap<String, String>>>,
         daemon_event_tx: tokio::sync::mpsc::Sender<nxcc_interface::proto::enclave::EventDelivery>,
@@ -71,6 +74,7 @@ impl WorkOrderOrchestrator {
             runner_service,
             policy_manager,
             gateway_manager,
+            scheduler_handle,
             config,
             active_work_orders: RwLock::new(HashMap::new()),
             http_mounts,
@@ -353,6 +357,7 @@ impl WorkOrderOrchestrator {
         let mut web3_event_configs = Vec::new();
 
         let mut http_requested = false;
+        let mut scheduled_events = Vec::new();
         for event_config in &wo_payload.events {
             match &event_config.kind {
                 WorkerEventKind::Launch => {
@@ -387,6 +392,14 @@ impl WorkOrderOrchestrator {
                     info!(
                         "Work order (hash: {}) requests HTTP capability.",
                         work_order_hash_b64url
+                    );
+                }
+                WorkerEventKind::Scheduled(schedule) => {
+                    scheduled_events.push((event_config.handler.clone(), schedule.clone()));
+                    info!(
+                        "Work order (hash: {}) requests scheduled event for handler '{}' with \
+                         schedule: {:?}",
+                        work_order_hash_b64url, event_config.handler, schedule
                     );
                 }
                 e => {
@@ -479,9 +492,170 @@ impl WorkOrderOrchestrator {
             );
         }
 
+        // 12. Set up scheduled events
+        for (handler, schedule) in scheduled_events {
+            if let Err(e) = self
+                .scheduler_handle
+                .add_scheduled_event(work_order_hash_b64url.clone(), handler.clone(), schedule)
+                .await
+            {
+                error!(
+                    "Failed to add scheduled event for work order {} handler {}: {}",
+                    work_order_hash_b64url, handler, e
+                );
+                return Err(AppError::Service(format!(
+                    "Failed to schedule event for handler {}: {}",
+                    handler, e
+                )));
+            } else {
+                info!(
+                    "Successfully scheduled event for work order {} handler {}",
+                    work_order_hash_b64url, handler
+                );
+            }
+        }
+
         Ok((
             work_order_hash_b64url, // Return the unique hash as the ID
             format!("Work order submitted and processed. ID: {}.", wo_payload.id),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use nxcc_interface::types::*;
+    use tokio::sync::mpsc;
+    use url::Url;
+
+    use super::*;
+    use crate::{
+        config::{Config, SchedulerConfig},
+        services::scheduler::SchedulerHandle,
+    };
+
+    fn create_test_config() -> Config {
+        Config {
+            scheduler: SchedulerConfig {
+                min_schedule_interval_ms: 10,
+            },
+            ..Default::default()
+        }
+    }
+
+    fn create_test_work_order_with_scheduled_events() -> WorkOrderPayload {
+        WorkOrderPayload {
+            id: "test-scheduled-wo".to_string(),
+            worker: WorkerManifest {
+                bundle: WorkerBundlePointer {
+                    source: Url::parse(
+                        "data:application/javascript;base64,Y29uc29sZS5sb2coImhlbGxvIik=",
+                    )
+                    .unwrap(),
+                    hash: None,
+                },
+                identities: vec![],
+                userdata: HashMap::new(),
+            },
+            events: vec![
+                WorkerEvent {
+                    handler: "launch".to_string(),
+                    kind: WorkerEventKind::Launch,
+                },
+                WorkerEvent {
+                    handler: "tick".to_string(),
+                    kind: WorkerEventKind::Scheduled(Schedule::Rate(RateMode::new(5000))),
+                },
+                WorkerEvent {
+                    handler: "hourly".to_string(),
+                    kind: WorkerEventKind::Scheduled(Schedule::Rate(RateMode::new(3600000))), // 1 hour
+                },
+            ],
+        }
+    }
+
+    #[tokio::test]
+    async fn test_scheduled_events_extraction() {
+        let work_order = create_test_work_order_with_scheduled_events();
+
+        // Extract scheduled events like the orchestrator does
+        let scheduled_events: Vec<(String, Schedule)> = work_order
+            .events
+            .iter()
+            .filter_map(|event| {
+                if let WorkerEventKind::Scheduled(schedule) = &event.kind {
+                    Some((event.handler.clone(), schedule.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        assert_eq!(scheduled_events.len(), 2);
+        assert_eq!(scheduled_events[0].0, "tick");
+        assert_eq!(scheduled_events[1].0, "hourly");
+
+        // Verify the schedules are correctly extracted
+        if let Schedule::Rate(rate_mode) = &scheduled_events[0].1 {
+            assert_eq!(rate_mode.period_ms, 5000);
+        } else {
+            panic!("Expected rate schedule for tick handler");
+        }
+
+        if let Schedule::Rate(rate_mode) = &scheduled_events[1].1 {
+            assert_eq!(rate_mode.period_ms, 3600000);
+        } else {
+            panic!("Expected rate schedule for hourly handler");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_work_order_serialization_with_scheduled_events() {
+        // Create work order with scheduled events
+        let work_order = create_test_work_order_with_scheduled_events();
+
+        // Test that scheduled events are properly identified
+        let scheduled_events: Vec<(String, Schedule)> = work_order
+            .events
+            .iter()
+            .filter_map(|event| {
+                if let WorkerEventKind::Scheduled(schedule) = &event.kind {
+                    Some((event.handler.clone(), schedule.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        assert_eq!(scheduled_events.len(), 2);
+
+        // Verify we can serialize the work order (this was failing in integration tests)
+        let serialized = serde_json::to_string_pretty(&work_order).expect("Should serialize");
+        let deserialized: WorkOrderPayload =
+            serde_json::from_str(&serialized).expect("Should deserialize");
+
+        assert_eq!(deserialized.id, work_order.id);
+        assert_eq!(deserialized.events.len(), 3); // launch + 2 scheduled events
+    }
+
+    #[tokio::test]
+    async fn test_schedule_validation_in_orchestrator_context() {
+        let config = create_test_config();
+
+        // Test schedules that should be valid
+        let valid_schedule = Schedule::Rate(RateMode::new(1000)); // 1 second, above minimum
+        assert!(
+            crate::services::scheduler::validate_schedule(&valid_schedule, &config.scheduler)
+                .is_ok()
+        );
+
+        // Test schedule that should be invalid (too fast)
+        let invalid_schedule = Schedule::Rate(RateMode::new(5)); // 5ms, below minimum of 10ms
+        assert!(
+            crate::services::scheduler::validate_schedule(&invalid_schedule, &config.scheduler)
+                .is_err()
+        );
     }
 }

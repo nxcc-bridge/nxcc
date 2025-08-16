@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 alloy-primitives = { version = "1.0.0", features = ["serde"] }
 base64 = "0.22.1"
+chrono = { version = "0.4", features = ["serde"] }
 ciborium = "0.2.2"
 prost = "0.13.5"
 serde = { version = "1.0", features = ["derive"] }

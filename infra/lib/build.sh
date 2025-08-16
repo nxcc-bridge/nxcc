@@ -23,7 +23,8 @@ _docker_build_common() {
   # Prepare build arguments
   local build_args=()
   if [[ "$build_mode" == "debug" ]]; then
-    info "Building in debug mode for faster development builds"
+    info "Building in debug mode"
+    build_args=(--build-arg "BUILD_MODE=")
   else
     build_args=(--build-arg "BUILD_MODE=release")
     info "Building in release mode"
@@ -43,20 +44,17 @@ _docker_build_common() {
     cache_args=(--cache-from "type=gha")
   fi
   
-  # Configure platform settings - default to single arch for speed
+  # Configure platform settings - default to amd64 for speed and TEE compatibility
   local build_platforms="${BUILD_PLATFORMS:-linux/amd64}"
   info "Building for platform: $build_platforms"
   
-  # Check if buildx is available and create/use a multi-arch builder
+  # Check if buildx is available and create/use a builder
   if docker buildx version &>/dev/null; then
-    info "Using docker buildx for multi-architecture build..."
-    
     # Create or use existing buildx instance
     if ! docker buildx inspect nxcc-builder &>/dev/null; then
-      info "Creating new buildx builder instance..."
+      info "Creating buildx builder instance"
       docker buildx create --name nxcc-builder --use
     else
-      info "Using existing buildx builder..."
       docker buildx use nxcc-builder
     fi
     
@@ -75,10 +73,9 @@ _docker_build_common() {
       "${cache_args[@]:+${cache_args[@]}}" \
       "${build_args[@]:+${build_args[@]}}" \
       --file "$dockerfile_path" \
-      --quiet \
       "$build_context"
   else
-    info "Docker buildx not available, using standard docker build..."
+    info "Using standard docker build"
     
     docker build \
       --tag "$image_name" \
@@ -89,7 +86,7 @@ _docker_build_common() {
     
     # Push if needed (for registry builds without buildx)
     if [[ "$action" == "push" ]]; then
-      info "Pushing image to registry..."
+      info "Pushing image to registry"
       docker push "$image_name"
     fi
   fi
@@ -103,19 +100,15 @@ _docker_build_common() {
 # Set BUILD_CACHE_FROM to specify upstream cache repository.
 ################################################################################
 build_local_image() {
-  info "Building Docker image for local KinD deployment..."
+  info "Building Docker image for local KinD deployment"
   check_deps docker
 
   local image_name="${LOCAL_IMAGE_NAME}:${LOCAL_IMAGE_TAG}"
   local build_mode="${BUILD_MODE:-debug}"
   
-  info "Building multi-architecture image: $image_name"
-  info "This ensures compatibility with both x86_64 and ARM64 architectures."
-  
   _docker_build_common "$image_name" "$build_mode" "load" "${BUILD_CACHE_FROM:-}"
 
-  success "Local image built successfully: $image_name"
-  info "Image is ready for KinD deployment."
+  success "Local image built: $image_name"
 }
 
 ################################################################################
@@ -126,7 +119,7 @@ build_local_image() {
 # Set BUILD_MODE=debug for debug builds (defaults to release for GCP).
 ################################################################################
 build_gcp_image() {
-  info "Building and pushing Docker image to GCP Artifact Registry..."
+  info "Building and pushing Docker image to GCP Artifact Registry"
   check_deps docker gcloud
   resolve_gcp_identity
 
@@ -136,7 +129,7 @@ build_gcp_image() {
   local full_image="${image_repo}:${image_tag}"
   local build_mode="${BUILD_MODE:-release}"
 
-  info "Configuring Docker authentication for Artifact Registry..."
+  info "Configuring Docker authentication for Artifact Registry"
   gcloud auth configure-docker "${registry_host}" --account="${RESOLVED_GCP_ACCOUNT}" --quiet
 
   # Check if image already exists for debug builds (to speed up e2e tests)
@@ -147,10 +140,9 @@ build_gcp_image() {
     fi
   fi
 
-  info "Building multi-architecture image for GCP: $full_image"
+  info "Building image: $full_image"
   
   _docker_build_common "$full_image" "$build_mode" "push"
 
-  success "GCP image built and pushed successfully: $full_image"
-  info "Image is ready for GKE deployment."
+  success "GCP image built and pushed: $full_image"
 }

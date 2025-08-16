@@ -150,7 +150,7 @@ impl PolicyManager {
                 secret_id_for_log
             );
             // Load from a fixed local path relative to the Cargo manifest dir
-            let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or("..".to_string());
+            let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or(".".to_string());
             let mock_manifest_path = Path::new(&manifest_dir).join("tests/policy/mock_policy.json");
 
             debug!(
@@ -222,7 +222,7 @@ impl PolicyManager {
                 // and manifest_url_for_context is something like "mock://..."
                 if manifest_url_for_context.starts_with("mock://") {
                     let manifest_dir =
-                        std::env::var("CARGO_MANIFEST_DIR").unwrap_or("..".to_string());
+                        std::env::var("CARGO_MANIFEST_DIR").unwrap_or(".".to_string());
                     PathBuf::from(manifest_dir).join(path)
                 } else {
                     // Attempt to resolve relative to the manifest URL if it's also a file URL

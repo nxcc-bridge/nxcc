@@ -45,6 +45,10 @@ pub struct Config {
     #[serde(default)]
     #[clap(flatten)]
     pub http: HttpConfig,
+
+    #[serde(default)]
+    #[clap(flatten)]
+    pub scheduler: SchedulerConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, clap::Args)]
@@ -238,6 +242,28 @@ fn default_http_listen_addr() -> String {
 
 fn default_cors_allowed_origins() -> Vec<String> {
     vec![]
+}
+
+/// Configuration for the daemon's scheduler service.
+#[derive(Debug, Clone, Serialize, Deserialize, clap::Args)]
+pub struct SchedulerConfig {
+    /// Minimum allowed schedule interval in milliseconds.
+    /// Work orders with scheduled events faster than this will be rejected.
+    #[clap(long, default_value_t = 10)]
+    #[serde(default = "default_min_schedule_interval_ms")]
+    pub min_schedule_interval_ms: u64,
+}
+
+impl Default for SchedulerConfig {
+    fn default() -> Self {
+        Self {
+            min_schedule_interval_ms: default_min_schedule_interval_ms(),
+        }
+    }
+}
+
+fn default_min_schedule_interval_ms() -> u64 {
+    10
 }
 
 impl Config {

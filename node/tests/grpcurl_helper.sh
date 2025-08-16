@@ -57,9 +57,9 @@ grpcurl_submit_work_order() {
 		-proto "$DAEMON_PROTO" \
 		-import-path "$PROTO_DIR" \
 		-plaintext -unix \
-		-d "@$_payload_file" \
+		-d "@" \
 		"unix://$_daemon_sock" \
-		daemon.WorkOrder/SubmitWorkOrder
+		daemon.WorkOrder/SubmitWorkOrder < "$_payload_file"
 	_grp_exit_code=$?
 	if [ $_grp_exit_code -ne 0 ]; then
 		echo "ERROR: grpcurl SubmitWorkOrder failed with exit code $_grp_exit_code for $_daemon_sock" >&2

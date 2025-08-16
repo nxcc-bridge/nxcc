@@ -167,11 +167,28 @@ export default worker({
       timestamp: new Date().toISOString(),
       testMessage: userdata.testMessage
     };
+  },
+
+  async tick(eventPayload: Record<string, unknown>, { userdata }: WorkerContext) {
+    const timestamp = new Date().toISOString();
+    console.log(\`Scheduled tick executed at \${timestamp}\`);
+    
+    // Track tick count in userdata or return a response
+    const tickResponse = {
+      timestamp,
+      message: "Scheduled event fired successfully",
+      eventPayload,
+      testMessage: userdata.testMessage,
+      tickNumber: Date.now() // Use timestamp as unique tick identifier
+    };
+    
+    console.log("Tick event processed:", JSON.stringify(tickResponse, null, 2));
+    return tickResponse;
   }
 });
 EOF
 
-    # Create worker manifest
+    # Create worker manifest with events including scheduled events
     cat > workers/echo-manifest.json << EOF
 {
   "bundle": {
@@ -181,8 +198,23 @@ EOF
   "userdata": {
     "name": "echo-worker",
     "testMessage": "$test_message",
-    "description": "E2E test worker for HTTP echo functionality"
-  }
+    "description": "E2E test worker for HTTP echo and scheduled events functionality"
+  },
+  "events": [
+    {
+      "handler": "launch",
+      "kind": "launch"
+    },
+    {
+      "handler": "fetch",
+      "kind": "http_request"
+    },
+    {
+      "handler": "tick",
+      "kind": "scheduled",
+      "period_ms": 500
+    }
+  ]
 }
 EOF
 
@@ -350,6 +382,46 @@ test_worker_http() {
     fi
 }
 
+# Test scheduled events by checking logs for scheduled event execution
+test_scheduled_events() {
+    local env="$1"
+    local timeout="${E2E_SCHEDULED_EVENT_TIMEOUT:-6}"
+    
+    log "Testing scheduled events in $env environment..."
+    
+    # Wait for at least 2 scheduled events to fire (500ms interval, wait 6 seconds)
+    log "Waiting $timeout seconds for scheduled events to fire..."
+    sleep "$timeout"
+    
+    # Get logs and check for scheduled event messages
+    local logs_output
+    logs_output=$(get_worker_logs "$env" 50 2>&1)
+    
+    # Check if scheduled tick messages appear in logs
+    if echo "$logs_output" | grep -q "Scheduled tick executed"; then
+        success "Scheduled events are firing successfully"
+        
+        # Count how many scheduled events fired
+        local tick_count
+        tick_count=$(echo "$logs_output" | grep -c "Scheduled tick executed" || echo "0")
+        log "Found $tick_count scheduled event executions in logs"
+        
+        # Verify we got multiple ticks (should be at least 8 in 6 seconds with 500ms interval)
+        if [[ "$tick_count" -ge 8 ]]; then
+            success "Multiple scheduled events detected ($tick_count ticks)"
+            return 0
+        else
+            warn "Only $tick_count scheduled events detected, expected at least 8"
+            return 1
+        fi
+    else
+        error "No scheduled events found in worker logs"
+        verbose_log "Worker logs output:"
+        verbose_log "$logs_output"
+        return 1
+    fi
+}
+
 # Test worker deployment and functionality
 test_worker_functionality() {
     local project_dir="$1"
@@ -369,6 +441,9 @@ test_worker_functionality() {
     
     # Test HTTP functionality
     test_worker_http "$env" "$test_message"
+    
+    # Test scheduled events functionality
+    test_scheduled_events "$env"
     
     success "Worker functionality test completed for $env environment"
 }

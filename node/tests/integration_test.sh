@@ -154,10 +154,10 @@ trap cleanup EXIT INT TERM
 echo "--- Building JS Workers ---"
 if [ ! -d "$JS_WORKER_DIR/node_modules" ]; then
 	echo "Installing JS dependencies..."
-	(cd "$JS_WORKER_DIR" && pnpm install)
+	(cd "$JS_WORKER_DIR" && npm install)
 fi
 echo "Building JS bundles..."
-(cd "$JS_WORKER_DIR" && pnpm run build)
+(cd "$JS_WORKER_DIR" && npm run build)
 
 POLICY_WORKER_JS_BUNDLE_PATH="$JS_WORKER_DIR/dist/test_worker_integration.js"
 EVENT_HANDLER_WORKER_JS_BUNDLE_PATH="$JS_WORKER_DIR/dist/event_handler_worker.js"
@@ -704,6 +704,114 @@ jq -e ".body == \"$HTTP_REQUEST_BODY\"" "$HTTP_RESPONSE_FILE" >/dev/null || {
 }
 
 echo "SUCCESS (HTTP Worker Test): HTTP echo worker responded correctly."
+
+# ==============================================================================
+# New Test Workflow (Step 6: Scheduled Events)
+# ==============================================================================
+echo "--- Starting Scheduled Events Test Workflow ---"
+
+# 6a. Prepare Work Order for scheduled events worker
+echo "Preparing scheduled events work order..."
+SCHEDULED_WORKER_JS_CONTENT=$(cat "$HTTP_ECHO_WORKER_JS_BUNDLE_PATH") # Reuse the echo worker for simplicity
+SCHEDULED_WORKER_JS_B64=$(printf "%s" "$SCHEDULED_WORKER_JS_CONTENT" | base64 | tr -d '\n')
+
+SCHEDULED_WORKER_BUNDLE_PAYLOAD_FILE="$TEST_DIR/scheduled_worker_bundle_payload.json"
+jq -n \
+	--arg vm "nxcc/workerd" \
+	--arg executable_b64 "$SCHEDULED_WORKER_JS_B64" \
+	'{vm: $vm, executable: $executable_b64, metadata: {}}' >"$SCHEDULED_WORKER_BUNDLE_PAYLOAD_FILE"
+
+SCHEDULED_WORKER_BUNDLE_PAYLOAD_B64_FILE="$TEST_DIR/scheduled_worker_bundle_payload_b64.txt"
+base64 <"$SCHEDULED_WORKER_BUNDLE_PAYLOAD_FILE" | tr -d '\n' >"$SCHEDULED_WORKER_BUNDLE_PAYLOAD_B64_FILE"
+
+SCHEDULED_WORKER_BUNDLE_DSSE_FILE="$TEST_DIR/scheduled_worker_bundle_dsse.json"
+jq -n \
+	--rawfile payload_b64 "$SCHEDULED_WORKER_BUNDLE_PAYLOAD_B64_FILE" \
+	--arg payload_type "application/vnd.nxcc.workerbundlepayload.v1+json" \
+	'{payload: $payload_b64, payloadType: $payload_type, signatures: [{keyid: "mock", sig: "'"$(printf "%s" "mocksig" | base64 | tr -d '\n')"'"}]}' >"$SCHEDULED_WORKER_BUNDLE_DSSE_FILE"
+
+SCHEDULED_WORKER_BUNDLE_DSSE_B64_FILE="$TEST_DIR/scheduled_worker_bundle_dsse_b64.txt"
+base64 <"$SCHEDULED_WORKER_BUNDLE_DSSE_FILE" | tr -d '\n' >"$SCHEDULED_WORKER_BUNDLE_DSSE_B64_FILE"
+
+SCHEDULED_WORKER_MANIFEST_FILE="$TEST_DIR/scheduled_worker_manifest.json"
+jq -n \
+	--rawfile bundle_source_b64 "$SCHEDULED_WORKER_BUNDLE_DSSE_B64_FILE" \
+	"{
+        bundle: {source: (\"data:application/json;base64,\" + \$bundle_source_b64), hash: null},
+        identities: [],
+        userdata: {testMessage: \"scheduled-test\"}
+    }" >"$SCHEDULED_WORKER_MANIFEST_FILE"
+
+SCHEDULED_WORK_ORDER_PAYLOAD_FILE="$TEST_DIR/scheduled_work_order_payload.json"
+jq -n \
+	--arg id "scheduled-test-work-order-$(date +%s%N)" \
+	--slurpfile worker_manifest "$SCHEDULED_WORKER_MANIFEST_FILE" \
+	'{
+        id: $id,
+        worker: $worker_manifest[0],
+        events: [
+            {"handler": "launch", "kind": "launch"},
+            {"handler": "fetch", "kind": "scheduled", "period_ms": 2000}
+        ]
+    }' >"$SCHEDULED_WORK_ORDER_PAYLOAD_FILE"
+
+SCHEDULED_WORK_ORDER_PAYLOAD_B64_FILE="$TEST_DIR/scheduled_work_order_payload_b64.txt"
+base64 <"$SCHEDULED_WORK_ORDER_PAYLOAD_FILE" | tr -d '\n' >"$SCHEDULED_WORK_ORDER_PAYLOAD_B64_FILE"
+
+SCHEDULED_WORK_ORDER_DSSE_FILE="$TEST_DIR/scheduled_work_order_dsse.json"
+jq -n \
+	--rawfile payload_b64 "$SCHEDULED_WORK_ORDER_PAYLOAD_B64_FILE" \
+	--arg payload_type "$DSSE_WORK_ORDER_PAYLOAD_TYPE" \
+	'{payload: $payload_b64, payloadType: $payload_type, signatures: [{keyid: "mock", sig: "'"$(printf "%s" "mocksig" | base64 | tr -d '\n')"'"}]}' >"$SCHEDULED_WORK_ORDER_DSSE_FILE"
+
+SCHEDULED_WORK_ORDER_DSSE_B64_FILE="$TEST_DIR/scheduled_work_order_dsse_b64.txt"
+base64 <"$SCHEDULED_WORK_ORDER_DSSE_FILE" | tr -d '\n' >"$SCHEDULED_WORK_ORDER_DSSE_B64_FILE"
+
+GRPCURL_SUBMIT_SCHEDULED_WO_PAYLOAD_FILE="$TEST_DIR/submit_scheduled_wo_payload.json"
+jq -n \
+	--rawfile work_order_dsse_bytes "$SCHEDULED_WORK_ORDER_DSSE_B64_FILE" \
+	'{work_order_dsse_bytes: $work_order_dsse_bytes}' >"$GRPCURL_SUBMIT_SCHEDULED_WO_PAYLOAD_FILE"
+
+# 6b. Submit scheduled events work order to Alice
+echo "Submitting scheduled events work order to Alice..."
+SCHEDULED_WO_SUBMIT_RESPONSE=$(grpcurl_submit_work_order "$alice_DAEMON_SOCK" "$GRPCURL_SUBMIT_SCHEDULED_WO_PAYLOAD_FILE")
+echo "Scheduled Work Order Submit Response: $SCHEDULED_WO_SUBMIT_RESPONSE"
+
+SCHEDULED_WO_SUBMIT_SUCCESS=$(echo "$SCHEDULED_WO_SUBMIT_RESPONSE" | jq -r .success)
+if [ "$SCHEDULED_WO_SUBMIT_SUCCESS" != "true" ]; then
+	echo "ERROR: Submitting scheduled work order was not successful."
+	exit 1
+fi
+
+SCHEDULED_WORK_ORDER_ID=$(echo "$SCHEDULED_WO_SUBMIT_RESPONSE" | jq -r .workOrderId)
+if [ -z "$SCHEDULED_WORK_ORDER_ID" ] || [ "$SCHEDULED_WORK_ORDER_ID" = "null" ]; then
+	echo "ERROR: Failed to get workOrderId from scheduled work order submission."
+	exit 1
+fi
+echo "Scheduled Work Order ID: $SCHEDULED_WORK_ORDER_ID"
+
+# 6c. Wait for scheduled events to fire and check logs
+echo "Waiting for scheduled events to fire (8 seconds to catch multiple events)..."
+sleep 8
+
+# 6d. Check for scheduled event execution in logs
+echo "Checking for scheduled event execution in Alice's daemon logs..."
+if grep -q "Firing scheduled event" "$alice_DAEMON_LOG"; then
+	SCHEDULED_EVENT_COUNT=$(grep -c "Firing scheduled event" "$alice_DAEMON_LOG")
+	echo "SUCCESS (Scheduled Events Test): Found $SCHEDULED_EVENT_COUNT scheduled event(s) in daemon logs."
+	
+	# Verify we got multiple events (should be at least 3 in 8 seconds with 2-second interval)
+	if [ "$SCHEDULED_EVENT_COUNT" -ge 3 ]; then
+		echo "SUCCESS (Scheduled Events Test): Multiple scheduled events detected ($SCHEDULED_EVENT_COUNT events)."
+	else
+		echo "WARNING (Scheduled Events Test): Only $SCHEDULED_EVENT_COUNT scheduled events detected, expected at least 3."
+	fi
+else
+	echo "ERROR (Scheduled Events Test): No scheduled events found in daemon logs."
+	echo "Alice daemon log contents:"
+	cat "$alice_DAEMON_LOG" || true
+	exit 1
+fi
 
 echo "--- Test Workflow Completed Successfully ---"
 

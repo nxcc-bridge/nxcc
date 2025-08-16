@@ -1496,8 +1496,10 @@ checksum = "1a7964611d71df112cb1730f2ee67324fcf4d0fc6606acbbe9bfe06df124637c"
 dependencies = [
  "android-tzdata",
  "iana-time-zone",
+ "js-sys",
  "num-traits",
  "serde",
+ "wasm-bindgen",
  "windows-link",
 ]
 
@@ -4153,6 +4155,7 @@ dependencies = [
  "anyhow",
  "axum",
  "base64",
+ "chrono",
  "ciborium",
  "clap",
  "figment",
@@ -4190,6 +4193,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types",
  "base64",
+ "chrono",
  "ciborium",
  "prost",
  "serde",

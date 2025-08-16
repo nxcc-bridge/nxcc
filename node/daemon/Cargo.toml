@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.97"
+chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.5.32", features = ["derive", "env"] }
 figment = { version = "0.10.19", features = ["toml", "env"] }
 futures = "0.3.31"

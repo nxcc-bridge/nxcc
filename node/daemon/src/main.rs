@@ -16,7 +16,7 @@ use std::{collections::HashMap, sync::Arc};
 use grpc::enclave_client;
 use nxcc_interface::proto::enclave as enclave_proto;
 use tokio::sync::RwLock;
-use tracing::{Level, error, info};
+use tracing::{Level, error, info, warn};
 use tracing_subscriber::{EnvFilter, FmtSubscriber as Subscriber, fmt::format::FmtSpan};
 
 use crate::{
@@ -25,7 +25,7 @@ use crate::{
     identity::{create_ephemeral_identity, get_or_create_identity},
     network::NetworkManager,
     policy::PolicyManager,
-    services::{runner::RunnerService, secrets::SecretsService},
+    services::{runner::RunnerService, scheduler::SchedulerHandle, secrets::SecretsService},
     web3::gateways::GatewayManager,
 };
 
@@ -95,6 +95,9 @@ async fn main() -> anyhow::Result<()> {
     let gateway_manager = Arc::new(GatewayManager::new());
     let policy_manager = Arc::new(PolicyManager::new(gateway_manager.clone(), &config).await?);
 
+    // Create scheduler handle
+    let scheduler_handle = Arc::new(SchedulerHandle::new(config.scheduler.clone()));
+
     // Attach the default VM to the enclave's runner service
     runner_service
         .attach_default_vm()
@@ -127,6 +130,7 @@ async fn main() -> anyhow::Result<()> {
             runner_service.clone(),
             policy_manager.clone(),
             gateway_manager.clone(),
+            scheduler_handle.clone(),
             Arc::new(config.clone()),
             http_mounts.clone(),
             daemon_event_tx.clone(),
@@ -221,6 +225,69 @@ async fn main() -> anyhow::Result<()> {
                 {
                     error!("Failed to send batch of events to enclave: {}", e);
                     // TODO: Add retry logic or dead-letter queue for batch
+                }
+            }
+        }
+    });
+
+    // Task to handle scheduled events
+    let scheduler_handle_for_events = scheduler_handle.clone();
+    let daemon_event_tx_for_scheduler = daemon_event_tx.clone();
+    let mut shutdown_rx_for_scheduler = shutdown_tx.subscribe();
+    tokio::spawn(async move {
+        let mut event_rx = match scheduler_handle_for_events.take_event_receiver().await {
+            Some(rx) => rx,
+            None => {
+                error!("Failed to get scheduler event receiver");
+                return;
+            }
+        };
+
+        loop {
+            tokio::select! {
+                biased;
+                _ = shutdown_rx_for_scheduler.recv() => {
+                    info!("Scheduled event handler shutting down.");
+                    break;
+                }
+                event_opt = event_rx.recv() => {
+                    if let Some(scheduled_event) = event_opt {
+                        info!(
+                            "Firing scheduled event for work_order {} handler {}",
+                            scheduled_event.work_order_id, scheduled_event.handler
+                        );
+
+                        let scheduled_event_payload_proto = nxcc_interface::proto::interface::EventPayload {
+                            payload: Some(nxcc_interface::proto::interface::event_payload::Payload::ScheduledEvent(
+                                ()
+                            )),
+                        };
+
+                        // Find the corresponding active work order to get the enclave_worker_id
+                        let active_work_orders = work_order_orchestrator.active_work_orders.read().await;
+                        if let Some(active_wo) = active_work_orders.get(&scheduled_event.work_order_id) {
+                            let event_delivery = nxcc_interface::proto::enclave::EventDelivery {
+                                worker_id: active_wo.enclave_worker_id.clone(),
+                                handler_name: scheduled_event.handler,
+                                event_payload: Some(scheduled_event_payload_proto),
+                            };
+
+                            if let Err(e) = daemon_event_tx_for_scheduler.send(event_delivery).await {
+                                error!(
+                                    "Failed to send scheduled event to daemon queue for work_order {}: {}",
+                                    scheduled_event.work_order_id, e
+                                );
+                            }
+                        } else {
+                            warn!(
+                                "Scheduled event fired for unknown work_order: {}",
+                                scheduled_event.work_order_id
+                            );
+                        }
+                    } else {
+                        // Channel closed
+                        break;
+                    }
                 }
             }
         }

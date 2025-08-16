@@ -27,4 +27,20 @@ export default worker({
     console.log(`  Tx: ${transactionHash}`);
     console.log(`  Block: ${blockNumber}`);
   },
+
+  async tick(eventPayload: Record<string, unknown>, { userdata }: WorkerContext) {
+    const timestamp = new Date().toISOString();
+    console.log(`Scheduled tick executed at ${timestamp}`);
+
+    // Example: Perform periodic tasks like data aggregation, monitoring, etc.
+    const status = {
+      timestamp,
+      message: "Scheduled event fired successfully",
+      eventPayload,
+      userdata,
+    };
+
+    console.log("Tick event processed:", status);
+    return status;
+  },
 });
