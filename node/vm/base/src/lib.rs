@@ -3,6 +3,7 @@
 pub mod binding;
 pub mod client;
 pub mod config;
+pub mod logging;
 pub mod server;
 #[cfg(test)]
 mod tests;

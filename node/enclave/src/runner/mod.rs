@@ -1,7 +1,11 @@
 #[cfg(test)]
 mod tests;
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use nxcc_interface::{
     proto::vm::{
@@ -148,6 +152,33 @@ impl VmClient {
             VmClient::Mock(client) => client.probe_worker(worker_id).await,
         }
     }
+
+    pub async fn stream_worker_logs(
+        &mut self,
+        worker_id: String,
+        tail_lines: u32,
+        follow: bool,
+    ) -> Result<
+        tokio_stream::wrappers::ReceiverStream<
+            Result<nxcc_interface::proto::vm::StreamWorkerLogsResponse, tonic::Status>,
+        >,
+        ClientError,
+    > {
+        match self {
+            VmClient::Real(client) => {
+                client
+                    .stream_worker_logs(worker_id, tail_lines, follow)
+                    .await
+            }
+            #[cfg(test)]
+            VmClient::Mock(_client) => {
+                // For testing, return an empty stream
+                let (tx, rx) = tokio::sync::mpsc::channel(1);
+                drop(tx); // Close channel immediately
+                Ok(tokio_stream::wrappers::ReceiverStream::new(rx))
+            }
+        }
+    }
 }
 
 // Create a convenient From implementation for VmServiceClient to make client creation more ergonomic
@@ -171,6 +202,8 @@ pub struct RunnerService {
     vms: Arc<RwLock<HashMap<String, VmClient>>>,
     /// Maps running worker_id (returned by VM) back to the vm_id it runs on.
     worker_map: Arc<RwLock<HashMap<String, String>>>,
+    /// Maps dead worker_id to (vm_id, death_time) for TTL-based log access.
+    dead_worker_map: Arc<RwLock<HashMap<String, (String, Instant)>>>,
     /// Shared secrets service for storing authorizations.
     secrets: Arc<Secrets>,
     /// Sender for the internal event queue: (worker_id, handler_name, serialized_vm_invocation_payload)
@@ -193,9 +226,37 @@ impl RunnerService {
 
         let vms_clone = Arc::new(RwLock::new(HashMap::<String, VmClient>::new()));
         let worker_map_clone = Arc::new(RwLock::new(HashMap::<String, String>::new()));
+        let dead_worker_map_clone =
+            Arc::new(RwLock::new(HashMap::<String, (String, Instant)>::new()));
 
         let vms_for_task = vms_clone.clone();
         let worker_map_for_task = worker_map_clone.clone();
+
+        // Start cleanup task for expired dead worker mappings
+        let dead_worker_map_for_cleanup = dead_worker_map_clone.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(60));
+            loop {
+                interval.tick().await;
+
+                let mut dead_map = dead_worker_map_for_cleanup.write().await;
+                let now = Instant::now();
+                let initial_count = dead_map.len();
+
+                dead_map.retain(|worker_id, (_vm_id, death_time)| {
+                    let should_retain = now.duration_since(*death_time) < Duration::from_secs(300); // 5 minutes
+                    if !should_retain {
+                        debug!("Cleaning up expired dead worker mapping: {}", worker_id);
+                    }
+                    should_retain
+                });
+
+                let cleaned_count = initial_count - dead_map.len();
+                if cleaned_count > 0 {
+                    debug!("Cleaned up {} expired dead worker mappings", cleaned_count);
+                }
+            }
+        });
 
         tokio::spawn(
             async move {
@@ -282,6 +343,7 @@ impl RunnerService {
         Self {
             vms: vms_clone,
             worker_map: worker_map_clone,
+            dead_worker_map: dead_worker_map_clone,
             secrets,
             event_tx,
         }
@@ -489,9 +551,13 @@ impl RunnerService {
                     "Successfully requested termination for worker '{}'",
                     worker_id
                 );
-                // Remove from worker map
+                // Move from active worker map to dead worker map
                 let mut worker_map_guard = self.worker_map.write().await;
                 worker_map_guard.remove(&worker_id);
+                drop(worker_map_guard);
+
+                let mut dead_worker_map_guard = self.dead_worker_map.write().await;
+                dead_worker_map_guard.insert(worker_id.clone(), (vm_id.clone(), Instant::now()));
                 Ok(())
             }
             Err(ClientError::Grpc(status)) if status.code() == tonic::Code::NotFound => {
@@ -499,9 +565,13 @@ impl RunnerService {
                     "Worker '{}' not found in VM '{}' during termination request.",
                     worker_id, vm_id
                 );
-                // Remove from worker map if it exists locally
+                // Move from active worker map to dead worker map if it exists locally
                 let mut worker_map_guard = self.worker_map.write().await;
                 worker_map_guard.remove(&worker_id);
+                drop(worker_map_guard);
+
+                let mut dead_worker_map_guard = self.dead_worker_map.write().await;
+                dead_worker_map_guard.insert(worker_id.clone(), (vm_id.clone(), Instant::now()));
                 Ok(())
             }
             Err(e) => {
@@ -814,6 +884,56 @@ impl RunnerService {
             );
             RunnerError::VmConnection(e)
         })
+    }
+    /// Gets the VM ID for a worker, checking both active and dead worker maps.
+    pub async fn get_worker_vm_id(&self, worker_id: &str) -> Option<String> {
+        // Check active workers first
+        if let Some(vm_id) = self.worker_map.read().await.get(worker_id) {
+            return Some(vm_id.clone());
+        }
+
+        // Check dead workers
+        if let Some((vm_id, _death_time)) = self.dead_worker_map.read().await.get(worker_id) {
+            return Some(vm_id.clone());
+        }
+
+        None
+    }
+
+    /// Streams logs from a worker via its VM.
+    pub async fn stream_worker_logs(
+        &self,
+        worker_id: String,
+        tail_lines: u32,
+        follow: bool,
+    ) -> Result<
+        tokio_stream::wrappers::ReceiverStream<
+            Result<nxcc_interface::proto::vm::StreamWorkerLogsResponse, tonic::Status>,
+        >,
+        RunnerError,
+    > {
+        info!("Requesting to stream logs for worker '{}'", worker_id);
+
+        let vm_id = self
+            .get_worker_vm_id(&worker_id)
+            .await
+            .ok_or_else(|| RunnerError::WorkerNotFound(worker_id.clone()))?;
+
+        let mut vms_guard = self.vms.write().await;
+        let client = vms_guard
+            .get_mut(&vm_id)
+            .ok_or_else(|| RunnerError::VmNotAttached(vm_id.clone()))?;
+
+        client
+            .stream_worker_logs(worker_id.clone(), tail_lines, follow)
+            .await
+            .map_err(|e| {
+                error!(
+                    "Log streaming failed for worker '{}' in VM '{}': {}",
+                    worker_id, vm_id, e
+                );
+                RunnerError::VmConnection(e)
+            })
     }
 }
 

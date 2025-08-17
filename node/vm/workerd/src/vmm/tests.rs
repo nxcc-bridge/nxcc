@@ -587,4 +587,196 @@ async fn test_multiple_secret_keys_derived_bits() -> Result<(), Box<dyn std::err
     Ok(())
 }
 
+#[tokio::test]
+async fn test_log_buffer_integration() -> Result<(), Box<dyn std::error::Error>> {
+    // Test that the VMM properly creates and manages log buffers for workers
+    let vmm = WorkerdVmm::new(Default::default());
+
+    // Initially, no workers should be registered
+    assert!(
+        vmm.log_manager
+            .get_worker_logs("non-existent", None)
+            .is_none()
+    );
+
+    // Register a worker with the log manager (this would normally happen during worker startup)
+    let buffer = vmm.log_manager.register_worker("test-worker".to_string());
+
+    // Write some logs to the buffer
+    buffer.write_log("Log message 1".to_string());
+    buffer.write_log("Log message 2".to_string());
+
+    // Should be able to get logs via the manager
+    let logs = vmm
+        .log_manager
+        .get_worker_logs("test-worker", None)
+        .unwrap();
+    assert_eq!(logs.len(), 2);
+    assert_eq!(logs[0].line, "Log message 1");
+    assert_eq!(logs[1].line, "Log message 2");
+
+    // Test tail functionality
+    let tail_logs = vmm
+        .log_manager
+        .get_worker_logs("test-worker", Some(1))
+        .unwrap();
+    assert_eq!(tail_logs.len(), 1);
+    assert_eq!(tail_logs[0].line, "Log message 2");
+
+    // Terminate the worker
+    vmm.log_manager.terminate_worker("test-worker");
+
+    // Logs should still be accessible from dead worker storage
+    let dead_logs = vmm
+        .log_manager
+        .get_worker_logs("test-worker", None)
+        .unwrap();
+    assert_eq!(dead_logs.len(), 2);
+    assert_eq!(dead_logs[0].line, "Log message 1");
+    assert_eq!(dead_logs[1].line, "Log message 2");
+
+    // But streaming should not be available for dead workers
+    assert!(vmm.log_manager.create_log_streamer("test-worker").is_none());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_log_streaming_functionality() -> Result<(), Box<dyn std::error::Error>> {
+    let vmm = WorkerdVmm::new(Default::default());
+
+    // Register a worker
+    let buffer = vmm.log_manager.register_worker("stream-test".to_string());
+
+    // Create a streamer for the worker
+    let mut streamer = vmm.log_manager.create_log_streamer("stream-test").unwrap();
+
+    // Write logs after creating the streamer
+    buffer.write_log("Streamed message 1".to_string());
+    buffer.write_log("Streamed message 2".to_string());
+
+    // Should receive the logs via the streamer
+    let log1 = streamer.next_log().await.unwrap();
+    let log2 = streamer.next_log().await.unwrap();
+
+    assert_eq!(log1.line, "Streamed message 1");
+    assert_eq!(log2.line, "Streamed message 2");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_multiple_log_streamers() -> Result<(), Box<dyn std::error::Error>> {
+    let vmm = WorkerdVmm::new(Default::default());
+
+    // Register a worker
+    let buffer = vmm.log_manager.register_worker("multi-stream".to_string());
+
+    // Create multiple streamers for the same worker
+    let mut streamer1 = vmm.log_manager.create_log_streamer("multi-stream").unwrap();
+    let mut streamer2 = vmm.log_manager.create_log_streamer("multi-stream").unwrap();
+
+    // Write a log message
+    buffer.write_log("Broadcast message".to_string());
+
+    // Both streamers should receive the message
+    let log1 = streamer1.next_log().await.unwrap();
+    let log2 = streamer2.next_log().await.unwrap();
+
+    assert_eq!(log1.line, "Broadcast message");
+    assert_eq!(log2.line, "Broadcast message");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_log_stream_worker_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
+    let vmm = WorkerdVmm::new(Default::default());
+
+    // Test streaming non-existent worker
+    let stream_result = vmm
+        .stream_worker_logs("non-existent".to_string(), 0, true)
+        .await;
+    assert!(stream_result.is_err());
+    assert!(
+        stream_result
+            .unwrap_err()
+            .to_string()
+            .contains("Worker instance not found")
+    );
+
+    // Register a worker
+    let buffer = vmm
+        .log_manager
+        .register_worker("lifecycle-test".to_string());
+
+    // Write some historical logs
+    buffer.write_log("Historical log 1".to_string());
+    buffer.write_log("Historical log 2".to_string());
+
+    // Test streaming with tail lines
+    let stream = vmm
+        .stream_worker_logs("lifecycle-test".to_string(), 1, false)
+        .await;
+
+    // The stream should be created successfully
+    assert!(stream.is_ok(), "Stream should be created successfully");
+
+    // Terminate the worker
+    vmm.log_manager.terminate_worker("lifecycle-test");
+
+    // Should still be able to get historical logs from terminated worker
+    let dead_stream_result = vmm
+        .stream_worker_logs("lifecycle-test".to_string(), 2, false)
+        .await;
+    assert!(
+        dead_stream_result.is_ok(),
+        "Should be able to stream historical logs from dead worker"
+    );
+
+    // Should also be able to request follow mode (it just won't get new logs)
+    let dead_follow_result = vmm
+        .stream_worker_logs("lifecycle-test".to_string(), 1, true)
+        .await;
+    assert!(
+        dead_follow_result.is_ok(),
+        "Should be able to request follow mode for dead worker"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_log_size_limits() -> Result<(), Box<dyn std::error::Error>> {
+    let vmm = WorkerdVmm::new(Default::default());
+
+    // Register a worker
+    let buffer = vmm.log_manager.register_worker("size-test".to_string());
+
+    // Write many logs to test size limits
+    for i in 0..100 {
+        buffer.write_log(format!("Log entry number {}", i));
+    }
+
+    // Should respect the buffer size limits defined in logging.rs
+    let all_logs = vmm.log_manager.get_worker_logs("size-test", None).unwrap();
+    assert!(all_logs.len() <= 10_000, "Should not exceed MAX_LINES");
+
+    // Test tail functionality with large number
+    let tail_logs = vmm
+        .log_manager
+        .get_worker_logs("size-test", Some(50))
+        .unwrap();
+    assert!(
+        tail_logs.len() <= 50,
+        "Tail should not exceed requested size"
+    );
+    assert!(
+        tail_logs.len() <= all_logs.len(),
+        "Tail should not exceed total logs"
+    );
+
+    Ok(())
+}
+
 // TODO: Add test for workerd failing to start if a mock workerd script is implemented.

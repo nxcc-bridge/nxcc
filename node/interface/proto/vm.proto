@@ -43,6 +43,9 @@ service Vm {
   /// Retrieves debug logs from a specific worker instance.
   rpc GetWorkerLogs(GetWorkerLogsRequest) returns (GetWorkerLogsResponse);
 
+  /// Streams logs from a specific worker instance (tail + follow).
+  rpc StreamWorkerLogs(StreamWorkerLogsRequest) returns (stream StreamWorkerLogsResponse);
+
   /// Sends an HTTP request to a specific worker instance.
   rpc InvokeHttp(InvokeHttpRequest) returns (InvokeHttpResponse);
 
@@ -252,6 +255,29 @@ message GetWorkerLogsResponse {
   bool success = 2;
   /// Optional error message if log retrieval failed (e.g., instance not found, logging disabled).
   string error_message = 3;
+}
+
+
+// --- StreamWorkerLogs Messages ---
+
+/// Request to stream logs from a specific worker instance.
+message StreamWorkerLogsRequest {
+  /// The unique identifier of the worker instance whose logs are requested.
+  string id = 1;
+  /// Number of historical log lines to include before streaming (0 for none).
+  uint32 tail_lines = 2;
+  /// Whether to follow/stream new logs as they arrive.
+  bool follow = 3;
+}
+
+/// Response containing a log line from a streaming worker instance.
+message StreamWorkerLogsResponse {
+  /// A single log line.
+  string log_line = 1;
+  /// Timestamp when the log was generated (Unix timestamp in milliseconds).
+  uint64 timestamp_ms = 2;
+  /// Whether this is a historical log line (true) or new/streaming (false).
+  bool is_historical = 3;
 }
 
 // --- ProbeWorker Messages ---

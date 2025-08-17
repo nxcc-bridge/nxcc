@@ -9,11 +9,11 @@ use nxcc_interface::{
             ExecutePolicyResponse, GenerateSecretsRequest, GetReportRequest, GetSecretsRequest,
             GetSecretsResponse, InvokeHttpWorkerRequest, InvokeHttpWorkerResponse,
             PutSecretsRequest, PutSecretsResponse, RunWorkerRequest, RunWorkerResponse,
-            SecretStatus, TerminateWorkerRequest,
+            SecretStatus, StreamWorkerLogsRequest, TerminateWorkerRequest,
             runner_server::{Runner, RunnerServer},
             secrets_server::{Secrets as SecretsServerTrait, SecretsServer},
         },
-        interface,
+        interface, vm,
     },
     types::{
         ConsumerInfo, EnvReport, EventPayload, PolicyExecutionRequest, SecretId, SecretRequest,
@@ -449,6 +449,32 @@ impl Runner for EnclaveRunnerGrpcService {
                 status: status.into(),
                 status_message,
             })),
+            Err(e) => Err(map_runner_error(e)),
+        }
+    }
+
+    type StreamWorkerLogsStream =
+        tokio_stream::wrappers::ReceiverStream<Result<vm::StreamWorkerLogsResponse, Status>>;
+
+    async fn stream_worker_logs(
+        &self,
+        request: Request<StreamWorkerLogsRequest>,
+    ) -> Result<Response<Self::StreamWorkerLogsStream>, Status> {
+        let req = request.into_inner();
+        debug!(
+            "gRPC StreamWorkerLogs request for worker_id '{}', tail_lines: {}, follow: {}",
+            req.worker_id, req.tail_lines, req.follow
+        );
+
+        match self
+            .runner
+            .stream_worker_logs(req.worker_id, req.tail_lines, req.follow)
+            .await
+        {
+            Ok(stream) => {
+                debug!("Successfully started streaming logs for worker");
+                Ok(Response::new(stream))
+            }
             Err(e) => Err(map_runner_error(e)),
         }
     }

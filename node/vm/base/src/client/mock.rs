@@ -586,4 +586,70 @@ impl VmClient for MockVmServiceClient {
             ))))
         }
     }
+
+    async fn stream_worker_logs(
+        &mut self,
+        id: String,
+        tail_lines: u32,
+        follow: bool,
+    ) -> Result<
+        tokio_stream::wrappers::ReceiverStream<
+            Result<nxcc_interface::proto::vm::StreamWorkerLogsResponse, tonic::Status>,
+        >,
+        ClientError,
+    > {
+        self.check_failure()?;
+
+        let workers = self.workers.lock().unwrap();
+        if !workers.contains_key(&id) {
+            return Err(ClientError::Grpc(Status::not_found(format!(
+                "Worker '{}' not found",
+                id
+            ))));
+        }
+        drop(workers);
+
+        let (tx, rx) = tokio::sync::mpsc::channel(100);
+
+        // Send mock log entries for testing
+        let worker_id = id.clone();
+        tokio::spawn(async move {
+            // Send historical logs if requested
+            if tail_lines > 0 {
+                for i in 1..=tail_lines.min(3) {
+                    let response = nxcc_interface::proto::vm::StreamWorkerLogsResponse {
+                        log_line: format!("Mock historical log {} for {}", i, worker_id),
+                        timestamp_ms: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_millis() as u64,
+                        is_historical: true,
+                    };
+                    if let Err(_) = tx.send(Ok(response)).await {
+                        break;
+                    }
+                }
+            }
+
+            // Send streaming logs if follow is enabled
+            if follow {
+                for i in 1..=2 {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    let response = nxcc_interface::proto::vm::StreamWorkerLogsResponse {
+                        log_line: format!("Mock live log {} for {}", i, worker_id),
+                        timestamp_ms: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_millis() as u64,
+                        is_historical: false,
+                    };
+                    if let Err(_) = tx.send(Ok(response)).await {
+                        break;
+                    }
+                }
+            }
+        });
+
+        Ok(tokio_stream::wrappers::ReceiverStream::new(rx))
+    }
 }

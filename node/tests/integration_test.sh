@@ -706,11 +706,116 @@ jq -e ".body == \"$HTTP_REQUEST_BODY\"" "$HTTP_RESPONSE_FILE" >/dev/null || {
 echo "SUCCESS (HTTP Worker Test): HTTP echo worker responded correctly."
 
 # ==============================================================================
-# New Test Workflow (Step 6: Scheduled Events)
+# Log Streaming Test Workflow (Step 6: Worker Log Streaming)
+# ==============================================================================
+echo "--- Starting Worker Log Streaming Test Workflow ---"
+
+# 6a. Test worker log streaming via HTTP API
+echo "Testing worker log streaming via HTTP API..."
+
+# Use the existing HTTP echo worker for log streaming tests
+HTTP_LOGS_URL="http://127.0.0.1:${NODE1_HTTP_PORT}/api/workers/${HTTP_ECHO_WORK_ORDER_ID}/logs"
+
+# Test 1: Get logs without streaming (should fail as not implemented)
+echo "Testing non-streaming logs (expected to fail)..."
+HTTP_LOGS_RESPONSE=$(curl -s -w "%{http_code}" -o /dev/null "$HTTP_LOGS_URL?follow=false" || echo "000")
+if [ "$HTTP_LOGS_RESPONSE" = "500" ]; then
+	echo "SUCCESS (Log Streaming Test 1): Non-streaming correctly returns 500 (not implemented)."
+else
+	echo "ERROR (Log Streaming Test 1): Expected 500 for non-streaming, got $HTTP_LOGS_RESPONSE"
+	exit 1
+fi
+
+# Test 2: Test streaming logs with follow=true (should succeed)
+echo "Testing streaming logs with follow=true..."
+LOGS_STREAM_PID=""
+LOGS_OUTPUT_FILE="$TEST_DIR/worker_logs_stream.txt"
+
+# Start streaming in background and capture a few lines
+timeout 5s curl -s -H "Accept: text/event-stream" "$HTTP_LOGS_URL?follow=true&tail=5" > "$LOGS_OUTPUT_FILE" &
+LOGS_STREAM_PID=$!
+
+# Wait a moment for the stream to start
+sleep 2
+
+# Make additional HTTP requests to the worker to generate more logs
+echo "Generating additional logs by invoking worker..."
+for i in 1 2 3; do
+	curl -s -X POST "http://127.0.0.1:${NODE1_HTTP_PORT}/w/${HTTP_ECHO_WORK_ORDER_ID}/echo-test" \
+		-H "Content-Type: application/json" \
+		-d "{\"test\": \"log-stream-test-$i\"}" > /dev/null
+	sleep 0.5
+done
+
+# Wait for stream to complete or timeout
+wait $LOGS_STREAM_PID 2>/dev/null || true
+
+# Check if we received SSE-formatted logs
+if [ -f "$LOGS_OUTPUT_FILE" ] && [ -s "$LOGS_OUTPUT_FILE" ]; then
+	echo "SUCCESS (Log Streaming Test 2): Received log stream data."
+	
+	# Verify SSE format (should contain "data: " lines)
+	if grep -q "data: " "$LOGS_OUTPUT_FILE"; then
+		echo "SUCCESS (Log Streaming Test 3): Log stream contains properly formatted SSE data."
+		
+		# Count the number of log entries (each "data: " line is a log entry)
+		LOG_ENTRY_COUNT=$(grep -c "data: " "$LOGS_OUTPUT_FILE")
+		echo "SUCCESS (Log Streaming Test 4): Received $LOG_ENTRY_COUNT log entries from stream."
+		
+		if [ "$LOG_ENTRY_COUNT" -ge 1 ]; then
+			echo "SUCCESS (Log Streaming Test 5): Adequate number of log entries received."
+		else
+			echo "ERROR (Log Streaming Test 5): Expected at least 1 log entry, got $LOG_ENTRY_COUNT"
+			exit 1
+		fi
+	else
+		echo "ERROR (Log Streaming Test 3): Log stream does not contain SSE data format."
+		echo "Log stream contents:"
+		cat "$LOGS_OUTPUT_FILE" || true
+		exit 1
+	fi
+else
+	echo "ERROR (Log Streaming Test 2): No log stream data received."
+	exit 1
+fi
+
+# Test 3: Test streaming with tail parameter
+echo "Testing streaming logs with tail parameter..."
+LOGS_TAIL_OUTPUT_FILE="$TEST_DIR/worker_logs_tail.txt"
+
+timeout 3s curl -s -H "Accept: text/event-stream" "$HTTP_LOGS_URL?follow=true&tail=2" > "$LOGS_TAIL_OUTPUT_FILE" &
+LOGS_TAIL_PID=$!
+
+# Wait for stream to complete or timeout
+wait $LOGS_TAIL_PID 2>/dev/null || true
+
+if [ -f "$LOGS_TAIL_OUTPUT_FILE" ] && [ -s "$LOGS_TAIL_OUTPUT_FILE" ]; then
+	echo "SUCCESS (Log Streaming Test 6): Tail parameter streaming works."
+else
+	echo "ERROR (Log Streaming Test 6): Tail parameter streaming failed."
+	exit 1
+fi
+
+# Test 4: Test invalid worker ID (should return error)
+echo "Testing log streaming with invalid worker ID..."
+INVALID_LOGS_URL="http://127.0.0.1:${NODE1_HTTP_PORT}/api/workers/invalid-worker-id/logs"
+INVALID_LOGS_RESPONSE=$(curl -s -w "%{http_code}" -o /dev/null "$INVALID_LOGS_URL?follow=true" || echo "000")
+
+if [ "$INVALID_LOGS_RESPONSE" = "500" ] || [ "$INVALID_LOGS_RESPONSE" = "404" ]; then
+	echo "SUCCESS (Log Streaming Test 7): Invalid worker ID correctly returns error ($INVALID_LOGS_RESPONSE)."
+else
+	echo "ERROR (Log Streaming Test 7): Expected error for invalid worker ID, got $INVALID_LOGS_RESPONSE"
+	exit 1
+fi
+
+echo "SUCCESS: All worker log streaming tests passed."
+
+# ==============================================================================
+# New Test Workflow (Step 7: Scheduled Events)
 # ==============================================================================
 echo "--- Starting Scheduled Events Test Workflow ---"
 
-# 6a. Prepare Work Order for scheduled events worker
+# 7a. Prepare Work Order for scheduled events worker
 echo "Preparing scheduled events work order..."
 SCHEDULED_WORKER_JS_CONTENT=$(cat "$HTTP_ECHO_WORKER_JS_BUNDLE_PATH") # Reuse the echo worker for simplicity
 SCHEDULED_WORKER_JS_B64=$(printf "%s" "$SCHEDULED_WORKER_JS_CONTENT" | base64 | tr -d '\n')
@@ -772,7 +877,7 @@ jq -n \
 	--rawfile work_order_dsse_bytes "$SCHEDULED_WORK_ORDER_DSSE_B64_FILE" \
 	'{work_order_dsse_bytes: $work_order_dsse_bytes}' >"$GRPCURL_SUBMIT_SCHEDULED_WO_PAYLOAD_FILE"
 
-# 6b. Submit scheduled events work order to Alice
+# 7b. Submit scheduled events work order to Alice
 echo "Submitting scheduled events work order to Alice..."
 SCHEDULED_WO_SUBMIT_RESPONSE=$(grpcurl_submit_work_order "$alice_DAEMON_SOCK" "$GRPCURL_SUBMIT_SCHEDULED_WO_PAYLOAD_FILE")
 echo "Scheduled Work Order Submit Response: $SCHEDULED_WO_SUBMIT_RESPONSE"
@@ -790,11 +895,11 @@ if [ -z "$SCHEDULED_WORK_ORDER_ID" ] || [ "$SCHEDULED_WORK_ORDER_ID" = "null" ];
 fi
 echo "Scheduled Work Order ID: $SCHEDULED_WORK_ORDER_ID"
 
-# 6c. Wait for scheduled events to fire and check logs
+# 7c. Wait for scheduled events to fire and check logs
 echo "Waiting for scheduled events to fire (8 seconds to catch multiple events)..."
 sleep 8
 
-# 6d. Check for scheduled event execution in logs
+# 7d. Check for scheduled event execution in logs
 echo "Checking for scheduled event execution in Alice's daemon logs..."
 if grep -q "Firing scheduled event" "$alice_DAEMON_LOG"; then
 	SCHEDULED_EVENT_COUNT=$(grep -c "Firing scheduled event" "$alice_DAEMON_LOG")

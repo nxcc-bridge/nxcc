@@ -9,8 +9,10 @@ nxcc-interface = { path = "../../interface" }
 
 # Async runtime and utilities
 tokio = { version = "1.44.1", features = ["rt-multi-thread", "macros", "process", "fs", "net", "time", "sync", "io-util"] }
+tokio-stream = "0.1.17"
 async-trait = "0.1.83"
 futures = "0.3.30"
+tonic = "0.13.1"
 
 # Cap'n Proto
 capnp = "0.21.0"

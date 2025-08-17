@@ -9,8 +9,8 @@ use nxcc_interface::{
         InvokeHttpWorkerRequest as ProtoInvokeHttpWorkerRequest,
         InvokeHttpWorkerResponse as ProtoInvokeHttpWorkerResponse, PutSecretsRequest,
         PutSecretsResponse, RunWorkerRequest, SecretsBundle as ProtoSecretsBundle,
-        TerminateWorkerRequest, VmAddress as ProtoVmAddress, runner_client::RunnerClient,
-        secrets_client::SecretsClient,
+        StreamWorkerLogsRequest, TerminateWorkerRequest, VmAddress as ProtoVmAddress,
+        runner_client::RunnerClient, secrets_client::SecretsClient,
     },
     types::{AttestationReport, ConsumerInfo, EnvReport, SecretId, SecretsBox},
 };
@@ -318,5 +318,44 @@ impl EnclaveClient {
                 )
             })?;
         Ok((status, resp.status_message))
+    }
+
+    pub async fn stream_worker_logs(
+        &self,
+        worker_id: String,
+        tail_lines: u32,
+        follow: bool,
+    ) -> Result<
+        tokio_stream::wrappers::ReceiverStream<
+            Result<nxcc_interface::proto::vm::StreamWorkerLogsResponse, tonic::Status>,
+        >,
+        String,
+    > {
+        let req = StreamWorkerLogsRequest {
+            worker_id: worker_id.clone(),
+            tail_lines,
+            follow,
+        };
+        let mut client = self.runner();
+        let response_stream = client
+            .stream_worker_logs(req)
+            .await
+            .map_err(|e| e.to_string())?
+            .into_inner();
+
+        // Convert tonic streaming response to tokio receiver stream
+        let (tx, rx) = tokio::sync::mpsc::channel(1000);
+
+        tokio::spawn(async move {
+            use futures::StreamExt;
+            let mut stream = response_stream;
+            while let Some(result) = stream.next().await {
+                if let Err(_) = tx.send(result).await {
+                    break; // Receiver dropped
+                }
+            }
+        });
+
+        Ok(tokio_stream::wrappers::ReceiverStream::new(rx))
     }
 }

@@ -3,6 +3,7 @@ mod tests;
 
 use std::{error::Error, fmt, sync::Arc};
 
+use futures::stream::StreamExt;
 use thiserror::Error;
 use tonic::{Request, Response, Status, transport::Server};
 use tracing::{debug, error, info, instrument, warn};
@@ -93,6 +94,19 @@ pub trait VmRuntime: Send + Sync + 'static {
     /// Retrieves debug logs from a specific worker instance.
     async fn get_worker_logs(&self, id: String) -> Result<String, VmError>;
 
+    /// Streams logs from a specific worker instance.
+    async fn stream_worker_logs(
+        &self,
+        id: String,
+        tail_lines: u32,
+        follow: bool,
+    ) -> Result<
+        tokio_stream::wrappers::ReceiverStream<
+            Result<nxcc_interface::proto::vm::StreamWorkerLogsResponse, tonic::Status>,
+        >,
+        VmError,
+    >;
+
     /// Actively probes a worker to check its liveness.
     async fn probe_worker(
         &self,
@@ -106,7 +120,8 @@ use nxcc_interface::proto::vm::{
     HttpResponse as ProtoHttpResponse, InvokeHttpRequest, InvokeHttpResponse, InvokeWorkerRequest,
     InvokeWorkerResponse, ListRunningWorkersRequest, ListRunningWorkersResponse,
     ProbeWorkerRequest, ProbeWorkerResponse, StartWorkerRequest, StartWorkerResponse,
-    StopWorkerRequest, StopWorkerResponse, WorkerStatus,
+    StopWorkerRequest, StopWorkerResponse, StreamWorkerLogsRequest, StreamWorkerLogsResponse,
+    WorkerStatus,
     vm_server::{Vm, VmServer},
 };
 
@@ -365,6 +380,38 @@ impl<T: VmRuntime> Vm for VmServiceGrpc<T> {
                     success: false,
                     error_message: e.to_string(),
                 }))
+            }
+        }
+    }
+
+    type StreamWorkerLogsStream =
+        tokio_stream::wrappers::ReceiverStream<Result<StreamWorkerLogsResponse, Status>>;
+
+    async fn stream_worker_logs(
+        &self,
+        request: Request<StreamWorkerLogsRequest>,
+    ) -> Result<Response<Self::StreamWorkerLogsStream>, Status> {
+        let req = request.into_inner();
+        debug!(
+            "gRPC StreamWorkerLogs request for id '{}', tail_lines: {}, follow: {}",
+            req.id, req.tail_lines, req.follow
+        );
+
+        match self
+            .runtime
+            .stream_worker_logs(req.id.clone(), req.tail_lines, req.follow)
+            .await
+        {
+            Ok(stream) => {
+                debug!("Successfully started streaming logs for worker {}", req.id);
+                Ok(Response::new(stream))
+            }
+            Err(e) => {
+                error!("Failed to stream worker logs for id {}: {}", req.id, e);
+                Err(Status::internal(format!(
+                    "Failed to stream worker logs: {}",
+                    e
+                )))
             }
         }
     }

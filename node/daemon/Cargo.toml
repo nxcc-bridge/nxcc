@@ -44,3 +44,6 @@ tower = "0.5.2"
 
 [dev-dependencies]
 tracing-test = "0.2.5"
+tower = { version = "0.5.2", features = ["util"] }
+serde_urlencoded = "0.7.1"
+anyhow = "1.0.97"

@@ -5,13 +5,15 @@ mod tests;
 
 use std::{future::Future, net::SocketAddr, path::Path};
 
+use futures::StreamExt;
 use hyper_util::rt::TokioIo;
 use nxcc_interface::{
     proto::vm::{
         GetAttestationRequest, GetWorkerLogsRequest, GetWorkerStatusRequest,
         HttpRequest as ProtoHttpRequest, HttpResponse as ProtoHttpResponse, InvokeHttpRequest,
         InvokeHttpResponse, InvokeWorkerRequest, ListRunningWorkersRequest, ProbeWorkerRequest,
-        StartWorkerRequest, StopWorkerRequest, TrustedConfig, UntrustedConfig, WorkerStatus,
+        StartWorkerRequest, StopWorkerRequest, StreamWorkerLogsRequest, StreamWorkerLogsResponse,
+        TrustedConfig, UntrustedConfig, WorkerStatus,
     },
     types::AttestationReport,
 };
@@ -107,6 +109,21 @@ pub trait VmClient {
         &mut self,
         id: String,
     ) -> impl Future<Output = Result<(WorkerStatus, String), ClientError>> + Send;
+
+    /// Stream logs from a worker instance.
+    fn stream_worker_logs(
+        &mut self,
+        id: String,
+        tail_lines: u32,
+        follow: bool,
+    ) -> impl Future<
+        Output = Result<
+            tokio_stream::wrappers::ReceiverStream<
+                Result<nxcc_interface::proto::vm::StreamWorkerLogsResponse, tonic::Status>,
+            >,
+            ClientError,
+        >,
+    > + Send;
 }
 
 /// Client for communicating with a VM service
@@ -336,5 +353,37 @@ impl VmClient for VmServiceClient {
             .map_err(|_| ClientError::Grpc(Status::internal("Invalid worker status received")))?;
 
         Ok((status, response.status_message))
+    }
+
+    async fn stream_worker_logs(
+        &mut self,
+        id: String,
+        tail_lines: u32,
+        follow: bool,
+    ) -> Result<
+        tokio_stream::wrappers::ReceiverStream<Result<StreamWorkerLogsResponse, tonic::Status>>,
+        ClientError,
+    > {
+        let request = StreamWorkerLogsRequest {
+            id,
+            tail_lines,
+            follow,
+        };
+        let response_stream = self.inner.stream_worker_logs(request).await?.into_inner();
+
+        // Convert tonic streaming response to tokio receiver stream
+        let (tx, rx) = tokio::sync::mpsc::channel(1000);
+
+        tokio::spawn(async move {
+            use futures::StreamExt;
+            let mut stream = response_stream;
+            while let Some(result) = stream.next().await {
+                if let Err(_) = tx.send(result).await {
+                    break; // Receiver dropped
+                }
+            }
+        });
+
+        Ok(tokio_stream::wrappers::ReceiverStream::new(rx))
     }
 }

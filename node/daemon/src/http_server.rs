@@ -7,13 +7,15 @@ use std::{
 
 use axum::{
     body::{Body, Bytes},
-    extract::{Json, State},
-    http::{self, Request, StatusCode},
-    response::{IntoResponse, Response},
+    extract::{Json, Path, Query, State},
+    http::{self, HeaderMap, HeaderValue, Request, StatusCode},
+    response::{IntoResponse, Response, Sse, sse::Event},
     routing::{Router, any, get, post},
 };
 use nxcc_interface::types::DsseEnvelope;
+use serde::Deserialize;
 use tokio::sync::RwLock;
+use tokio_stream::StreamExt;
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{debug, error, info, instrument, warn};
 
@@ -91,6 +93,24 @@ struct StatusResponse {
 /// This allows handlers to return `Result<_, AppError>` and have errors automatically
 /// converted into a user-facing JSON response.
 struct ApiError(AppError);
+
+impl From<AppError> for ApiError {
+    fn from(err: AppError) -> Self {
+        ApiError(err)
+    }
+}
+
+impl From<String> for ApiError {
+    fn from(err: String) -> Self {
+        ApiError(AppError::Internal(err))
+    }
+}
+
+impl From<&str> for ApiError {
+    fn from(err: &str) -> Self {
+        ApiError(AppError::Internal(err.to_string()))
+    }
+}
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
@@ -282,6 +302,73 @@ async fn status_handler(State(state): State<Arc<AppState>>) -> Result<impl IntoR
     }))
 }
 
+/// Query parameters for worker logs API
+#[derive(Deserialize, serde::Serialize)]
+struct WorkerLogsQuery {
+    /// Number of lines to tail (optional)
+    #[serde(rename = "tail")]
+    tail_lines: Option<u32>,
+    /// Whether to follow/stream logs (optional, defaults to false)
+    #[serde(default)]
+    follow: bool,
+}
+
+/// Handles worker log streaming via Server-Sent Events
+async fn worker_logs_handler(
+    State(state): State<Arc<AppState>>,
+    Path(worker_id): Path<String>,
+    Query(params): Query<WorkerLogsQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    info!(
+        "Received worker logs request for worker_id: {} with params: tail={:?}, follow={}",
+        worker_id, params.tail_lines, params.follow
+    );
+
+    // If follow is false, return static logs
+    if !params.follow {
+        // For non-streaming requests, we would typically get logs and return them as JSON
+        // But since we want to support streaming, let's redirect to SSE even for static logs
+        return Err(ApiError::from(
+            "Non-streaming logs not implemented yet. Use follow=true for streaming.",
+        ));
+    }
+
+    // Create a stream from the enclave
+    let log_stream = match state
+        .enclave_client
+        .stream_worker_logs(
+            worker_id.clone(),
+            params.tail_lines.unwrap_or(0),
+            params.follow,
+        )
+        .await
+    {
+        Ok(stream) => stream,
+        Err(e) => {
+            error!("Failed to start log stream for worker {}: {}", worker_id, e);
+            return Err(ApiError::from(format!("Failed to start log stream: {}", e)));
+        }
+    };
+
+    // Convert the gRPC stream to SSE events
+    let sse_stream = log_stream.map(|result| match result {
+        Ok(log_response) => {
+            Ok::<Event, axum::BoxError>(Event::default().data(log_response.log_line).event("log"))
+        }
+        Err(e) => Ok::<Event, axum::BoxError>(
+            Event::default()
+                .data(format!("Error: {}", e))
+                .event("error"),
+        ),
+    });
+
+    Ok(Sse::new(sse_stream).keep_alive(
+        axum::response::sse::KeepAlive::new()
+            .interval(std::time::Duration::from_secs(15))
+            .text("keep-alive"),
+    ))
+}
+
 /// Configures and starts the HTTP server.
 pub async fn start_http_server(
     config: &HttpConfig,
@@ -311,9 +398,11 @@ pub async fn start_http_server(
 
     // Conditionally add the `/api` routes
     if config.api_enabled {
+        tracing::info!("Setting up API routes including /workers/{{worker_id}}/logs");
         let mut api_router = Router::new()
             .route("/work-orders", post(submit_work_order_handler))
-            .route("/status", get(status_handler));
+            .route("/status", get(status_handler))
+            .route("/workers/{worker_id}/logs", get(worker_logs_handler));
 
         // Conditionally add CORS layer to the API router
         if !config.api_cors_allowed_origins.is_empty() {
@@ -340,7 +429,10 @@ pub async fn start_http_server(
     let app = if worker_base_path.is_empty() {
         app.fallback_service(worker_router.with_state(app_state.clone()))
     } else {
-        app.nest(worker_base_path, worker_router)
+        app.nest(
+            worker_base_path,
+            worker_router.with_state(app_state.clone()),
+        )
     };
 
     // Apply the shared state to the final, composed application.
@@ -358,4 +450,151 @@ pub async fn start_http_server(
         .await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_worker_logs_query_parsing() {
+        // Test default values
+        let query_str = "";
+        let parsed: WorkerLogsQuery = serde_urlencoded::from_str(query_str).unwrap();
+        assert_eq!(parsed.tail_lines, None);
+        assert_eq!(parsed.follow, false);
+
+        // Test with follow=true
+        let query_str = "follow=true";
+        let parsed: WorkerLogsQuery = serde_urlencoded::from_str(query_str).unwrap();
+        assert_eq!(parsed.tail_lines, None);
+        assert_eq!(parsed.follow, true);
+
+        // Test with tail parameter
+        let query_str = "tail=10&follow=true";
+        let parsed: WorkerLogsQuery = serde_urlencoded::from_str(query_str).unwrap();
+        assert_eq!(parsed.tail_lines, Some(10));
+        assert_eq!(parsed.follow, true);
+
+        // Test with both parameters
+        let query_str = "tail=25&follow=false";
+        let parsed: WorkerLogsQuery = serde_urlencoded::from_str(query_str).unwrap();
+        assert_eq!(parsed.tail_lines, Some(25));
+        assert_eq!(parsed.follow, false);
+
+        // Test edge cases
+        let query_str = "tail=0&follow=true";
+        let parsed: WorkerLogsQuery = serde_urlencoded::from_str(query_str).unwrap();
+        assert_eq!(parsed.tail_lines, Some(0));
+        assert_eq!(parsed.follow, true);
+    }
+
+    #[tokio::test]
+    async fn test_worker_logs_query_invalid_parsing() {
+        // Test invalid tail parameter
+        let query_str = "tail=invalid&follow=true";
+        let result: Result<WorkerLogsQuery, _> = serde_urlencoded::from_str(query_str);
+        assert!(
+            result.is_err(),
+            "Should fail to parse invalid tail parameter"
+        );
+
+        // Test negative tail parameter
+        let query_str = "tail=-5&follow=true";
+        let result: Result<WorkerLogsQuery, _> = serde_urlencoded::from_str(query_str);
+        assert!(
+            result.is_err(),
+            "Should fail to parse negative tail parameter"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_api_error_conversion() {
+        // Test String to ApiError conversion
+        let error = ApiError::from("Test error message");
+        let response = error.into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        // Test &str to ApiError conversion
+        let error = ApiError::from("Another error");
+        let response = error.into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        // Test AppError to ApiError conversion
+        let app_error = AppError::Internal("Internal error".to_string());
+        let api_error = ApiError::from(app_error);
+        let response = api_error.into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn test_api_error_response_format() {
+        let error = ApiError::from("Test error");
+        let response = error.into_response();
+
+        // Check that response has correct content type
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "application/json"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_vm_registry_basic_operations() {
+        let registry = VmRegistry::new();
+
+        // Initially empty
+        assert_eq!(registry.list_vms().await.len(), 0);
+
+        // Add VMs
+        registry.add_vm("vm-1".to_string()).await;
+        registry.add_vm("vm-2".to_string()).await;
+
+        let vms = registry.list_vms().await;
+        assert_eq!(vms.len(), 2);
+        assert!(vms.contains(&"vm-1".to_string()));
+        assert!(vms.contains(&"vm-2".to_string()));
+
+        // Remove VM
+        registry.remove_vm("vm-1").await;
+        let vms = registry.list_vms().await;
+        assert_eq!(vms.len(), 1);
+        assert!(vms.contains(&"vm-2".to_string()));
+        assert!(!vms.contains(&"vm-1".to_string()));
+
+        // Remove non-existent VM (should not error)
+        registry.remove_vm("non-existent").await;
+        let vms = registry.list_vms().await;
+        assert_eq!(vms.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_vm_registry_duplicate_vms() {
+        let registry = VmRegistry::new();
+
+        // Add same VM twice
+        registry.add_vm("vm-1".to_string()).await;
+        registry.add_vm("vm-1".to_string()).await;
+
+        // Should only contain one instance
+        let vms = registry.list_vms().await;
+        assert_eq!(vms.len(), 1);
+        assert!(vms.contains(&"vm-1".to_string()));
+    }
+
+    #[test]
+    fn test_worker_logs_query_serde_attributes() {
+        // Test that serde rename works correctly
+        let query = WorkerLogsQuery {
+            tail_lines: Some(10),
+            follow: true,
+        };
+
+        // Serialize to query string
+        let serialized = serde_urlencoded::to_string(&query).unwrap();
+
+        // Should use 'tail' instead of 'tail_lines'
+        assert!(serialized.contains("tail=10"));
+        assert!(serialized.contains("follow=true"));
+    }
 }

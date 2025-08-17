@@ -95,6 +95,112 @@ async function deploy(
   }
 }
 
+async function logs(
+  workerId: string,
+  options: {
+    rpcUrl: string;
+    follow: boolean;
+    tail: string;
+  },
+) {
+  try {
+    const tailLines = parseInt(options.tail, 10);
+    if (isNaN(tailLines) || tailLines < 0) {
+      console.error("Error: --tail must be a positive number");
+      process.exit(1);
+    }
+
+    // Build the API URL
+    const baseUrl = options.rpcUrl.replace(/\/+$/, ""); // Remove trailing slashes
+    const apiUrl = new URL(`/api/workers/${encodeURIComponent(workerId)}/logs`, baseUrl);
+
+    // Add query parameters
+    if (tailLines > 0) {
+      apiUrl.searchParams.set("tail", tailLines.toString());
+    }
+    if (options.follow) {
+      apiUrl.searchParams.set("follow", "true");
+    }
+
+    console.log(`Fetching logs for worker: ${workerId}`);
+
+    if (options.follow) {
+      console.log("Streaming logs (press Ctrl+C to stop)...");
+      await streamLogs(apiUrl.toString());
+    } else {
+      // For non-streaming, we'd make a regular HTTP request
+      // But for now, let's redirect users to use --follow
+      console.log("Note: Use --follow to stream logs in real-time");
+      apiUrl.searchParams.set("follow", "true");
+      await streamLogs(apiUrl.toString());
+    }
+  } catch (error) {
+    console.error("Error fetching logs:", error);
+    process.exit(1);
+  }
+}
+
+async function streamLogs(url: string) {
+  try {
+    const response = await fetch(url, {
+      headers: {
+        Accept: "text/event-stream",
+        "Cache-Control": "no-cache",
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
+    }
+
+    if (!response.body) {
+      throw new Error("No response body");
+    }
+
+    // Read the Server-Sent Events stream
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    // Handle Ctrl+C gracefully
+    process.on("SIGINT", () => {
+      console.log("\nStopping log stream...");
+      reader.cancel();
+      process.exit(0);
+    });
+
+    while (true) {
+      const { done, value } = await reader.read();
+
+      if (done) {
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+
+      // Process all complete lines, keep the last incomplete line in buffer
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          const logData = line.substring(6); // Remove "data: " prefix
+          if (logData.trim() && logData !== "keep-alive") {
+            console.log(logData);
+          }
+        }
+      }
+    }
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      console.log("Log stream stopped.");
+    } else {
+      throw error;
+    }
+  }
+}
+
 export function workerSubcommand(program: Command) {
   const worker = program.command("worker").description("Interact with a worker");
 
@@ -105,4 +211,12 @@ export function workerSubcommand(program: Command) {
     .option("--bundle", "Bundle the worker code into a data URL")
     .option("--signer <private-key>", "Private key to sign the work order")
     .action(deploy);
+
+  worker
+    .command("logs <worker-id>")
+    .description("Stream logs from a worker")
+    .requiredOption("--rpc-url <url>", "nXCC node HTTP RPC URL", "http://localhost:6922")
+    .option("-f, --follow", "Follow log output (stream new logs)", false)
+    .option("-t, --tail <lines>", "Number of lines to tail", "10")
+    .action(logs);
 }

@@ -127,6 +127,66 @@ impl VmRuntime for MockVmRuntime {
         Ok(format!("Log entry 1 for {}\nLog entry 2 for {}", id, id))
     }
 
+    async fn stream_worker_logs(
+        &self,
+        id: String,
+        tail_lines: u32,
+        follow: bool,
+    ) -> Result<
+        tokio_stream::wrappers::ReceiverStream<
+            Result<nxcc_interface::proto::vm::StreamWorkerLogsResponse, tonic::Status>,
+        >,
+        VmError,
+    > {
+        let workers = self.workers.lock().unwrap();
+        if !workers.contains_key(&id) {
+            return Err(VmError::new(format!("Worker instance not found: {}", id)));
+        }
+
+        let (tx, rx) = tokio::sync::mpsc::channel(10);
+
+        // Send mock log entries
+        let worker_id = id.clone();
+        tokio::spawn(async move {
+            let historical_count = if tail_lines > 0 { tail_lines } else { 1 };
+
+            // Send historical logs first
+            for i in 1..=historical_count {
+                let response = nxcc_interface::proto::vm::StreamWorkerLogsResponse {
+                    log_line: format!("Historical mock log {} for {}", i, worker_id),
+                    timestamp_ms: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis() as u64,
+                    is_historical: true,
+                };
+                if tx.send(Ok(response)).await.is_err() {
+                    break;
+                }
+            }
+
+            // Send streaming logs if follow is enabled
+            if follow {
+                for i in 1..=2 {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    let response = nxcc_interface::proto::vm::StreamWorkerLogsResponse {
+                        log_line: format!("Live mock log {} for {}", i, worker_id),
+                        timestamp_ms: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_millis() as u64,
+                        is_historical: false,
+                    };
+                    if tx.send(Ok(response)).await.is_err() {
+                        break;
+                    }
+                }
+            }
+        });
+
+        Ok(tokio_stream::wrappers::ReceiverStream::new(rx))
+    }
+
     async fn probe_worker(&self, id: String) -> Result<(WorkerStatus, String), VmError> {
         self.probe_worker_count.fetch_add(1, Ordering::SeqCst);
         let workers = self.workers.lock().unwrap();

@@ -5,7 +5,7 @@ use std::{
         Arc,
         atomic::{AtomicI32, Ordering},
     },
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use async_trait::async_trait;
@@ -22,20 +22,24 @@ use hyperlocal::UnixConnector;
 use nxcc_interface::{
     proto::vm::{
         Header as ProtoHeader, HttpRequest as ProtoHttpRequest, HttpResponse as ProtoHttpResponse,
-        TrustedConfig, UntrustedConfig, WorkerStatus,
+        StreamWorkerLogsResponse, TrustedConfig, UntrustedConfig, WorkerStatus,
     },
     types::{AttestationReport, EventPayload},
 };
-use nxcc_vm_base::server::{VmError, VmRuntime};
+use nxcc_vm_base::{
+    logging::{LogEntry, VmmLogManager},
+    server::{VmError, VmRuntime},
+};
 use serde::Deserialize;
 use tempfile::TempDir;
 use tokio::{
     fs::File,
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     process::{Child, Command},
-    sync::Mutex,
+    sync::{Mutex, mpsc},
     time::sleep,
 };
+use tokio_stream::wrappers::ReceiverStream;
 use tracing::{Instrument as _, debug, error, info, instrument, warn};
 
 use crate::{
@@ -61,7 +65,8 @@ struct WorkerData {
     config_path: PathBuf,
     temp_dir: Arc<TempDir>,
     code_type: CodeType,
-    logs: Arc<Mutex<String>>,
+    logs: Arc<Mutex<String>>, // Legacy logs field for compatibility
+    log_buffer: Arc<nxcc_vm_base::logging::LogBuffer>,
 }
 
 impl WorkerData {
@@ -80,6 +85,7 @@ pub struct WorkerdVmm {
     workers: Arc<DashMap<String, Arc<WorkerData>>>,
     config: WorkerdConfig,
     client: Client<UnixConnector, http_body_util::Full<Bytes>>,
+    log_manager: Arc<VmmLogManager>,
 }
 
 impl WorkerdVmm {
@@ -90,6 +96,7 @@ impl WorkerdVmm {
             workers: Arc::new(DashMap::new()),
             config,
             client,
+            log_manager: VmmLogManager::new(),
         }
     }
 
@@ -98,6 +105,7 @@ impl WorkerdVmm {
         instance_id: String,
         output_type: &str,
         logs: Arc<Mutex<String>>,
+        log_buffer: Arc<nxcc_vm_base::logging::LogBuffer>,
     ) where
         R: AsyncReadExt + Unpin,
     {
@@ -106,10 +114,18 @@ impl WorkerdVmm {
             if bytes_read == 0 {
                 break;
             }
+
+            let formatted_line = format!("{}: {}", output_type, line);
+
+            // Write to legacy logs for compatibility
             {
                 let mut logs_guard = logs.lock().await;
-                logs_guard.push_str(&format!("{}: {}", output_type, line));
+                logs_guard.push_str(&formatted_line);
             }
+
+            // Write to new log buffer system
+            log_buffer.write_log(formatted_line.trim_end().to_string());
+
             match output_type {
                 "stdout" => info!(?instance_id, "stdout: {}", line.trim()),
                 "stderr" => error!(?instance_id, "stderr: {}", line.trim()),
@@ -339,12 +355,15 @@ impl VmRuntime for WorkerdVmm {
         info!(pid = ?child_pid, "Workerd process spawned.");
 
         let logs_arc = Arc::new(Mutex::new(String::new()));
+        let log_buffer = self.log_manager.register_worker(instance_id.clone());
+
         if let Some(stdout) = child_process.stdout.take() {
             tokio::spawn(WorkerdVmm::log_stream(
                 BufReader::new(stdout),
                 instance_id.clone(),
                 "stdout",
                 logs_arc.clone(),
+                log_buffer.clone(),
             ));
         }
         if let Some(stderr) = child_process.stderr.take() {
@@ -353,6 +372,7 @@ impl VmRuntime for WorkerdVmm {
                 instance_id.clone(),
                 "stderr",
                 logs_arc.clone(),
+                log_buffer.clone(),
             ));
         }
 
@@ -366,6 +386,7 @@ impl VmRuntime for WorkerdVmm {
             temp_dir: temp_dir_handle,
             code_type,
             logs: logs_arc.clone(),
+            log_buffer: log_buffer.clone(),
         });
         self.workers.insert(instance_id.clone(), worker_data);
 
@@ -500,6 +521,10 @@ impl VmRuntime for WorkerdVmm {
                     }
                 }
                 worker.set_status(WorkerStatus::Stopped);
+
+                // Move worker logs to dead storage
+                self.log_manager.terminate_worker(&id);
+
                 Ok(())
             }
             WorkerStatus::Stopped | WorkerStatus::Error => Ok(()),
@@ -638,6 +663,75 @@ impl VmRuntime for WorkerdVmm {
 
         let logs_content = worker.logs.lock().await.clone();
         Ok(logs_content)
+    }
+
+    async fn stream_worker_logs(
+        &self,
+        id: String,
+        tail_lines: u32,
+        follow: bool,
+    ) -> Result<ReceiverStream<Result<StreamWorkerLogsResponse, tonic::Status>>, VmError> {
+        debug!(
+            "Streaming logs for worker {}, tail_lines: {}, follow: {}",
+            id, tail_lines, follow
+        );
+
+        let (tx, rx) = mpsc::channel::<Result<StreamWorkerLogsResponse, tonic::Status>>(1000);
+
+        // Get historical logs if requested
+        let tail_lines_opt = if tail_lines > 0 {
+            Some(tail_lines as usize)
+        } else {
+            None
+        };
+        if let Some(logs) = self.log_manager.get_worker_logs(&id, tail_lines_opt) {
+            for entry in logs {
+                // Convert Instant to Unix timestamp milliseconds
+                let timestamp_ms = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
+
+                let response = StreamWorkerLogsResponse {
+                    log_line: entry.line,
+                    timestamp_ms,
+                    is_historical: true,
+                };
+                if let Err(_) = tx.send(Ok(response)).await {
+                    warn!("Log stream receiver dropped during historical logs");
+                    break;
+                }
+            }
+        } else {
+            // Worker not found
+            return Err(WorkerdVmError::WorkerNotFound(id).into());
+        }
+
+        // If follow is true and worker is active, stream new logs
+        if follow {
+            if let Some(mut streamer) = self.log_manager.create_log_streamer(&id) {
+                tokio::spawn(async move {
+                    while let Some(entry) = streamer.next_log().await {
+                        let timestamp_ms = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64;
+
+                        let response = StreamWorkerLogsResponse {
+                            log_line: entry.line,
+                            timestamp_ms,
+                            is_historical: false,
+                        };
+                        if let Err(_) = tx.send(Ok(response)).await {
+                            debug!("Log stream receiver dropped, stopping streaming");
+                            break;
+                        }
+                    }
+                });
+            }
+        }
+
+        Ok(ReceiverStream::new(rx))
     }
 
     #[instrument(level = "info", skip(self), fields(id = %id), err)]

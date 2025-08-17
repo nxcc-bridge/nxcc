@@ -102,6 +102,65 @@ impl VmRuntime for E2EMockVmRuntime {
         }
     }
 
+    async fn stream_worker_logs(
+        &self,
+        id: String,
+        tail_lines: u32,
+        follow: bool,
+    ) -> Result<
+        tokio_stream::wrappers::ReceiverStream<
+            Result<nxcc_interface::proto::vm::StreamWorkerLogsResponse, tonic::Status>,
+        >,
+        VmError,
+    > {
+        if !id.starts_with("instance-e2e-") {
+            return Err(VmError::new("Not found"));
+        }
+
+        let (tx, rx) = tokio::sync::mpsc::channel(10);
+
+        // Send mock log entries for E2E testing
+        let worker_id = id.clone();
+        tokio::spawn(async move {
+            // Send historical logs if requested
+            if tail_lines > 0 {
+                for i in 1..=tail_lines {
+                    let response = nxcc_interface::proto::vm::StreamWorkerLogsResponse {
+                        log_line: format!("E2E historical log {} for {}", i, worker_id),
+                        timestamp_ms: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_millis() as u64,
+                        is_historical: true,
+                    };
+                    if tx.send(Ok(response)).await.is_err() {
+                        break;
+                    }
+                }
+            }
+
+            // Send streaming logs if follow is enabled
+            if follow {
+                for i in 1..=2 {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    let response = nxcc_interface::proto::vm::StreamWorkerLogsResponse {
+                        log_line: format!("E2E live log {} for {}", i, worker_id),
+                        timestamp_ms: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_millis() as u64,
+                        is_historical: false,
+                    };
+                    if tx.send(Ok(response)).await.is_err() {
+                        break;
+                    }
+                }
+            }
+        });
+
+        Ok(tokio_stream::wrappers::ReceiverStream::new(rx))
+    }
+
     async fn probe_worker(&self, id: String) -> Result<(WorkerStatus, String), VmError> {
         if id.starts_with("instance-e2e-") {
             Ok((WorkerStatus::Running, "Probed: Still running".to_string()))

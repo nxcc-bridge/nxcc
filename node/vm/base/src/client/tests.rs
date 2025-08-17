@@ -2,8 +2,9 @@ use std::{collections::HashMap, error::Error, sync::Arc};
 
 use nxcc_interface::proto::vm::{
     Header as ProtoHeader, HttpRequest as ProtoHttpRequest, HttpResponse as ProtoHttpResponse,
-    InvokeHttpRequest, InvokeHttpResponse, ProbeWorkerRequest, ProbeWorkerResponse, TrustedConfig,
-    UntrustedConfig, WorkerStatus,
+    InvokeHttpRequest, InvokeHttpResponse, ProbeWorkerRequest, ProbeWorkerResponse,
+    StreamWorkerLogsRequest, StreamWorkerLogsResponse, TrustedConfig, UntrustedConfig,
+    WorkerStatus,
 };
 use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
@@ -29,6 +30,43 @@ impl MockVmService {
 
 #[tonic::async_trait]
 impl nxcc_interface::proto::vm::vm_server::Vm for MockVmService {
+    type StreamWorkerLogsStream = std::pin::Pin<
+        Box<dyn tokio_stream::Stream<Item = Result<StreamWorkerLogsResponse, Status>> + Send>,
+    >;
+
+    async fn stream_worker_logs(
+        &self,
+        request: Request<StreamWorkerLogsRequest>,
+    ) -> Result<Response<Self::StreamWorkerLogsStream>, Status> {
+        let req = request.into_inner();
+        let workers = self.workers.lock().await;
+
+        if !workers.contains_key(&req.id) {
+            return Err(Status::not_found("Worker not found"));
+        }
+
+        // Create a simple mock stream that sends a few log entries
+        let stream = futures::stream::iter(vec![
+            Ok(StreamWorkerLogsResponse {
+                log_line: format!("Mock log for worker: {}", req.id),
+                timestamp_ms: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as u64,
+                is_historical: false,
+            }),
+            Ok(StreamWorkerLogsResponse {
+                log_line: "Mock log entry 2".to_string(),
+                timestamp_ms: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as u64,
+                is_historical: false,
+            }),
+        ]);
+
+        Ok(Response::new(Box::pin(stream)))
+    }
     async fn start_worker(
         &self,
         request: Request<StartWorkerRequest>,

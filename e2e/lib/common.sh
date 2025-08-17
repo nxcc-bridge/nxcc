@@ -166,6 +166,35 @@ ensure_nxcc_cli() {
         success "NXCC CLI built successfully and available at: $nxcc_location"
     else
         verbose_log "NXCC CLI found at: $(which nxcc)"
+        
+        # Check if the logs command is available
+        if ! nxcc worker logs --help &>/dev/null; then
+            log "NXCC CLI logs command not available, rebuilding CLI..."
+            
+            # Change to CLI directory
+            verbose_log "Changing to CLI directory: $project_root/sdk/cli"
+            if ! cd "$project_root/sdk/cli"; then
+                error "Failed to change to CLI directory: $project_root/sdk/cli"
+            fi
+            
+            # Run pnpm build to get latest features
+            verbose_log "Running pnpm run build..."
+            local pnpm_build_output
+            if ! pnpm_build_output=$(pnpm run build 2>&1); then
+                error "pnpm run build failed:\n$pnpm_build_output"
+            fi
+            verbose_log "pnpm run build completed successfully"
+            
+            # Update PATH to use local version
+            local dist_dir="$project_root/sdk/cli/dist"
+            verbose_log "Adding $dist_dir to PATH"
+            export PATH="$dist_dir:$PATH"
+            
+            # Return to project root
+            cd "$project_root" || error "Failed to change to project root directory"
+            
+            success "NXCC CLI rebuilt with latest features"
+        fi
     fi
 }
 
@@ -313,30 +342,6 @@ test_http_endpoint() {
     return 1
 }
 
-# Get logs from worker pod
-get_worker_logs() {
-    local env="$1"
-    local namespace="$env"
-    local lines="${2:-20}"
-    
-    if [[ "$env" == "local" ]]; then
-        namespace="debug"
-    fi
-    
-    log "Getting worker logs from $env environment..."
-    
-    local worker_pod
-    worker_pod=$(get_worker_pod "$namespace")
-    
-    if [[ -n "$worker_pod" ]]; then
-        verbose_log "Worker pod: $worker_pod"
-        kubectl logs "$worker_pod" -n "$namespace" --tail="$lines"
-        return 0
-    else
-        warn "No worker pods found in $namespace namespace"
-        return 1
-    fi
-}
 
 # Execute a command with port forwarding, automatically cleaning up
 # Usage: with_port_forward <env> <command>
