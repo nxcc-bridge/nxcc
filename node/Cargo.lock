@@ -4228,6 +4228,7 @@ dependencies = [
  "pem",
  "rand 0.8.5",
  "rcgen 0.14.3",
+ "rustls",
  "serde",
  "thiserror 2.0.15",
  "tokio",

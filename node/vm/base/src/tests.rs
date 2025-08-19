@@ -173,6 +173,8 @@ impl VmRuntime for E2EMockVmRuntime {
 /// Run a fully in-memory test of the VM server and client binding layer.
 #[tokio::test]
 async fn test_e2e_with_client_binding() -> Result<(), Box<dyn Error>> {
+    // Initialize the default CryptoProvider for Rustls
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     // 1. Generate CA and Certs using the simplified API
     let certs = MtlsCertificates::new()?;
 

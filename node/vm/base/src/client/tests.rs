@@ -272,6 +272,8 @@ impl nxcc_interface::proto::vm::vm_server::Vm for MockVmService {
 
 #[tokio::test]
 async fn test_client_operations() -> Result<(), Box<dyn Error>> {
+    // Initialize the default CryptoProvider for Rustls
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     // Generate certificates using the simplified API
     let certs = MtlsCertificates::new()?;
     let server_tls_config = certs.server_tls_config()?;
@@ -394,6 +396,8 @@ async fn test_client_operations() -> Result<(), Box<dyn Error>> {
 
 #[tokio::test]
 async fn test_client_error_handling() {
+    // Initialize the default CryptoProvider for Rustls
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     // Generate certificates
     let certs = MtlsCertificates::new().unwrap();
     let server_tls_config = certs.server_tls_config().unwrap();
@@ -469,11 +473,11 @@ async fn test_client_error_handling() {
     let result = client
         .invoke_http("non-existent".to_string(), http_req_payload)
         .await;
-    assert!(result.is_err()); // MockVmServiceClient's invoke_http returns error for not found
-    match result.err().unwrap() {
-        ClientError::Grpc(status) => assert!(status.message().contains("Worker not found")),
-        e => panic!("Expected Grpc error, got {:?}", e),
-    }
+    // Mock service returns 404 status code for non-existent workers, not a gRPC error
+    assert!(result.is_ok()); 
+    let http_response = result.unwrap();
+    assert_eq!(http_response.status_code, 404);
+    assert_eq!(http_response.body, b"Worker not found".to_vec());
 
     // Try to probe non-existent worker
     let result = client.probe_worker("non-existent".to_string()).await;
