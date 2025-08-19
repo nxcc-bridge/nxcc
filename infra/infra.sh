@@ -34,6 +34,7 @@ source "${LIB_DIR}/ci.sh"
 source "${LIB_DIR}/cluster.sh"
 source "${LIB_DIR}/k8s.sh"
 source "${LIB_DIR}/test.sh"
+source "${LIB_DIR}/dev.sh"
 
 
 ################################################################################
@@ -79,9 +80,19 @@ usage() {
   echo "    Tests HTTP connectivity to the deployed NXCC node."
   echo "      <env>: debug | staging | prod"
   echo
+  echo "  dev <create|connect|destroy|status|container>"
+  echo "    Manages TDX development VM for real hardware testing and local development containers."
+  echo "      create:     Creates a TDX-enabled development VM with all dependencies."
+  echo "      connect:    SSH into the development VM."
+  echo "      destroy:    Destroys the development VM."
+  echo "      status:     Shows VM status and connection info."
+  echo "      container:  Runs a local development container with all tools pre-installed."
+  echo "                  Options: --platform <linux/amd64|linux/arm64> --build"
+  echo
   echo "Environment Notes:"
   echo "  - 'debug' environment is intended for the 'kind' cluster."
   echo "  - 'staging' and 'prod' environments are intended for the 'gke' cluster."
+  echo "  - 'dev' commands create VMs with Intel TDX confidential computing enabled."
   echo
   echo "GCP Identity:"
   echo "  For 'ci' and 'gke' commands, the script will resolve your GCP identity automatically."
@@ -216,6 +227,37 @@ main() {
     test)
       if [[ -z "$subcommand" ]]; then error "Missing environment for 'test'. Use 'debug', 'staging', or 'prod'."; fi
       test_connectivity "$subcommand"
+      ;;
+
+    dev)
+      check_deps docker gcloud ssh  # Not all dev commands need all deps, but we'll check them generically
+      case "$subcommand" in
+        create)
+          dev_create_vm
+          ;;
+        connect)
+          dev_connect_vm
+          ;;
+        destroy)
+          if [[ "$auto_yes" == true ]]; then
+            dev_destroy_vm
+          else
+            read -p "Are you sure you want to delete the TDX development VM? [y/N] " -n 1 -r; echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then dev_destroy_vm; else info "VM deletion cancelled."; fi
+          fi
+          ;;
+        status)
+          dev_status_vm
+          ;;
+        container)
+          # Pass remaining arguments to dev_run_container
+          shift 2  # Remove 'dev' and 'container' from args
+          dev_run_container "$@"
+          ;;
+        *)
+          error "Invalid subcommand for 'dev'. Use 'create', 'connect', 'destroy', 'status', or 'container'."
+          ;;
+      esac
       ;;
 
     *)
