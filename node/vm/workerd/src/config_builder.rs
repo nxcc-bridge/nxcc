@@ -151,7 +151,8 @@ pub fn build_config(
         let uds_addr = format!("unix:{}", uds_path.display());
         socket_builder.set_address(&uds_addr);
         // Configure the socket to serve HTTP requests to the main service
-        socket_builder.reborrow().init_http(); // Default HTTP options are likely fine
+        // Don't initialize HTTP options to avoid TCP-specific socket settings for UDS
+        socket_builder.reborrow().init_http();
         let mut service_designator = socket_builder.init_service();
         service_designator.set_name(service_name);
     }

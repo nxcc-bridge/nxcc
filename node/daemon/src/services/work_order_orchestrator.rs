@@ -153,7 +153,17 @@ impl WorkOrderOrchestrator {
                 &worker_manifest.bundle,
                 "work-order-context", // manifest_url_for_context
             )
-            .await?;
+            .await
+            .map_err(|e| match e {
+                AppError::Io(io_err) => AppError::Service(format!(
+                    "Failed to fetch worker bundle from source '{}': {}",
+                    worker_manifest.bundle.source, io_err
+                )),
+                other => AppError::Service(format!(
+                    "Failed to fetch worker bundle from source '{}': {}",
+                    worker_manifest.bundle.source, other
+                )),
+            })?;
         debug!(
             "Fetched worker bundle for work order (hash: {})",
             work_order_hash_b64url
@@ -179,8 +189,20 @@ impl WorkOrderOrchestrator {
             "Executing policies for self-authorization for work order {}",
             wo_payload.id
         );
-        let daemon_env_report_for_self_auth =
-            self.secrets_service.get_own_env_report(vec![]).await?; // TODO: This should be the enclave's report, not daemon's
+        let daemon_env_report_for_self_auth = self
+            .secrets_service
+            .get_own_env_report(vec![])
+            .await
+            .map_err(|e| match &e {
+                AppError::Io(io_err) => AppError::Service(format!(
+                    "Failed to get daemon env report for self-auth for work order {}: {}",
+                    work_order_hash_b64url, io_err
+                )),
+                other => AppError::Service(format!(
+                    "Failed to get daemon env report for self-auth for work order {}: {}",
+                    work_order_hash_b64url, other
+                )),
+            })?; // TODO: This should be the enclave's report, not daemon's
         let worker_consumer_info_for_self_auth = ConsumerInfo {
             bundle_hash: actual_worker_bundle.hash_signed_payload().map_err(|e| {
                 AppError::Validation(format!("Failed to hash worker bundle payload: {}", e))
@@ -290,16 +312,33 @@ impl WorkOrderOrchestrator {
                     missing_secret_requests.len(), // Using payload.id for logging clarity
                     work_order_hash_b64url
                 );
-                let daemon_env_report = self.secrets_service.get_own_env_report(vec![]).await?;
+                let daemon_env_report = self
+                    .secrets_service
+                    .get_own_env_report(vec![])
+                    .await
+                    .map_err(|e| match &e {
+                        AppError::Io(io_err) => AppError::Service(format!(
+                            "Failed to get daemon env report for work order {}: {}",
+                            work_order_hash_b64url, io_err
+                        )),
+                        other => AppError::Service(format!(
+                            "Failed to get daemon env report for work order {}: {}",
+                            work_order_hash_b64url, other
+                        )),
+                    })?;
                 self.secrets_service
                     .clone() // Arc clone
                     .get_secrets(missing_secret_requests, daemon_env_report)
                     .await
-                    .map_err(|e| {
-                        AppError::Service(format!(
+                    .map_err(|e| match &e {
+                        AppError::Io(io_err) => AppError::Service(format!(
+                            "Failed to get secrets for work order {}: {}",
+                            work_order_hash_b64url, io_err
+                        )),
+                        other => AppError::Service(format!(
                             "Failed to get secrets for work order {}: {:?}",
-                            work_order_hash_b64url, e
-                        ))
+                            work_order_hash_b64url, other
+                        )),
                     })?;
                 debug!(
                     "Missing secrets processed for work order (hash: {})",

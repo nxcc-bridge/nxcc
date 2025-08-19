@@ -64,17 +64,14 @@ pub enum WorkerdVmError {
     #[error("Worker is not in a runnable state: {0:?}")]
     WorkerNotRunnable(nxcc_interface::proto::vm::WorkerStatus),
 
-    #[error("Worker '{instance_id}' failed to become ready within {timeout:?}. Logs:\n{logs}")]
+    #[error("Worker '{instance_id}' failed to become ready within {timeout:?}")]
     StartupTimeout {
         instance_id: String,
         timeout: Duration,
         logs: String,
     },
 
-    #[error(
-        "Worker '{instance_id}' started but exited prematurely with status {final_status:?}. \
-         Logs:\n{logs}"
-    )]
+    #[error("Worker '{instance_id}' started but exited prematurely with status {final_status:?}")]
     StartupFailedPrematureExit {
         instance_id: String,
         final_status: WorkerStatus,

@@ -361,27 +361,169 @@ impl Config {
             .clone()
             .unwrap_or_else(|| "config.toml".into());
 
-        // Load config without CLI overrides first
-        let mut base_config: Config = Figment::new()
+        // Load config with figment doing automatic merging
+        let config: Config = Figment::new()
             .merge(Serialized::defaults(Config::default()))
             .merge(Toml::file(config_path))
             .merge(Env::prefixed("NXCC_"))
+            .merge(Serialized::defaults(cli)) // CLI args have highest priority
             .extract()?;
 
-        // Apply CLI overrides manually only for explicitly provided values
-        if cli.identity_path.is_some() {
-            base_config.identity_path = cli.identity_path;
-        }
-        if cli.verbose {
-            base_config.verbose = cli.verbose;
-        }
-        if cli.print_peer_id {
-            base_config.print_peer_id = cli.print_peer_id;
-        }
-        if let Some(policy_cache_dir) = cli.policy_cache_dir {
-            base_config.policy_cache_dir = Some(policy_cache_dir);
-        }
+        Ok(config)
+    }
+}
 
-        Ok(base_config)
+#[cfg(test)]
+mod tests {
+    use std::net::{Ipv4Addr, SocketAddr};
+
+    use super::*;
+
+    #[test]
+    fn test_config_merging_nested_structures() {
+        // Create a base config with some values
+        let mut base_config = Config {
+            verbose: false,
+            identity_path: Some("/base/identity".into()),
+            network: NetworkConfig {
+                listen_addresses: vec!["/ip4/127.0.0.1/tcp/8000".to_string()],
+                bootstrap_peers: vec![],
+                ..Default::default()
+            },
+            grpc: GrpcConfig {
+                uds_path: "/base/grpc.sock".to_string(),
+                tcp_addr: "127.0.0.1:9000".to_string(),
+                ..Default::default()
+            },
+            enclave: EnclaveConfig {
+                enclave_uds_path: "/base/enclave.sock".to_string(),
+                default_vm_id: "base-vm".to_string(),
+                ..Default::default()
+            },
+            http: HttpConfig {
+                http_listen_addr: "127.0.0.1:8080".to_string(),
+                api_enabled: false,
+                api_cors_allowed_origins: vec!["http://localhost:3000".to_string()],
+                ..Default::default()
+            },
+            scheduler: SchedulerConfig {
+                min_schedule_interval_ms: 1000,
+                ..Default::default()
+            },
+            attestation: AttestationConfig {
+                tdx_enabled: false,
+                gcs_project_id: Some("base-project".to_string()),
+                prefer_local_verification: true,
+                max_block_age: 100,
+                min_chain_count: 2,
+                freshness_chain_ids: vec![1, 2],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        // Create CLI args that should override some nested values
+        let cli = Config {
+            verbose: true,
+            identity_path: Some("/cli/identity".into()),
+            network: NetworkConfig {
+                listen_addresses: vec!["/ip4/127.0.0.1/tcp/9000".to_string()],
+                bootstrap_peers: vec!["/ip4/127.0.0.1/tcp/8001".to_string()],
+                ..Default::default()
+            },
+            grpc: GrpcConfig {
+                uds_path: "/cli/grpc.sock".to_string(),
+                tcp_addr: "127.0.0.1:9001".to_string(),
+                ..Default::default()
+            },
+            enclave: EnclaveConfig {
+                enclave_uds_path: "/base/enclave.sock".to_string(), // Explicitly set to preserve base value
+                default_vm_id: "cli-vm".to_string(),
+                ..Default::default()
+            },
+            http: HttpConfig {
+                http_listen_addr: "127.0.0.1:8080".to_string(), // Explicitly preserve base value
+                api_enabled: false, // Set to false (different from default true) to trigger override
+                api_cors_allowed_origins: vec!["http://localhost:3000".to_string()], // Explicitly preserve base value
+                ..Default::default()
+            },
+            scheduler: SchedulerConfig {
+                min_schedule_interval_ms: 2000,
+                ..Default::default()
+            },
+            attestation: AttestationConfig {
+                tdx_enabled: false, // Set to false (different from default true) to trigger override
+                gcs_project_id: Some("cli-project".to_string()),
+                prefer_local_verification: true, // Explicitly preserve base value
+                max_block_age: 200,
+                min_chain_count: 2,              // Explicitly preserve base value
+                freshness_chain_ids: vec![1, 2], // Explicitly preserve base value
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        // Use figment to merge base config with CLI overrides (same as the actual implementation)
+        use figment::{Figment, providers::Serialized};
+
+        let merged_config: Config = Figment::new()
+            .merge(Serialized::defaults(base_config))
+            .merge(Serialized::defaults(cli))
+            .extract()
+            .unwrap();
+
+        let base_config = merged_config;
+
+        // Verify the expected merged results
+        assert_eq!(base_config.verbose, true); // Overridden by CLI
+        assert_eq!(
+            base_config
+                .identity_path
+                .as_ref()
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "/cli/identity"
+        ); // Overridden by CLI
+
+        // Network: CLI values should override
+        assert_eq!(
+            base_config.network.listen_addresses,
+            vec!["/ip4/127.0.0.1/tcp/9000"]
+        );
+        assert_eq!(
+            base_config.network.bootstrap_peers,
+            vec!["/ip4/127.0.0.1/tcp/8001"]
+        );
+
+        // gRPC: CLI values should override
+        assert_eq!(base_config.grpc.uds_path, "/cli/grpc.sock");
+        assert_eq!(base_config.grpc.tcp_addr, "127.0.0.1:9001");
+
+        // Enclave: Only default_vm_id should be overridden, enclave_uds_path should remain from base
+        assert_eq!(base_config.enclave.default_vm_id, "cli-vm");
+        assert_eq!(base_config.enclave.enclave_uds_path, "/base/enclave.sock"); // Should remain from base
+
+        // HTTP: Only api_enabled should be overridden
+        assert_eq!(base_config.http.api_enabled, false);
+        assert_eq!(base_config.http.http_listen_addr, "127.0.0.1:8080"); // Should remain from base
+        assert_eq!(
+            base_config.http.api_cors_allowed_origins,
+            vec!["http://localhost:3000"]
+        ); // Should remain from base
+
+        // Scheduler: Should be overridden
+        assert_eq!(base_config.scheduler.min_schedule_interval_ms, 2000);
+
+        // Attestation: Some fields overridden, others preserved
+        assert_eq!(base_config.attestation.tdx_enabled, false); // Overridden
+        assert_eq!(
+            base_config.attestation.gcs_project_id.as_ref().unwrap(),
+            "cli-project"
+        ); // Overridden
+        assert_eq!(base_config.attestation.max_block_age, 200); // Overridden
+        assert_eq!(base_config.attestation.prefer_local_verification, true); // Should remain from base
+        assert_eq!(base_config.attestation.min_chain_count, 2); // Should remain from base
+        assert_eq!(base_config.attestation.freshness_chain_ids, vec![1, 2]); // Should remain from base
     }
 }

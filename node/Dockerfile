@@ -6,7 +6,7 @@ FROM alpine:3.20 AS workerd-downloader
 
 RUN apk add --no-cache curl gzip
 
-ARG WORKERD_VERSION=v1.20250520.0
+ARG WORKERD_VERSION=v1.20250819.0
 ARG TARGETARCH
 ARG WORKERD_ARCH=linux-64
 # Set workerd architecture based on target platform

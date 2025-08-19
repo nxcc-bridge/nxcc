@@ -32,10 +32,7 @@ impl WorkOrder for WorkOrderGrpcService {
         request: Request<SubmitWorkOrderRequest>,
     ) -> Result<Response<SubmitWorkOrderResponse>, Status> {
         let req = request.into_inner();
-        info!(
-            "Received gRPC SubmitWorkOrder request with DSSE bytes length: {}",
-            req.work_order_dsse_bytes.len()
-        );
+        info!("Received gRPC SubmitWorkOrder request");
 
         match self
             .orchestrator

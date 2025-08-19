@@ -150,8 +150,38 @@ impl PolicyManager {
                 secret_id_for_log
             );
             // Load from a fixed local path relative to the Cargo manifest dir
-            let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or(".".to_string());
-            let mock_manifest_path = Path::new(&manifest_dir).join("tests/policy/mock_policy.json");
+            let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| {
+                // When CARGO_MANIFEST_DIR is not set (e.g., when running built binary),
+                // try to find the tests directory relative to the current executable
+                std::env::current_exe()
+                    .ok()
+                    .and_then(|exe_path| {
+                        // Look for node directory in the path hierarchy
+                        exe_path
+                            .ancestors()
+                            .find(|ancestor| {
+                                ancestor.file_name() == Some(std::ffi::OsStr::new("node"))
+                                    && ancestor.join("tests/policy/mock_policy.json").exists()
+                            })
+                            .map(|p| p.to_path_buf())
+                    })
+                    .map(|node_dir| node_dir.to_string_lossy().to_string())
+                    .unwrap_or_else(|| ".".to_string())
+            });
+
+            // Handle case where CARGO_MANIFEST_DIR points to daemon subdirectory during tests
+            let base_path = Path::new(&manifest_dir);
+            let mock_manifest_path =
+                if base_path.file_name() == Some(std::ffi::OsStr::new("daemon")) {
+                    // If we're in the daemon directory, go up one level to find the tests directory
+                    base_path
+                        .parent()
+                        .unwrap()
+                        .join("tests/policy/mock_policy.json")
+                } else {
+                    // If we're in the root node directory, use the direct path
+                    base_path.join("tests/policy/mock_policy.json")
+                };
 
             debug!(
                 "Loading mock worker manifest from: {}",
@@ -160,7 +190,16 @@ impl PolicyManager {
 
             let manifest_content = tokio::fs::read_to_string(&mock_manifest_path)
                 .await
-                .map_err(AppError::Io)?;
+                .map_err(|e| {
+                    AppError::Io(std::io::Error::new(
+                        e.kind(),
+                        format!(
+                            "Failed to read mock policy file '{}': {}",
+                            mock_manifest_path.display(),
+                            e
+                        ),
+                    ))
+                })?;
 
             let manifest: WorkerManifest =
                 serde_json::from_str(&manifest_content).map_err(|e| {
@@ -221,9 +260,33 @@ impl PolicyManager {
                 // Assuming mock_policy.json specifies relative paths like "tests/policy/mock_worker.js"
                 // and manifest_url_for_context is something like "mock://..."
                 if manifest_url_for_context.starts_with("mock://") {
-                    let manifest_dir =
-                        std::env::var("CARGO_MANIFEST_DIR").unwrap_or(".".to_string());
-                    PathBuf::from(manifest_dir).join(path)
+                    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| {
+                        // When CARGO_MANIFEST_DIR is not set (e.g., when running built binary),
+                        // try to find the tests directory relative to the current executable
+                        std::env::current_exe()
+                            .ok()
+                            .and_then(|exe_path| {
+                                // Look for node directory in the path hierarchy
+                                exe_path
+                                    .ancestors()
+                                    .find(|ancestor| {
+                                        ancestor.file_name() == Some(std::ffi::OsStr::new("node"))
+                                            && ancestor.join("tests").exists()
+                                    })
+                                    .map(|p| p.to_path_buf())
+                            })
+                            .map(|node_dir| node_dir.to_string_lossy().to_string())
+                            .unwrap_or_else(|| ".".to_string())
+                    });
+                    // Handle case where CARGO_MANIFEST_DIR points to daemon subdirectory during tests
+                    let base_path = Path::new(&manifest_dir);
+                    if base_path.file_name() == Some(std::ffi::OsStr::new("daemon")) {
+                        // If we're in the daemon directory, go up one level to find the tests directory
+                        base_path.parent().unwrap().join(path)
+                    } else {
+                        // If we're in the root node directory, use the direct path
+                        base_path.join(path)
+                    }
                 } else {
                     // Attempt to resolve relative to the manifest URL if it's also a file URL
                     // This part might need more robust relative URL resolution logic
@@ -249,9 +312,16 @@ impl PolicyManager {
                 "Loading worker executable from: {}",
                 absolute_path.display()
             );
-            let file_content_bytes = tokio::fs::read(&absolute_path)
-                .await
-                .map_err(AppError::Io)?;
+            let file_content_bytes = tokio::fs::read(&absolute_path).await.map_err(|e| {
+                AppError::Io(std::io::Error::new(
+                    e.kind(),
+                    format!(
+                        "Failed to read worker bundle file '{}': {}",
+                        absolute_path.display(),
+                        e
+                    ),
+                ))
+            })?;
 
             // If it's a local file (likely for mocking/testing), and it looks like raw executable (e.g. .js)
             // wrap it in a mock DSSE envelope.

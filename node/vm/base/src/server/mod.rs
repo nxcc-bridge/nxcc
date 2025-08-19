@@ -166,14 +166,11 @@ impl<T: VmRuntime> Vm for VmServiceGrpc<T> {
                     error_message: String::new(),
                 }))
             }
-            Err(e) => {
-                error!("Failed to start worker: {}", e);
-                Ok(Response::new(StartWorkerResponse {
-                    id: String::new(),
-                    success: false,
-                    error_message: e.to_string(),
-                }))
-            }
+            Err(e) => Ok(Response::new(StartWorkerResponse {
+                id: String::new(),
+                success: false,
+                error_message: e.to_string(),
+            })),
         }
     }
 

@@ -403,8 +403,7 @@ impl VmRuntime for WorkerdVmm {
                     let logs_content = worker.logs.lock().await.clone();
                     error!(
                         ?exit_status,
-                        "Workerd process exited prematurely during startup check. Logs:\n{}",
-                        logs_content
+                        "Workerd process exited prematurely during startup check"
                     );
                     return Err(WorkerdVmError::StartupFailedPrematureExit {
                         instance_id: instance_id.clone(),
@@ -421,8 +420,10 @@ impl VmRuntime for WorkerdVmm {
                 .into());
             }
 
-            if tokio::net::UnixStream::connect(&uds_path).await.is_ok() {
-                sleep(Duration::from_millis(100)).await;
+            // Check if socket file exists (workerd creates it when ready)
+            if uds_path.exists() {
+                // Give workerd additional time to fully initialize
+                sleep(Duration::from_millis(200)).await;
 
                 if let Some(worker) = self.workers.get(&instance_id) {
                     let mut process = worker.process.lock().await;
@@ -431,8 +432,7 @@ impl VmRuntime for WorkerdVmm {
                         let logs_content = worker.logs.lock().await.clone();
                         error!(
                             ?exit_status,
-                            "Workerd process exited just before marking as Running. Logs:\n{}",
-                            logs_content
+                            "Workerd process exited just before marking as Running"
                         );
                         return Err(WorkerdVmError::StartupFailedPrematureExit {
                             instance_id: instance_id.clone(),

@@ -474,7 +474,7 @@ async fn test_client_error_handling() {
         .invoke_http("non-existent".to_string(), http_req_payload)
         .await;
     // Mock service returns 404 status code for non-existent workers, not a gRPC error
-    assert!(result.is_ok()); 
+    assert!(result.is_ok());
     let http_response = result.unwrap();
     assert_eq!(http_response.status_code, 404);
     assert_eq!(http_response.body, b"Worker not found".to_vec());
