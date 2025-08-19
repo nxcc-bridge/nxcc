@@ -18,8 +18,7 @@ RUN case "${TARGETARCH}" in \
     curl -sSL "https://github.com/cloudflare/workerd/releases/download/${WORKERD_VERSION}/workerd-${WORKERD_ARCH}.gz" | gunzip > /opt/workerd
 
 # Stage 1: Builder
-FROM rust:1.85.0-slim-bookworm AS builder
-# FROM rust:1.85.0-slim-bookworm@sha256:1829c432be4a592f3021501334d3fcca24f238432b13306a4e62669dec538e52 AS builder
+FROM rust:1.86.0-slim-bookworm AS builder
 
 ENV CARGO_TERM_COLOR=always
 

@@ -138,7 +138,7 @@ This is a Rust workspace implementing the NXCC (Network eXecutable Cross-Chain) 
 
 ### Development Patterns
 
-**Rust Workspace Structure**: All Rust code follows workspace conventions with shared dependencies and build configurations. Uses Rust toolchain 1.85.0 with rustfmt edition 2024.
+**Rust Workspace Structure**: All Rust code follows workspace conventions with shared dependencies and build configurations. Uses Rust toolchain 1.89.0 with rustfmt edition 2024.
 
 **Protobuf Interfaces**: Inter-service communication defined in `interface/proto/` with generated Rust bindings.
 

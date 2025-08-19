@@ -1,6 +1,6 @@
 # NXCC Development Environment (multi-platform)
 # Universal Docker environment for building and testing the complete NXCC project
-FROM rust:1.85.0-slim-bookworm
+FROM rust:1.89.0-slim-bookworm
 
 ENV CARGO_TERM_COLOR=always
 ENV NODE_ENV=development
@@ -107,4 +107,4 @@ RUN echo "Development container architecture: $(uname -m)" && \
     echo "kind: $(kind --version)" && \
     echo "grpcurl: $(grpcurl --version)" && \
     echo "jq: $(jq --version)" && \
-    echo "=== All tools ready ===" 
+    echo "=== All tools ready ==="

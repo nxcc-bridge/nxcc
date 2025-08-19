@@ -47,7 +47,7 @@ apt-get install -y --no-install-recommends \
 # Install Rust
 export RUSTUP_HOME=/opt/rust
 export CARGO_HOME=/opt/rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.85.0
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.89.0
 
 # Make Rust available to all users
 echo 'export PATH="/opt/rust/bin:$PATH"' >> /etc/environment
