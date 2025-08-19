@@ -2,12 +2,18 @@ pub mod debug;
 pub mod enclave_client;
 pub mod work_orders;
 
-use std::sync::Arc;
+use std::{
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+};
 
+use futures_util::StreamExt;
 use nxcc_interface::proto::daemon::{
     debug_server::DebugServer, work_order_server::WorkOrderServer,
 };
-use tonic::transport::Server;
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tonic::transport::{Server, server::Connected};
 use tracing::info;
 
 use crate::{
@@ -17,6 +23,51 @@ use crate::{
     http_server::VmRegistry,
     services::{secrets::SecretsService, work_order_orchestrator::WorkOrderOrchestrator},
 };
+
+// Wrapper to implement tonic 0.14 Connected trait for VsockStream
+struct VsockStreamWrapper(tokio_vsock::VsockStream);
+
+impl Connected for VsockStreamWrapper {
+    type ConnectInfo = ();
+
+    fn connect_info(&self) -> Self::ConnectInfo {
+        ()
+    }
+}
+
+impl AsyncRead for VsockStreamWrapper {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.0).poll_read(cx, buf)
+    }
+}
+
+impl AsyncWrite for VsockStreamWrapper {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, std::io::Error>> {
+        Pin::new(&mut self.0).poll_write(cx, buf)
+    }
+
+    fn poll_flush(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
+        Pin::new(&mut self.0).poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
+        Pin::new(&mut self.0).poll_shutdown(cx)
+    }
+}
 
 pub async fn start_grpc_server(
     config: &GrpcConfig,
@@ -37,7 +88,9 @@ pub async fn start_grpc_server(
                 config.vsock_port,
             ))
             .map_err(|e| AppError::Service(format!("Failed to bind vsock: {}", e)))?;
-            let incoming = listener.incoming();
+            let incoming = listener
+                .incoming()
+                .map(|stream_result| stream_result.map(|stream| VsockStreamWrapper(stream)));
 
             Server::builder()
                 .add_service(DebugServer::new(DebugGrpc::new(

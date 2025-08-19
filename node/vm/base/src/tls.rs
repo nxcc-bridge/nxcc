@@ -22,8 +22,8 @@
 //! - Authorization decisions should **not** be based solely on the fact that a certificate was validated against this dummy CA.
 
 use rcgen::{
-    Certificate as RcgenCertificate, CertificateParams, DistinguishedName, DnType,
-    ExtendedKeyUsagePurpose, IsCa, KeyPair, KeyUsagePurpose,
+    BasicConstraints, Certificate as RcgenCertificate, CertificateParams, DistinguishedName,
+    DnType, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair, KeyUsagePurpose,
 };
 use thiserror::Error;
 use tonic::transport::{Certificate, ClientTlsConfig, Identity, ServerTlsConfig};
@@ -137,7 +137,6 @@ fn generate_deterministic_ca_cert() -> Result<(RcgenCertificate, KeyPair), TlsEr
         "-".repeat(5) + "END CERTIFICATE" + &"-".repeat(5),
     ]
     .join("\n");
-    let params = CertificateParams::from_ca_cert_pem(&cert_pem).unwrap();
 
     let key_pem = [
         "-".repeat(5) + "BEGIN EC PRIVATE KEY" + &"-".repeat(5),
@@ -147,10 +146,19 @@ fn generate_deterministic_ca_cert() -> Result<(RcgenCertificate, KeyPair), TlsEr
         "-".repeat(5) + "END EC PRIVATE KEY" + &"-".repeat(5),
     ]
     .join("\n");
+
     let key_pair =
         KeyPair::from_pem(&key_pem).map_err(|e| TlsError::KeyGeneration(e.to_string()))?;
 
-    let cert = params.self_signed(&key_pair)?;
+    // Create parameters for the CA certificate
+    let mut ca_params = CertificateParams::new(vec![])?;
+    let mut distinguished_name = DistinguishedName::new();
+    distinguished_name.push(DnType::CommonName, "Dummy Untrusted CA - Deterministic");
+    ca_params.distinguished_name = distinguished_name;
+    ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    ca_params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::CrlSign];
+
+    let cert = ca_params.self_signed(&key_pair)?;
     Ok((cert, key_pair))
 }
 
@@ -184,7 +192,16 @@ fn generate_signed_cert(
 
     // Generate a new key pair for the end-entity certificate - does not take alg argument
     let key_pair = KeyPair::generate().map_err(|e| TlsError::KeyGeneration(e.to_string()))?;
-    let cert = params.signed_by(&key_pair, ca_cert, ca_key_pair)?;
+
+    // Create an issuer from the CA cert and key for signing
+    let ca_cert_pem = ca_cert.pem();
+    let ca_key_pem = ca_key_pair.serialize_pem();
+    let ca_key_owned =
+        KeyPair::from_pem(&ca_key_pem).map_err(|e| TlsError::KeyGeneration(e.to_string()))?;
+    let ca_issuer = Issuer::from_ca_cert_pem(&ca_cert_pem, ca_key_owned)
+        .map_err(|e| TlsError::CertGeneration(e))?;
+
+    let cert = params.signed_by(&key_pair, &ca_issuer)?;
 
     Ok(CertBundle {
         cert_pem: cert.pem(),
@@ -260,5 +277,39 @@ mod tests {
             .identity(client2_identity)
             .ca_certificate(ca_cert)
             .domain_name("localhost"); // Still need a domain name for client config
+    }
+
+    #[test]
+    fn test_certificates_are_signed_by_ca() {
+        let certs = MtlsCertificates::new().expect("Failed to create base certificates");
+
+        // Parse the CA certificate
+        let ca_pem_parsed = pem::parse(&certs.ca_pem).expect("Failed to parse CA PEM");
+        let ca_cert_parsed = x509_parser::parse_x509_certificate(ca_pem_parsed.contents())
+            .expect("Failed to parse CA cert")
+            .1;
+
+        // Parse the server certificate
+        let server_pem_parsed =
+            pem::parse(&certs.server.cert_pem).expect("Failed to parse server PEM");
+        let server_cert_parsed = x509_parser::parse_x509_certificate(server_pem_parsed.contents())
+            .expect("Failed to parse server cert")
+            .1;
+
+        // Parse the client certificate
+        let client_pem_parsed =
+            pem::parse(&certs.client.cert_pem).expect("Failed to parse client PEM");
+        let client_cert_parsed = x509_parser::parse_x509_certificate(client_pem_parsed.contents())
+            .expect("Failed to parse client cert")
+            .1;
+
+        // Verify that server and client certificates have the CA as their issuer
+        // The issuer DN should match the CA's subject DN
+        assert_eq!(server_cert_parsed.issuer(), ca_cert_parsed.subject());
+        assert_eq!(client_cert_parsed.issuer(), ca_cert_parsed.subject());
+
+        // Verify certificates are not self-signed (issuer != subject)
+        assert_ne!(server_cert_parsed.issuer(), server_cert_parsed.subject());
+        assert_ne!(client_cert_parsed.issuer(), client_cert_parsed.subject());
     }
 }

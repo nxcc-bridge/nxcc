@@ -271,7 +271,6 @@ impl nxcc_interface::proto::vm::vm_server::Vm for MockVmService {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_client_operations() -> Result<(), Box<dyn Error>> {
     // Generate certificates using the simplified API
     let certs = MtlsCertificates::new()?;
@@ -394,7 +393,6 @@ async fn test_client_operations() -> Result<(), Box<dyn Error>> {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_client_error_handling() {
     // Generate certificates
     let certs = MtlsCertificates::new().unwrap();

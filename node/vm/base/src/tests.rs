@@ -172,7 +172,6 @@ impl VmRuntime for E2EMockVmRuntime {
 
 /// Run a fully in-memory test of the VM server and client binding layer.
 #[tokio::test]
-#[ignore]
 async fn test_e2e_with_client_binding() -> Result<(), Box<dyn Error>> {
     // 1. Generate CA and Certs using the simplified API
     let certs = MtlsCertificates::new()?;

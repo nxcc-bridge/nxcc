@@ -8,16 +8,17 @@ alloy-primitives = { version = "1.0.0", features = ["serde"] }
 base64 = "0.22.1"
 chrono = { version = "0.4", features = ["serde"] }
 ciborium = "0.2.2"
-prost = "0.13.5"
+prost = "0.14.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10.8"
 url = { version = "2.5.4", features = ["serde"] } # Added for WorkerManifest
-thiserror = "1.0"
-tonic = { version = "0.13.1", features = ["transport"] }
+thiserror = "2.0.15"
+tonic = { version = "0.14.1", features = ["transport"] }
+tonic-prost = "0.14.1"
 alloy-rpc-types = "1.0.6"
 anyhow = "1.0"
 async-trait = "0.1"
 
 [build-dependencies]
-tonic-build = "0.13.1"
+tonic-prost-build = "0.14.1"
