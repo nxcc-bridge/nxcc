@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Important Instructions
+
+- **NEVER add Claude as co-author in git commits**. Only include human contributors in commit co-author lines.
+
 ## Build and Development Commands
 
 ### Building the Project

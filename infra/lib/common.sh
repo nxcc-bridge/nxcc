@@ -30,6 +30,18 @@ HELM_CHART_PATH="$(dirname "$(realpath "$0")")/charts/nxcc-node"
 readonly HELM_CHART_PATH
 export HELM_CHART_PATH
 
+# TDX Development VM Config
+readonly TDX_VM_NAME="${TDX_VM_NAME:-nxcc-tdx-dev}"
+export TDX_VM_NAME
+readonly TDX_VM_ZONE="${TDX_VM_ZONE:-europe-west1-b}"
+export TDX_VM_ZONE
+readonly TDX_VM_MACHINE_TYPE="${TDX_VM_MACHINE_TYPE:-n2d-standard-4}"
+export TDX_VM_MACHINE_TYPE
+readonly TDX_VM_IMAGE_FAMILY="${TDX_VM_IMAGE_FAMILY:-ubuntu-2204-lts}"
+export TDX_VM_IMAGE_FAMILY
+readonly TDX_VM_IMAGE_PROJECT="${TDX_VM_IMAGE_PROJECT:-ubuntu-os-cloud}"
+export TDX_VM_IMAGE_PROJECT
+
 # --- GCP Locations ---
 # Override with environment variables if needed.
 readonly GCP_AR_LOCATION="${GCP_AR_LOCATION:-europe}"

@@ -35,49 +35,36 @@ echo "Started at: $(date)"
 
 # Update system
 apt-get update
-apt-get upgrade -y
 
-# Install dependencies matching the devcontainer
+# Install minimal dependencies: Docker, git, and basic tools
 apt-get install -y --no-install-recommends \
-  curl wget git vim nano \
-  build-essential autoconf automake libtool pkg-config \
-  protobuf-compiler libprotobuf-dev \
-  ca-certificates sudo
+  curl wget git vim \
+  ca-certificates gnupg lsb-release
 
-# Install Rust
-export RUSTUP_HOME=/opt/rust
-export CARGO_HOME=/opt/rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.89.0
+# Install Docker
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+apt-get update
+apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 
-# Make Rust available to all users
-echo 'export PATH="/opt/rust/bin:$PATH"' >> /etc/environment
-echo 'export RUSTUP_HOME="/opt/rust"' >> /etc/environment  
-echo 'export CARGO_HOME="/opt/rust"' >> /etc/environment
+# Add ubuntu user to docker group
+usermod -aG docker ubuntu
 
-# Install Cap'n Proto (matching version)
-cd /tmp
-CAPNP_VERSION=1.1.0
-curl -sSL "https://capnproto.org/capnproto-c++-${CAPNP_VERSION}.tar.gz" -o capnproto.tar.gz
-tar zxf capnproto.tar.gz
-cd capnproto-c++-${CAPNP_VERSION}
-./configure
-make -j$(nproc)
-make install
-ldconfig
-cd /tmp
-rm -rf capnproto-c++-${CAPNP_VERSION} capnproto.tar.gz
+# Enable and start Docker service
+systemctl enable docker
+systemctl start docker
 
-# Clone NXCC repository
-git clone https://github.com/nhynes/nxcc.git /home/ubuntu/nxcc || true
-chown -R ubuntu:ubuntu /home/ubuntu/nxcc
-
-# Pre-compile dependencies to speed up first build
-cd /home/ubuntu/nxcc/node
-sudo -u ubuntu -i bash -c 'cd /home/ubuntu/nxcc/node && source /etc/environment && cargo metadata --format-version 1 > /dev/null'
+# Verify TDX is available (check for TDX-specific files/capabilities)
+echo "=== Checking TDX Support ==="
+if [ -e /sys/firmware/tdx_guest ]; then
+  echo "TDX guest support detected!"
+else
+  echo "Warning: TDX guest support not detected in /sys/firmware/tdx_guest"
+fi
 
 echo "=== TDX VM Setup Complete ==="
 echo "Finished at: $(date)"
-echo "VM is ready for NXCC development!"
+echo "VM is ready for TDX testing with Docker!"
 EOF
 
   info "Creating TDX-enabled VM: ${TDX_VM_NAME}"
@@ -107,10 +94,15 @@ EOF
   info "Waiting for VM to become ready..."
   
   # Wait for VM to be running
-  gcloud compute instances wait-until-running "${TDX_VM_NAME}" \
-    --zone="${TDX_VM_ZONE}" \
-    --project="${RESOLVED_PROJECT_ID}" \
-    --account="${RESOLVED_GCP_ACCOUNT}"
+  while true; do
+    local vm_status
+    vm_status=$(gcloud compute instances describe "${TDX_VM_NAME}" --zone="${TDX_VM_ZONE}" --project="${RESOLVED_PROJECT_ID}" --account="${RESOLVED_GCP_ACCOUNT}" --format="value(status)")
+    if [[ "$vm_status" == "RUNNING" ]]; then
+      break
+    fi
+    info "VM status: $vm_status, waiting..."
+    sleep 5
+  done
 
   success "VM is running. Setup script is installing dependencies..."
   info "This may take 5-10 minutes. You can connect with:"
@@ -141,7 +133,14 @@ dev_connect_vm() {
     gcloud compute instances start "${TDX_VM_NAME}" --zone="${TDX_VM_ZONE}" --project="${RESOLVED_PROJECT_ID}" --account="${RESOLVED_GCP_ACCOUNT}"
     
     info "Waiting for VM to start..."
-    gcloud compute instances wait-until-running "${TDX_VM_NAME}" --zone="${TDX_VM_ZONE}" --project="${RESOLVED_PROJECT_ID}" --account="${RESOLVED_GCP_ACCOUNT}"
+    while true; do
+      local vm_status
+      vm_status=$(gcloud compute instances describe "${TDX_VM_NAME}" --zone="${TDX_VM_ZONE}" --project="${RESOLVED_PROJECT_ID}" --account="${RESOLVED_GCP_ACCOUNT}" --format="value(status)")
+      if [[ "$vm_status" == "RUNNING" ]]; then
+        break
+      fi
+      sleep 3
+    done
   fi
 
   info "Connecting to ${TDX_VM_NAME}..."
