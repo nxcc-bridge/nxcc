@@ -78,8 +78,8 @@ EOF
     --machine-type="${TDX_VM_MACHINE_TYPE}" \
     --image-family="${TDX_VM_IMAGE_FAMILY}" \
     --image-project="${TDX_VM_IMAGE_PROJECT}" \
-    --boot-disk-size=50GB \
-    --boot-disk-type=pd-standard \
+    --boot-disk-size=20GB \
+    --boot-disk-type=pd-ssd \
     --confidential-compute \
     --maintenance-policy=TERMINATE \
     --metadata-from-file startup-script="$startup_script_path" \

@@ -33,9 +33,9 @@ export HELM_CHART_PATH
 # TDX Development VM Config
 readonly TDX_VM_NAME="${TDX_VM_NAME:-nxcc-tdx-dev}"
 export TDX_VM_NAME
-readonly TDX_VM_ZONE="${TDX_VM_ZONE:-europe-west1-b}"
+readonly TDX_VM_ZONE="${TDX_VM_ZONE:-us-central1-a}"
 export TDX_VM_ZONE
-readonly TDX_VM_MACHINE_TYPE="${TDX_VM_MACHINE_TYPE:-n2d-standard-4}"
+readonly TDX_VM_MACHINE_TYPE="${TDX_VM_MACHINE_TYPE:-c3d-highcpu-4}"
 export TDX_VM_MACHINE_TYPE
 readonly TDX_VM_IMAGE_FAMILY="${TDX_VM_IMAGE_FAMILY:-ubuntu-2204-lts}"
 export TDX_VM_IMAGE_FAMILY
