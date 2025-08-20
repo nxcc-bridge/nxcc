@@ -247,14 +247,14 @@ pub fn generate_attestation(ephemeral_kx_pk: &PublicKey, user_data: Vec<u8>) -> 
                 };
             }
             Err(e) => {
-                log::warn!(
+                tracing::warn!(
                     "Failed to generate platform attestation: {}, falling back to dummy",
                     e
                 );
             }
         }
     } else {
-        log::warn!("Platform attestation manager not initialized, using dummy attestation");
+        tracing::warn!("Platform attestation manager not initialized, using dummy attestation");
     }
 
     // Fallback to dummy attestation
