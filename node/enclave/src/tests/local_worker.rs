@@ -79,13 +79,11 @@ async fn test_local_worker_secret_authorization_flow() {
     let enclave_env_report = EnvReport::try_from(nxcc_interface::proto::interface::EnvReport {
         attestation: Some(enclave_attestation_report_proto),
         operator_signature: None, // Not strictly needed for this part of test
-        node_id: "enclave-self".to_string(),
     })
     .unwrap();
     let enclave_env_report_for_policy = EnvReport {
         attestation: enclave_env_report.attestation,
-        operator_signature: None,    // Not used for self-auth
-        node_id: "daemon-self".into(), // The daemon is the one orchestrating
+        operator_signature: None, // Not used for self-auth
     };
 
     // 3b. Prepare for policy execution

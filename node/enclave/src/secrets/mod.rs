@@ -232,9 +232,7 @@ impl Secrets {
 
         for (secrets_box, env_report, local_consumer_info) in bundles {
             debug!(
-                "Processing secrets box from node {} for consumer bundle_hash {:?} containing {} \
-                 secrets",
-                env_report.node_id,
+                "Processing secrets box for consumer bundle_hash {:?} containing {} secrets",
                 local_consumer_info.bundle_hash,
                 secrets_box.contained_secret_ids.len()
             );
@@ -243,14 +241,11 @@ impl Secrets {
             let verified_user_data = match verify_attestation(&env_report.attestation) {
                 Ok(data) => data,
                 Err(e) => {
-                    warn!(
-                        "Skipping bundle from node {}: Attestation verification failed: {}",
-                        env_report.node_id, e
-                    );
+                    warn!("Skipping bundle: Attestation verification failed: {}", e);
                     continue;
                 }
             };
-            debug!("Attestation verified for node {}", env_report.node_id);
+            debug!("Attestation verified");
 
             // TODO (important!): verify that env report is bound to the attestation (node_id is used but untrusted)
 
@@ -258,9 +253,7 @@ impl Secrets {
             let expected_hash_slice = verified_user_data.as_slice();
             if expected_hash_slice.len() != 32 {
                 warn!(
-                    "Skipping bundle from node {}: Invalid hash length ({}) in verified \
-                     attestation user_data",
-                    env_report.node_id,
+                    "Skipping bundle: Invalid hash length ({}) in verified attestation user_data",
                     expected_hash_slice.len()
                 );
                 continue;
@@ -270,18 +263,13 @@ impl Secrets {
 
             if expected_hash != calculated_hash {
                 warn!(
-                    "Skipping bundle from node {}: SecretsBox hash mismatch. Expected {}, \
-                     calculated {}",
-                    env_report.node_id,
+                    "Skipping bundle: SecretsBox hash mismatch. Expected {}, calculated {}",
                     hex::encode(expected_hash),
                     hex::encode(calculated_hash)
                 );
                 continue;
             }
-            debug!(
-                "SecretsBox binding verified for node {}",
-                env_report.node_id
-            );
+            debug!("SecretsBox binding verified");
 
             // 3. Check authorization for *each* secret contained in the box.
             // This checks if *our* runner approved the *sender* (identified by their attestation report)
@@ -294,9 +282,9 @@ impl Secrets {
                     &local_consumer_info,
                 ) {
                     warn!(
-                        "Skipping bundle from node {}: Not authorized locally to receive secret \
-                         {:?} from this node for consumer bundle_hash {:?}",
-                        env_report.node_id, secret_id, local_consumer_info.bundle_hash
+                        "Skipping bundle: Not authorized locally to receive secret {:?} for \
+                         consumer bundle_hash {:?}",
+                        secret_id, local_consumer_info.bundle_hash
                     );
                     all_secrets_authorized = false;
                     break;
@@ -306,44 +294,31 @@ impl Secrets {
             if !all_secrets_authorized {
                 continue;
             }
-            debug!(
-                "Local authorization check passed for all secrets in the box from node {}",
-                env_report.node_id
-            );
+            debug!("Local authorization check passed for all secrets in the box");
 
             let decrypted_secrets =
                 match decrypt_secrets_box(&self.ephemeral_kx_keypair, &secrets_box) {
                     Ok(s) => s,
                     Err(e) => {
                         // Decryption failure might indicate wrong recipient key or corrupted data
-                        error!(
-                            "Failed to decrypt secrets box from node {} (post-attestation): {}",
-                            env_report.node_id, e
-                        );
+                        error!("Failed to decrypt secrets box (post-attestation): {}", e);
                         continue; // Skip this bundle
                     }
                 };
-            debug!(
-                "Successfully decrypted secrets box from node {}",
-                env_report.node_id
-            );
+            debug!("Successfully decrypted secrets box");
 
             // 5. Store the decrypted secrets
             for (secret_id, data, expiry, generation_timestamp) in decrypted_secrets {
                 if expiry != 0 && expiry <= current_time {
-                    info!(
-                        "Ignoring expired secret {:?} from node {}",
-                        secret_id, env_report.node_id
-                    );
+                    info!("Ignoring expired secret {:?}", secret_id);
                     continue;
                 }
                 match secrets_map.get(&secret_id) {
                     Some(existing_secret) => {
                         if generation_timestamp > existing_secret.generation_timestamp {
                             info!(
-                                "Updating secret {:?} from node {} with newer timestamp {} > {}",
+                                "Updating secret {:?} with newer timestamp {} > {}",
                                 secret_id,
-                                env_report.node_id,
                                 generation_timestamp,
                                 existing_secret.generation_timestamp
                             );
@@ -358,10 +333,9 @@ impl Secrets {
                             secrets_added_count += 1;
                         } else {
                             warn!(
-                                "Ignoring incoming secret {:?} from node {}: existing timestamp \
-                                 {} >= incoming {}",
+                                "Ignoring incoming secret {:?}: existing timestamp {} >= incoming \
+                                 {}",
                                 secret_id,
-                                env_report.node_id,
                                 existing_secret.generation_timestamp,
                                 generation_timestamp
                             );
@@ -506,8 +480,7 @@ impl Secrets {
         requester_env_report: EnvReport,
     ) -> Result<SecretsBox, String> {
         info!(
-            "GetSecrets request from node {} for {} secret-consumer pairs",
-            requester_env_report.node_id,
+            "GetSecrets request for {} secret-consumer pairs",
             requests.len()
         );
         let current_time = Utc::now().timestamp() as u64;
@@ -518,16 +491,10 @@ impl Secrets {
             match verify_attestation(&requester_env_report.attestation) {
                 Ok(data) => data, // We don't necessarily need the user_data here, just verification success
                 Err(e) => {
-                    return Err(format!(
-                        "Requester attestation verification failed for node {}: {}",
-                        requester_env_report.node_id, e
-                    ));
+                    return Err(format!("Requester attestation verification failed: {}", e));
                 }
             };
-        debug!(
-            "Requester attestation verified for node {}",
-            requester_env_report.node_id
-        );
+        debug!("Requester attestation verified");
         // Extract requester's KX public key *after* verifying attestation
         let requester_kx_pk_bytes: [u8; 32] = requester_env_report
             .attestation
@@ -556,10 +523,9 @@ impl Secrets {
                     consumer_info,
                 ) {
                     warn!(
-                        "Not authorized to release secret {:?} to node {} for consumer \
-                         bundle_hash {:?} (attestation measurement: {:?})",
+                        "Not authorized to release secret {:?} for consumer bundle_hash {:?} \
+                         (attestation measurement: {:?})",
                         secret_id,
-                        requester_env_report.node_id,
                         consumer_info.bundle_hash,
                         requester_env_report.attestation.measurement // Log part of attestation
                     );
@@ -589,10 +555,7 @@ impl Secrets {
         } // Drop read locks
 
         if secrets_to_pack.is_empty() {
-            info!(
-                "No authorized/valid secrets found for node {}",
-                requester_env_report.node_id
-            );
+            info!("No authorized/valid secrets found");
             // Return an empty box rather than erroring
             // Encrypting an empty list still produces a valid box structure
             // Assuming signature field REMOVED from SecretsBox type:
@@ -604,11 +567,7 @@ impl Secrets {
             .map_err(|e| format!("Failed to encrypt empty secrets box: {e}"));
         }
 
-        info!(
-            "Packing {} secrets for node {}",
-            secrets_to_pack.len(),
-            requester_env_report.node_id
-        );
+        info!("Packing {} secrets", secrets_to_pack.len());
 
         // 3. Encrypt the secrets into a SecretsBox
         // Assuming signature field was REMOVED from SecretsBox type:

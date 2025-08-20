@@ -7,15 +7,15 @@ use std::{
     time::Duration,
 };
 
+use ed25519_dalek::Signer;
 use futures::channel::mpsc;
 use libp2p::PeerId; // Import PeerId
 use libp2p::identity::Keypair; // Import Keypair
-use ed25519_dalek::Signer;
-use sha2::Digest;
 use nxcc_interface::types::{
-    AttestationReport, ConsumerInfo, EnvReport, OperatorSignature, PolicyExecutionRequest, SecretId, SecretRequest,
-    SecretsBox, WorkerBundle, WorkerManifest,
+    AttestationReport, ConsumerInfo, EnvReport, OperatorSignature, PolicyExecutionRequest,
+    SecretId, SecretRequest, SecretsBox, WorkerBundle, WorkerManifest,
 };
+use sha2::Digest;
 use tokio::sync::{Mutex, RwLock, oneshot};
 use tracing::{debug, error, info, warn};
 
@@ -42,7 +42,7 @@ pub struct SecretsService {
     runner_service: Arc<RunnerService>,
     request_counter: AtomicU64,
     local_peer_id: PeerId, // Store the local PeerId
-    config: Arc<Config>, // Store config
+    config: Arc<Config>,   // Store config
 }
 
 struct PendingRequest {
@@ -66,7 +66,7 @@ impl SecretsService {
         enclave_client: EnclaveClient,
         policy_manager: Arc<PolicyManager>,
         runner_service: Arc<RunnerService>,
-        local_key: Keypair, // Pass the keypair
+        local_key: Keypair,  // Pass the keypair
         config: Arc<Config>, // Pass config
     ) -> Arc<Self> {
         Arc::new(Self {
@@ -316,19 +316,15 @@ impl SecretsService {
                 {
                     Ok(false) => {
                         warn!(
-                            "Policy check failed for secret {:?} from responder node {} for \
-                             consumer bundle_hash {:?}",
-                            secret_id, env_report.node_id, consumer_info.bundle_hash
+                            "Policy check failed for secret {:?} for consumer bundle_hash {:?}",
+                            secret_id, consumer_info.bundle_hash
                         );
                         is_valid_response = false;
                         break; // One failure invalidates the whole bundle for now
                     }
                     Ok(true) => { /* Policy satisfied, continue */ }
                     Err(e) => {
-                        error!(
-                            "Policy execution failed for responder node {}: {}",
-                            env_report.node_id, e
-                        );
+                        error!("Policy execution failed: {}", e);
                         is_valid_response = false;
                         break;
                     }
@@ -451,23 +447,15 @@ impl SecretsService {
                 }
                 Ok(false) => warn!(
                     // Policy denied is not an error, just a denial
-                    "Policy denied for requester {} for secret {:?} with consumer bundle_hash {:?}",
-                    requester_env_report.node_id,
-                    secret_id,
-                    consumer_info_for_peer_worker.bundle_hash
+                    "Policy denied for secret {:?} with consumer bundle_hash {:?}",
+                    secret_id, consumer_info_for_peer_worker.bundle_hash
                 ),
-                Err(e) => error!(
-                    "Policy execution failed for requester {}: {}",
-                    requester_env_report.node_id, e
-                ),
+                Err(e) => error!("Policy execution failed: {}", e),
             }
         }
 
         if authorized_ids_and_consumers.is_empty() {
-            info!(
-                "No secrets authorized for requester {}",
-                requester_env_report.node_id
-            );
+            info!("No secrets authorized for requester");
             return None;
         }
 
@@ -851,22 +839,22 @@ impl SecretsService {
             .map_err(|e| AppError::Service(format!("Failed to get attestation report: {}", e)))?;
 
         // Generate operator signature if signing key is configured
-        let operator_signature = if let Some(ref key_path) = self.config.attestation.operator_signing_key_path {
-            match self.create_operator_signature(key_path, &attestation).await {
-                Ok(sig) => Some(sig),
-                Err(e) => {
-                    warn!("Failed to create operator signature: {}", e);
-                    None // Continue without signature if signing fails
+        let operator_signature =
+            if let Some(ref key_path) = self.config.attestation.operator_signing_key_path {
+                match self.create_operator_signature(key_path, &attestation).await {
+                    Ok(sig) => Some(sig),
+                    Err(e) => {
+                        warn!("Failed to create operator signature: {}", e);
+                        None // Continue without signature if signing fails
+                    }
                 }
-            }
-        } else {
-            None
-        };
+            } else {
+                None
+            };
 
         Ok(EnvReport {
             attestation,
             operator_signature,
-            node_id: "@self".into(), // This node_id is for daemon's internal use/logging; enclave uses attestation.
         })
     }
 
@@ -877,14 +865,24 @@ impl SecretsService {
         attestation: &AttestationReport,
     ) -> Result<OperatorSignature, Box<dyn std::error::Error + Send + Sync>> {
         // Read the signing key from file
-        let key_bytes = std::fs::read(key_path)
-            .map_err(|e| format!("Failed to read signing key from {}: {}", key_path.display(), e))?;
+        let key_bytes = std::fs::read(key_path).map_err(|e| {
+            format!(
+                "Failed to read signing key from {}: {}",
+                key_path.display(),
+                e
+            )
+        })?;
 
         // Convert key bytes to fixed size array
         if key_bytes.len() != 32 {
-            return Err(format!("Signing key must be exactly 32 bytes, got {}", key_bytes.len()).into());
+            return Err(format!(
+                "Signing key must be exactly 32 bytes, got {}",
+                key_bytes.len()
+            )
+            .into());
         }
-        let signing_key: [u8; 32] = key_bytes.try_into()
+        let signing_key: [u8; 32] = key_bytes
+            .try_into()
             .map_err(|_| "Failed to convert key bytes to array")?;
 
         // Create hash of attestation data to sign
@@ -892,7 +890,8 @@ impl SecretsService {
             attestation.ephemeral_public_key.clone(),
             attestation.measurement.clone(),
             attestation.user_data.clone(),
-        ].concat();
+        ]
+        .concat();
 
         // Hash the attestation data
         let mut hasher = sha2::Sha256::new();
@@ -900,7 +899,8 @@ impl SecretsService {
         let evidence_hash = hasher.finalize();
 
         // Create operator signature using Ed25519
-        let signing_key_array: [u8; 32] = signing_key.try_into()
+        let signing_key_array: [u8; 32] = signing_key
+            .try_into()
             .map_err(|_| "Signing key must be exactly 32 bytes")?;
         let signing_key = ed25519_dalek::SigningKey::from_bytes(&signing_key_array);
         let public_key = signing_key.verifying_key();
@@ -908,9 +908,18 @@ impl SecretsService {
 
         // Create a simple CBOR structure with signature info (can be upgraded to full COSE later)
         let signature_data = std::collections::BTreeMap::from([
-            ("alg".to_string(), ciborium::Value::Text("EdDSA".to_string())),
-            ("sig".to_string(), ciborium::Value::Bytes(signature.to_bytes().to_vec())),
-            ("key".to_string(), ciborium::Value::Bytes(public_key.to_bytes().to_vec())),
+            (
+                "alg".to_string(),
+                ciborium::Value::Text("EdDSA".to_string()),
+            ),
+            (
+                "sig".to_string(),
+                ciborium::Value::Bytes(signature.to_bytes().to_vec()),
+            ),
+            (
+                "key".to_string(),
+                ciborium::Value::Bytes(public_key.to_bytes().to_vec()),
+            ),
         ]);
 
         // Serialize to CBOR
@@ -934,19 +943,20 @@ fn current_unix_time() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::path::Path;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_create_operator_signature() {
         // Create a temporary key file for testing
         let temp_dir = std::env::temp_dir();
         let key_path = temp_dir.join("test_operator_key");
-        
+
         // Write a test key (32 bytes)
         let test_key = [1u8; 32];
         std::fs::write(&key_path, test_key).unwrap();
-        
+
         // Create test attestation report
         let attestation = AttestationReport {
             ephemeral_public_key: vec![1, 2, 3, 4],
@@ -954,19 +964,20 @@ mod tests {
             user_data: vec![9, 10, 11, 12],
             block_hashes: vec![vec![1, 2, 3], vec![4, 5, 6]], // Add required block hashes
         };
-        
+
         // Test the signature creation logic directly (without the full SecretsService)
-        
+
         // Test the signature creation logic directly
         let key_bytes = std::fs::read(&key_path).unwrap();
         let signing_key_array: [u8; 32] = key_bytes.try_into().unwrap();
-        
+
         let attestation_data = [
             attestation.ephemeral_public_key.clone(),
             attestation.measurement.clone(),
             attestation.user_data.clone(),
-        ].concat();
-        
+        ]
+        .concat();
+
         // Create signature using Ed25519
         let signing_key = ed25519_dalek::SigningKey::from_bytes(&signing_key_array);
         let public_key = signing_key.verifying_key();
@@ -974,40 +985,49 @@ mod tests {
 
         // Create a simple CBOR structure with signature info (can be upgraded to full COSE later)
         let signature_data = std::collections::BTreeMap::from([
-            ("alg".to_string(), ciborium::Value::Text("EdDSA".to_string())),
-            ("sig".to_string(), ciborium::Value::Bytes(signature.to_bytes().to_vec())),
-            ("key".to_string(), ciborium::Value::Bytes(public_key.to_bytes().to_vec())),
+            (
+                "alg".to_string(),
+                ciborium::Value::Text("EdDSA".to_string()),
+            ),
+            (
+                "sig".to_string(),
+                ciborium::Value::Bytes(signature.to_bytes().to_vec()),
+            ),
+            (
+                "key".to_string(),
+                ciborium::Value::Bytes(public_key.to_bytes().to_vec()),
+            ),
         ]);
 
         // Serialize to CBOR
         let mut cose_bytes = Vec::new();
         ciborium::into_writer(&signature_data, &mut cose_bytes).unwrap();
-        
+
         // Create the interface type
         let operator_sig = OperatorSignature {
             cose_sign1: cose_bytes,
         };
-        
+
         // Verify the basic properties
         assert!(!operator_sig.cose_sign1.is_empty());
         assert!(operator_sig.cose_sign1.len() > 50); // Should be a reasonable size for COSE_Sign1
-        
+
         // Clean up
         std::fs::remove_file(key_path).ok();
     }
-    
+
     #[test]
     fn test_operator_signature_invalid_key_size() {
         let temp_dir = std::env::temp_dir();
         let key_path = temp_dir.join("test_invalid_key");
-        
+
         // Write an invalid key (wrong size)
         let invalid_key = [1u8; 16];
         std::fs::write(&key_path, invalid_key).unwrap();
-        
+
         let key_bytes = std::fs::read(&key_path).unwrap();
         assert_eq!(key_bytes.len(), 16); // Should be invalid
-        
+
         // Clean up
         std::fs::remove_file(key_path).ok();
     }

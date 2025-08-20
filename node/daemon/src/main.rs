@@ -108,8 +108,8 @@ async fn main() -> anyhow::Result<()> {
         secrets_tx.clone(),
         enclave_client.clone(), // SecretsService still needs the combined client for secrets calls
         policy_manager.clone(),
-        runner_service.clone(), // Inject RunnerService
-        local_key.clone(),      // Pass the local keypair
+        runner_service.clone(),   // Inject RunnerService
+        local_key.clone(),        // Pass the local keypair
         Arc::new(config.clone()), // Pass config
     );
 

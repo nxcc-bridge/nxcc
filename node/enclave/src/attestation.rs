@@ -42,7 +42,6 @@ impl PlatformAttestationManager {
         Ok(())
     }
 
-
     /// Generate attestation with user data + ephemeral key binding
     pub async fn generate_bound_attestation(&self, user_data: &[u8]) -> Result<AttestationBundle> {
         // Use the new ephemeral key binding method

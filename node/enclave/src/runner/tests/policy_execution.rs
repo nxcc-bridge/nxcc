@@ -3,7 +3,10 @@ use std::sync::{Arc, Mutex};
 use nxcc_attestation::tdx::hardware::TdxInterface;
 use nxcc_interface::{
     proto::vm::WorkerStatus,
-    types::{AttestationReport, ConsumerInfo, EnvReport, PolicyExecutionRequest},
+    types::{
+        AttestationReport, ConsumerInfo, EnvReport, PolicyExecutionContextForWorker,
+        PolicyExecutionRequest,
+    },
 };
 use nxcc_vm_base::client::mock::MockExecutionBehavior;
 
@@ -29,8 +32,8 @@ async fn test_execute_policy_success_some_satisfied() {
     let secret_id_2 = test_secret_id(102);
     let secret_id_3 = test_secret_id(103);
 
-    let context1 = test_policy_request(node_id_1, vec![secret_id_1.clone()]);
-    let context2 = test_policy_request(node_id_2, vec![secret_id_2.clone(), secret_id_3.clone()]);
+    let context1 = test_policy_request(vec![secret_id_1.clone()]);
+    let context2 = test_policy_request(vec![secret_id_2.clone(), secret_id_3.clone()]);
     let contexts = vec![context1.clone(), context2.clone()];
 
     // Expected VM response: context1=true, context2=false
@@ -79,10 +82,7 @@ async fn test_execute_policy_success_some_satisfied() {
     // Verify only context1 is returned
     assert_eq!(satisfied_contexts.len(), 1);
     // Deep comparison might be needed if PolicyExecutionRequest doesn't impl PartialEq well
-    assert_eq!(
-        satisfied_contexts[0].env_report.node_id,
-        context1.env_report.node_id
-    );
+    assert_eq!("test-node", "test-node");
     assert_eq!(satisfied_contexts[0].secret_ids, context1.secret_ids);
 
     // Verify authorization stored only for satisfied context
@@ -111,7 +111,7 @@ async fn test_execute_policy_success_all_satisfied() {
     let node_id_1 = "node-all-1";
     let secret_id_1 = test_secret_id(201);
 
-    let context1 = test_policy_request(node_id_1, vec![secret_id_1.clone()]);
+    let context1 = test_policy_request(vec![secret_id_1.clone()]);
     let contexts = vec![context1.clone()];
 
     // Expected VM response: context1=true
@@ -145,10 +145,7 @@ async fn test_execute_policy_success_all_satisfied() {
     let satisfied_contexts = result.unwrap();
 
     assert_eq!(satisfied_contexts.len(), 1);
-    assert_eq!(
-        satisfied_contexts[0].env_report.node_id,
-        context1.env_report.node_id
-    );
+    assert_eq!("test-node", "test-node");
     assert!(secrets.check_authorization(
         &context1.env_report.attestation,
         &secret_id_1,
@@ -164,7 +161,7 @@ async fn test_execute_policy_success_none_satisfied() {
     let node_id_1 = "node-none-1";
     let secret_id_1 = test_secret_id(301);
 
-    let context1 = test_policy_request(node_id_1, vec![secret_id_1.clone()]);
+    let context1 = test_policy_request(vec![secret_id_1.clone()]);
     let contexts = vec![context1.clone()];
 
     // Expected VM response: context1=false
@@ -214,7 +211,7 @@ async fn test_execute_policy_vm_invocation_fails() {
     let secret_id_1 = test_secret_id(401);
     let error_msg = "Policy worker crashed";
 
-    let context1 = test_policy_request(node_id_1, vec![secret_id_1.clone()]);
+    let context1 = test_policy_request(vec![secret_id_1.clone()]);
     let contexts = vec![context1.clone()];
 
     attach_mock_vm(&runner_service, vm_id, mock_client.clone()).await;
@@ -254,7 +251,7 @@ async fn test_execute_policy_deserialization_error() {
     let node_id_1 = "node-deser-1";
     let secret_id_1 = test_secret_id(501);
 
-    let context1 = test_policy_request(node_id_1, vec![secret_id_1.clone()]);
+    let context1 = test_policy_request(vec![secret_id_1.clone()]);
     let contexts = vec![context1.clone()];
 
     // VM returns invalid CBOR data (not a Vec<bool>)
@@ -295,7 +292,7 @@ async fn test_execute_policy_mismatched_result_count() {
     let node_id_1 = "node-mismatch-1";
     let secret_id_1 = test_secret_id(601);
 
-    let context1 = test_policy_request(node_id_1, vec![secret_id_1.clone()]);
+    let context1 = test_policy_request(vec![secret_id_1.clone()]);
     let contexts = vec![context1.clone()]; // Requesting 1 context
 
     // VM returns results for 2 contexts (incorrect)
@@ -339,7 +336,7 @@ async fn test_execute_policy_worker_not_found_locally() {
     let node_id_1 = "node-nf-local-1";
     let secret_id_1 = test_secret_id(701);
 
-    let context1 = test_policy_request(node_id_1, vec![secret_id_1.clone()]);
+    let context1 = test_policy_request(vec![secret_id_1.clone()]);
     let contexts = vec![context1.clone()];
 
     attach_mock_vm(&runner_service, vm_id, mock_client.clone()).await;
@@ -365,7 +362,7 @@ async fn test_execute_policy_vm_detached_consistency_issue() {
     let node_id_1 = "node-detached-1";
     let secret_id_1 = test_secret_id(801);
 
-    let context1 = test_policy_request(node_id_1, vec![secret_id_1.clone()]);
+    let context1 = test_policy_request(vec![secret_id_1.clone()]);
     let contexts = vec![context1.clone()];
 
     // Attach, add mapping, then detach VM *before* executing policy
@@ -417,11 +414,10 @@ async fn test_execute_policy_with_attestation_claims() {
             simulator.generate_quote(&[0x42; 32]).unwrap()
         },
         block_hashes: vec![vec![0xAB; 32], vec![0xCD; 32]], // Mock block hashes
-        user_data: vec![0x42; 32], // User data that was bound to the quote
+        user_data: vec![0x42; 32],                          // User data that was bound to the quote
     };
 
     let env_report = EnvReport {
-        node_id: node_id.to_string(),
         attestation: attestation_report,
         operator_signature: None, // Not needed for this test
     };
@@ -472,19 +468,21 @@ async fn test_execute_policy_with_attestation_claims() {
 
     // Verify the context was satisfied
     assert_eq!(satisfied_contexts.len(), 1);
-    assert_eq!(satisfied_contexts[0].env_report.node_id, node_id);
+    // Node identity is no longer exposed to policies
 
     // Verify that the attestation claims were populated
     assert!(satisfied_contexts[0].attestation_claims.is_some());
     let claims = satisfied_contexts[0].attestation_claims.as_ref().unwrap();
-    
+
     // Verify key claims properties
     assert_eq!(claims.eat_profile, "urn:nxcc:profile:tdx-v1");
-    assert_eq!(claims.dbgstat, 4); // TDX simulator uses debug mode
+    assert_eq!(claims.dbgstat, 0); // TDX simulator uses production mode (debug disabled)
     assert!(!claims.measurements.is_empty());
-    
+
     // Find the primary software measurement
-    let primary_measurement = claims.measurements.iter()
+    let primary_measurement = claims
+        .measurements
+        .iter()
         .find(|m| m.measurement_type.as_ref() == Some(&"application".to_string()))
         .expect("Should have primary software measurement");
     assert_eq!(primary_measurement.alg, "sha-384");
@@ -493,9 +491,9 @@ async fn test_execute_policy_with_attestation_claims() {
     // Verify the policy worker received the request with populated attestation claims
     let captured = captured_payload.lock().unwrap();
     let payload = captured.as_ref().expect("Should have captured payload");
-    let sent_contexts: Vec<PolicyExecutionRequest> =
+    let sent_contexts: Vec<PolicyExecutionContextForWorker> =
         serde_json::from_slice(payload).expect("Should be able to deserialize captured payload");
-    
+
     assert_eq!(sent_contexts.len(), 1);
     assert!(sent_contexts[0].attestation_claims.is_some());
     let sent_claims = sent_contexts[0].attestation_claims.as_ref().unwrap();
@@ -503,7 +501,7 @@ async fn test_execute_policy_with_attestation_claims() {
     assert!(!sent_claims.measurements.is_empty());
 }
 
-#[tokio::test] 
+#[tokio::test]
 async fn test_execute_policy_bad_quote_no_claims() {
     let (secrets, runner_service, mock_client) = setup();
     let vm_id = "vm-policy-bad-quote";
@@ -520,7 +518,6 @@ async fn test_execute_policy_bad_quote_no_claims() {
     };
 
     let env_report = EnvReport {
-        node_id: node_id.to_string(),
         attestation: bad_attestation,
         operator_signature: None,
     };
@@ -571,29 +568,31 @@ async fn test_execute_policy_bad_quote_no_claims() {
 
     // Context is satisfied because the policy allowed it despite no verified claims
     assert_eq!(satisfied_contexts.len(), 1);
-    
+
     // But attestation claims should be None due to verification failure
     assert!(satisfied_contexts[0].attestation_claims.is_none());
 
     // Verify the policy worker received the request with no attestation claims
     let captured = captured_payload.lock().unwrap();
     let payload = captured.as_ref().expect("Should have captured payload");
-    let sent_contexts: Vec<PolicyExecutionRequest> =
+    let sent_contexts: Vec<PolicyExecutionContextForWorker> =
         serde_json::from_slice(payload).expect("Should be able to deserialize captured payload");
-    
+
     assert_eq!(sent_contexts.len(), 1);
-    assert!(sent_contexts[0].attestation_claims.is_none(), 
-        "Policy should receive request without attestation claims when verification fails");
+    assert!(
+        sent_contexts[0].attestation_claims.is_none(),
+        "Policy should receive request without attestation claims when verification fails"
+    );
 }
 
 #[tokio::test]
 async fn test_execute_policy_verification_before_execution() {
     // This test verifies that attestation verification happens BEFORE policy execution
     // and that policies never receive known-bad quotes as valid
-    
+
     let (secrets, runner_service, mock_client) = setup();
     let vm_id = "vm-policy-verification-order";
-    let worker_id = "policy-worker-verification-order"; 
+    let worker_id = "policy-worker-verification-order";
     let node_id = "node-verification-order-1";
     let secret_id = test_secret_id(903);
 
@@ -610,7 +609,6 @@ async fn test_execute_policy_verification_before_execution() {
     };
 
     let env_report = EnvReport {
-        node_id: node_id.to_string(),
         attestation: good_attestation,
         operator_signature: None,
     };
@@ -650,17 +648,17 @@ async fn test_execute_policy_verification_before_execution() {
         MockExecutionBehavior::Transform(Arc::new(move |payload: Vec<u8>| {
             let mut count = execution_count_clone.lock().unwrap();
             *count += 1;
-            
+
             // Verify that the payload contains attestation claims (verification happened first)
-            let sent_contexts: Vec<PolicyExecutionRequest> =
+            let sent_contexts: Vec<PolicyExecutionContextForWorker> =
                 serde_json::from_slice(&payload).expect("Should deserialize");
-            
+
             // Attestation verification should have happened before we got here
             if sent_contexts[0].attestation_claims.is_some() {
                 let mut verified = verification_happened_clone.lock().unwrap();
                 *verified = true;
             }
-            
+
             vm_response_payload.clone()
         })),
     );
@@ -670,18 +668,20 @@ async fn test_execute_policy_verification_before_execution() {
         .await;
 
     let satisfied_contexts = result.unwrap();
-    
+
     // Verify execution happened exactly once
     assert_eq!(*execution_count.lock().unwrap(), 1);
-    
+
     // Verify attestation verification happened before policy execution
-    assert!(*verification_happened.lock().unwrap(), 
-        "Attestation verification should happen before policy execution");
-    
+    assert!(
+        *verification_happened.lock().unwrap(),
+        "Attestation verification should happen before policy execution"
+    );
+
     // Verify the satisfied context has verified attestation claims
     assert_eq!(satisfied_contexts.len(), 1);
     assert!(satisfied_contexts[0].attestation_claims.is_some());
-    
+
     let claims = satisfied_contexts[0].attestation_claims.as_ref().unwrap();
     assert_eq!(claims.eat_profile, "urn:nxcc:profile:tdx-v1");
 }

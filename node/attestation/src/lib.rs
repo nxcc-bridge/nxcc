@@ -232,4 +232,3 @@ impl AttestationService {
         &mut self.freshness_service
     }
 }
-

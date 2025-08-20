@@ -162,18 +162,15 @@ impl RunnerService {
         consumer_info: &ConsumerInfo,
     ) -> Result<bool, AppError> {
         info!(
-            "Executing policy check for secret {:?} against node {} for consumer bundle_hash {:?}",
-            secret_id, env_report.node_id, consumer_info.bundle_hash
+            "Executing policy check for secret {:?} for consumer bundle_hash {:?}",
+            secret_id, consumer_info.bundle_hash
         );
         let FullPolicyPackage { manifest, bundle } = policy_package;
 
         // 1. Start Worker
         let worker_id = self.run_worker_in_default_vm(&manifest, &bundle).await?;
 
-        info!(
-            "Started policy worker {} for node {}",
-            worker_id, env_report.node_id
-        );
+        info!("Started policy worker {}", worker_id);
 
         // 2. Execute Policy
         let policy_request = PolicyExecutionRequest {

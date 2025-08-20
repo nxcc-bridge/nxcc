@@ -87,11 +87,8 @@ async fn test_generate_secrets_workflow() {
     let secrets_box_put =
         encrypt_secrets_box(&putter_kx, &enclave_pk, &secrets_to_send_put).unwrap();
     let binding_hash_put = secrets_box_put.calculate_binding_hash();
-    let putter_env_report = test_env_report_for_client(
-        putter_node_id,
-        putter_kx.public_key().as_bytes(),
-        binding_hash_put.to_vec(),
-    );
+    let putter_env_report =
+        test_env_report_for_client(putter_kx.public_key().as_bytes(), binding_hash_put.to_vec());
     execute_policy_with_env_report(
         &runner_grpc,
         &mock_vm_client,
@@ -120,7 +117,6 @@ async fn test_generate_secrets_workflow() {
     let getter_node_id = "node-getter-for-gen";
     let getter_kx = KeyExchangeKeyPair::generate();
     let getter_env_report = test_env_report_for_client(
-        getter_node_id,
         getter_kx.public_key().as_bytes(),
         vec![0u8; 32], // Arbitrary user_data for getter's report
     );

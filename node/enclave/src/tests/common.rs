@@ -41,7 +41,6 @@ pub fn test_consumer_info() -> ConsumerInfo {
 // Helper to create an EnvReport with a specific ephemeral public key and user_data.
 // This is crucial for ensuring consistency between policy execution context and actual operation context.
 pub fn test_env_report_for_client(
-    node_id: &str,
     client_kx_public_key: &[u8],
     user_data_for_attestation: Vec<u8>, // For PutSecrets, this is the binding hash. For GetSecrets, can be anything.
 ) -> EnvReport {
@@ -53,7 +52,6 @@ pub fn test_env_report_for_client(
             user_data: user_data_for_attestation,
         },
         operator_signature: None, // Consistent operator_signature
-        node_id: node_id.to_string(),
     }
 }
 
@@ -225,12 +223,12 @@ pub async fn execute_policy_with_env_report(
     if should_succeed {
         info!(
             "Test Setup: Policy execution succeeded for node '{}', secrets '{:?}'",
-            client_env_report.node_id, secret_ids
+            "test-node", secret_ids
         );
     } else {
         info!(
             "Test Setup: Policy execution failed for node '{}', secrets '{:?}'",
-            client_env_report.node_id, secret_ids
+            "test-node", secret_ids
         );
     }
 }
@@ -267,7 +265,6 @@ pub async fn authorize_self_generation(secrets_service: &Secrets, secret_id: &Se
     let self_env_report = EnvReport {
         attestation: self_attestation,
         operator_signature: None, // Not relevant for self-auth policy
-        node_id: "self-enclave".to_string(), // Identifier for logging/policy
     };
     let request = PolicyExecutionRequest {
         attestation_claims: None,

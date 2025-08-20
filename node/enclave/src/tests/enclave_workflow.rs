@@ -53,7 +53,6 @@ async fn test_enclave_workflow() {
 
     // Putter's EnvReport, which will be used for policy and for PutSecrets
     let putter_env_report = test_env_report_for_client(
-        putter_node_id,
         putter_kx.public_key().as_bytes(),
         binding_hash_for_put.to_vec(),
     );
@@ -130,7 +129,6 @@ async fn test_enclave_workflow() {
     let getter_kx = KeyExchangeKeyPair::generate();
     // For GetSecrets, user_data in getter's attestation can be arbitrary.
     let getter_env_report = test_env_report_for_client(
-        getter_node_id,
         getter_kx.public_key().as_bytes(),
         vec![0u8; 32], // Arbitrary user_data for getter's report
     );

@@ -42,11 +42,8 @@ async fn test_get_secrets_unauthorized_node() {
     let secrets_to_send = vec![(secret_id.clone(), secret_data.clone(), 0, 1)];
     let secrets_box_put = encrypt_secrets_box(&putter_kx, &enclave_pk, &secrets_to_send).unwrap();
     let binding_hash_put = secrets_box_put.calculate_binding_hash();
-    let putter_env_report = test_env_report_for_client(
-        putter_node_id,
-        putter_kx.public_key().as_bytes(),
-        binding_hash_put.to_vec(),
-    );
+    let putter_env_report =
+        test_env_report_for_client(putter_kx.public_key().as_bytes(), binding_hash_put.to_vec());
     execute_policy_with_env_report(
         &runner_grpc,
         &mock_vm_client,
@@ -72,7 +69,6 @@ async fn test_get_secrets_unauthorized_node() {
     // 2. Authorize the *authorized* node
     let authorized_getter_kx = KeyExchangeKeyPair::generate();
     let authorized_getter_env_report = test_env_report_for_client(
-        authorized_node_id,
         authorized_getter_kx.public_key().as_bytes(),
         vec![0u8; 32], // user_data for GetSecrets attestation can be arbitrary
     );
@@ -90,7 +86,6 @@ async fn test_get_secrets_unauthorized_node() {
     // 3. Attempt GetSecrets from the *unauthorized* node
     let unauthorized_getter_kx = KeyExchangeKeyPair::generate();
     let unauthorized_getter_env_report = test_env_report_for_client(
-        unauthorized_node_id,
         unauthorized_getter_kx.public_key().as_bytes(),
         vec![1u8; 32], // Different user_data to ensure different attestation if needed
     );
@@ -139,7 +134,7 @@ async fn test_get_secrets_invalid_requester_report() {
     let getter_node_id = "node-getter-badreport";
 
     let mut bad_env_report_proto: nxcc_interface::proto::interface::EnvReport =
-        test_env_report_for_client(getter_node_id, &[0; 32], vec![]).into();
+        test_env_report_for_client(&[0; 32], vec![]).into();
     // Tamper with the attestation part of the proto directly
     bad_env_report_proto
         .attestation

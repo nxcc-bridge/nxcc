@@ -133,7 +133,7 @@ impl UserDataBinding {
     }
 }
 
-/// Operator signature over attestation evidence  
+/// Operator signature over attestation evidence
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OperatorSignature {
     /// Ed25519 signature over the hash of the raw attestation evidence
@@ -146,7 +146,10 @@ pub struct OperatorSignature {
 
 impl OperatorSignature {
     /// Create a new operator signature over raw attestation evidence
-    pub fn new(signing_key: &[u8], raw_attestation: &RawAttestation) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub fn new(
+        signing_key: &[u8],
+        raw_attestation: &RawAttestation,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         if signing_key.len() != 32 {
             return Err("Ed25519 signing key must be 32 bytes".into());
         }
@@ -157,7 +160,8 @@ impl OperatorSignature {
         let evidence_hash = hasher.finalize();
 
         // Sign the hash using Ed25519
-        let signing_key_array: [u8; 32] = signing_key.try_into()
+        let signing_key_array: [u8; 32] = signing_key
+            .try_into()
             .map_err(|_| "Signing key must be exactly 32 bytes")?;
         let signing_key = ed25519_dalek::SigningKey::from_bytes(&signing_key_array);
         let public_key = signing_key.verifying_key();
@@ -171,7 +175,10 @@ impl OperatorSignature {
     }
 
     /// Verify the operator signature against raw attestation evidence
-    pub fn verify(&self, raw_attestation: &RawAttestation) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub fn verify(
+        &self,
+        raw_attestation: &RawAttestation,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if self.algorithm != "Ed25519" {
             return Err(format!("Unsupported signature algorithm: {}", self.algorithm).into());
         }
@@ -190,16 +197,23 @@ impl OperatorSignature {
         let evidence_hash = hasher.finalize();
 
         // Verify the signature
-        let public_key_array: [u8; 32] = self.public_key.as_slice().try_into()
+        let public_key_array: [u8; 32] = self
+            .public_key
+            .as_slice()
+            .try_into()
             .map_err(|_| "Public key must be exactly 32 bytes")?;
-        let signature_array: [u8; 64] = self.signature.as_slice().try_into()
+        let signature_array: [u8; 64] = self
+            .signature
+            .as_slice()
+            .try_into()
             .map_err(|_| "Signature must be exactly 64 bytes")?;
 
         let verifying_key = ed25519_dalek::VerifyingKey::from_bytes(&public_key_array)
             .map_err(|e| format!("Invalid Ed25519 public key: {}", e))?;
         let signature = ed25519_dalek::Signature::from_bytes(&signature_array);
 
-        verifying_key.verify(&evidence_hash, &signature)
+        verifying_key
+            .verify(&evidence_hash, &signature)
             .map_err(|e| format!("Signature verification failed: {}", e).into())
     }
 }
@@ -412,7 +426,7 @@ mod tests {
     fn test_operator_signature_creation_and_verification() {
         // Create a test signing key
         let signing_key = [0u8; 32]; // Simple test key
-        
+
         // Create a mock raw attestation
         let raw_attestation = RawAttestation {
             platform_type: "test".to_string(),
@@ -425,15 +439,17 @@ mod tests {
             .expect("Failed to create operator signature");
 
         // Verify the signature
-        assert!(operator_signature.verify(&raw_attestation).is_ok(), 
-                "Operator signature verification should succeed");
-        
+        assert!(
+            operator_signature.verify(&raw_attestation).is_ok(),
+            "Operator signature verification should succeed"
+        );
+
         // Verify algorithm is correct
         assert_eq!(operator_signature.algorithm, "Ed25519");
-        
+
         // Verify public key is 32 bytes
         assert_eq!(operator_signature.public_key.len(), 32);
-        
+
         // Verify signature is 64 bytes
         assert_eq!(operator_signature.signature.len(), 64);
     }
@@ -441,7 +457,7 @@ mod tests {
     #[test]
     fn test_operator_signature_verification_fails_with_wrong_evidence() {
         let signing_key = [0u8; 32];
-        
+
         let original_attestation = RawAttestation {
             platform_type: "test".to_string(),
             evidence: vec![1, 2, 3, 4, 5],
@@ -459,8 +475,10 @@ mod tests {
             .expect("Failed to create operator signature");
 
         // Verify should fail with modified evidence
-        assert!(operator_signature.verify(&modified_attestation).is_err(),
-                "Operator signature verification should fail with modified evidence");
+        assert!(
+            operator_signature.verify(&modified_attestation).is_err(),
+            "Operator signature verification should fail with modified evidence"
+        );
     }
 
     #[test]

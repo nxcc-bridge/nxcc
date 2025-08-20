@@ -285,7 +285,6 @@ pub struct OperatorSignature {
 pub struct EnvReport {
     pub attestation: AttestationReport,
     pub operator_signature: Option<OperatorSignature>,
-    pub node_id: String,
 }
 
 impl From<interface::OperatorSignature> for OperatorSignature {
@@ -313,7 +312,6 @@ impl TryFrom<interface::EnvReport> for EnvReport {
                 .map(AttestationReport::from)
                 .ok_or(ConversionError::MissingField("attestation".to_string()))?,
             operator_signature: p.operator_signature.map(OperatorSignature::from),
-            node_id: p.node_id,
         })
     }
 }
@@ -323,7 +321,6 @@ impl From<EnvReport> for interface::EnvReport {
         interface::EnvReport {
             attestation: Some(value.attestation.into()),
             operator_signature: value.operator_signature.map(|sig| sig.into()),
-            node_id: value.node_id,
         }
     }
 }
@@ -333,7 +330,6 @@ impl From<&EnvReport> for interface::EnvReport {
         interface::EnvReport {
             attestation: Some(value.attestation.clone().into()),
             operator_signature: value.operator_signature.clone().map(|sig| sig.into()),
-            node_id: value.node_id.clone(),
         }
     }
 }
@@ -419,6 +415,51 @@ impl From<&SecretsBox> for interface::SecretsBox {
     }
 }
 
+/// Sanitized attestation report for policy workers, excluding system userdata
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PolicyAttestationReport {
+    /// Platform measurement (MRENCLAVE/PCR0) - trusted
+    pub measurement: Vec<u8>,
+    /// User-provided data only (no ephemeral keys, no block hashes)
+    pub user_data: Vec<u8>,
+}
+
+/// Sanitized environment report for policy workers
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PolicyEnvReport {
+    pub attestation: PolicyAttestationReport,
+    pub operator_signature: Option<OperatorSignature>,
+}
+
+impl PolicyEnvReport {
+    /// Create a sanitized policy environment report from a full environment report
+    /// This removes system userdata (ephemeral keys, block hashes) while preserving
+    /// user data and platform measurements for policy decisions
+    pub fn from_env_report(env_report: &EnvReport, user_provided_data: Vec<u8>) -> Self {
+        Self {
+            attestation: PolicyAttestationReport {
+                measurement: env_report.attestation.measurement.clone(),
+                user_data: user_provided_data,
+            },
+            operator_signature: env_report.operator_signature.clone(),
+        }
+    }
+
+    /// Convert back to a full EnvReport for protobuf serialization
+    /// Note: This reconstructs minimal system fields for compatibility
+    pub fn to_env_report(&self) -> EnvReport {
+        EnvReport {
+            attestation: AttestationReport {
+                ephemeral_public_key: Vec::new(), // Empty - system data removed
+                measurement: self.attestation.measurement.clone(),
+                block_hashes: Vec::new(), // Empty - system data removed
+                user_data: self.attestation.user_data.clone(),
+            },
+            operator_signature: self.operator_signature.clone(),
+        }
+    }
+}
+
 /// A request for the policy runner that references multiple secrets.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PolicyExecutionRequest {
@@ -427,6 +468,32 @@ pub struct PolicyExecutionRequest {
     pub env_report: EnvReport, // The EnvReport of the entity being evaluated
     /// Standardized attestation claims extracted from the verified env_report
     /// These are available when the attestation system successfully verifies the report
+    pub attestation_claims: Option<StandardizedAttestationClaims>,
+}
+
+impl PolicyExecutionRequest {
+    /// Create a sanitized version for policy worker execution
+    /// This removes system userdata while preserving user data and claims
+    pub fn for_policy_worker(
+        &self,
+        user_provided_data: Vec<u8>,
+    ) -> PolicyExecutionContextForWorker {
+        PolicyExecutionContextForWorker {
+            secret_ids: self.secret_ids.clone(),
+            consumer: self.consumer.clone(),
+            env_report: PolicyEnvReport::from_env_report(&self.env_report, user_provided_data),
+            attestation_claims: self.attestation_claims.clone(),
+        }
+    }
+}
+
+/// Sanitized context sent to policy workers (excludes system userdata)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PolicyExecutionContextForWorker {
+    pub secret_ids: Vec<SecretId>,
+    pub consumer: ConsumerInfo,
+    pub env_report: PolicyEnvReport, // Sanitized EnvReport without system userdata
+    /// Standardized attestation claims extracted from the verified env_report
     pub attestation_claims: Option<StandardizedAttestationClaims>,
 }
 

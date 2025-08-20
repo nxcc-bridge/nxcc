@@ -44,7 +44,6 @@ message SecretRequest {
 message EnvReport {
   AttestationReport attestation = 1;
   OperatorSignature operator_signature = 2;  // Changed from bytes to structured OperatorSignature
-  string node_id = 3;
 }
 
 // For policy runner usage.

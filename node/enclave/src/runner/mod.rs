@@ -14,8 +14,9 @@ use nxcc_interface::{
     },
     types::{
         AttestationReport, ConsumerInfo, EventPayload, InterfaceConfirmationMethod, InterfaceJwk,
-        InterfaceMeasurement, PolicyExecutionReport, PolicyExecutionRequest,
-        StandardizedAttestationClaims, VmAddress, Web3Log, WorkerBundle, WorkerManifest,
+        InterfaceMeasurement, PolicyExecutionContextForWorker, PolicyExecutionReport,
+        PolicyExecutionRequest, StandardizedAttestationClaims, VmAddress, Web3Log, WorkerBundle,
+        WorkerManifest,
     },
 };
 #[cfg(test)]
@@ -609,25 +610,22 @@ impl RunnerService {
                 {
                     Ok(claims) => {
                         info!(
-                            "Successfully verified attestation for node {} with platform {}",
-                            context.env_report.node_id, claims.eat_profile
+                            "Successfully verified attestation with platform {}",
+                            claims.eat_profile
                         );
                         context.attestation_claims = Some(claims);
                     }
                     Err(e) => {
                         warn!(
-                            "Failed to verify attestation for node {}: {}. Policy will run \
-                             without verified claims.",
-                            context.env_report.node_id, e
+                            "Failed to verify attestation: {}. Policy will run without verified \
+                             claims.",
+                            e
                         );
                         // Continue without claims - policy can decide whether to allow this
                     }
                 }
             } else {
-                debug!(
-                    "Platform attestation manager not available for node {}",
-                    context.env_report.node_id
-                );
+                debug!("Platform attestation manager not available");
             }
         }
 
@@ -639,7 +637,21 @@ impl RunnerService {
                 .ok_or_else(|| RunnerError::WorkerNotFound(worker_id.clone()))?
         };
 
-        let payload = serde_json::to_vec(&contexts).unwrap();
+        // Create sanitized contexts for policy worker (exclude system userdata)
+        let sanitized_contexts: Vec<PolicyExecutionContextForWorker> = contexts
+            .iter()
+            .map(|context| {
+                // Extract user-provided data from the full attestation
+                // The user_data field in AttestationReport contains mixed system + user data
+                // For now, we pass the full user_data field but policy workers should
+                // receive only the user-provided portion. This can be refined based on
+                // how user data is structured in practice.
+                let user_provided_data = context.env_report.attestation.user_data.clone();
+                context.for_policy_worker(user_provided_data)
+            })
+            .collect();
+
+        let payload = serde_json::to_vec(&sanitized_contexts).unwrap();
 
         let mut vms_guard = self.vms.write().await; // Write lock for mutable client
         let client = vms_guard
@@ -683,11 +695,7 @@ impl RunnerService {
         for (i, context) in contexts.into_iter().enumerate() {
             if results[i] {
                 // Policy satisfied for this context
-                debug!(
-                    "Policy satisfied for context {} (Node ID: {})",
-                    i,
-                    context.env_report.node_id // node_id used for logging only
-                );
+                debug!("Policy satisfied for context {}", i);
                 let report = PolicyExecutionReport {
                     request: context.clone(),
                     decision: true,
@@ -697,11 +705,7 @@ impl RunnerService {
                 self.secrets.store_authorization(report);
                 satisfied_contexts.push(context);
             } else {
-                debug!(
-                    "Policy denied for context {} (Node ID: {})",
-                    i,
-                    context.env_report.node_id // node_id used for logging only
-                );
+                debug!("Policy denied for context {}", i);
             }
         }
 

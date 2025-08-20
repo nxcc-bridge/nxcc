@@ -39,7 +39,6 @@ async fn test_put_secrets_mismatched_binding_hash() {
 
     // EnvReport with the INCORRECT binding hash (this is what the putter will present)
     let putter_env_report_bad_hash = test_env_report_for_client(
-        putter_node_id,
         putter_kx.public_key().as_bytes(),
         incorrect_hash_vec.clone(), // Use the tampered hash
     );
@@ -95,7 +94,6 @@ async fn test_put_secrets_invalid_secrets_box_structure() {
     let binding_hash_bad_box = bad_secrets_box.calculate_binding_hash();
 
     let putter_env_report_for_bad_box = test_env_report_for_client(
-        putter_node_id,
         putter_kx.public_key().as_bytes(),
         binding_hash_bad_box.to_vec(),
     );
@@ -151,7 +149,6 @@ async fn test_put_secrets_decryption_failure() {
     let binding_hash_wrong_key_box = secrets_box_wrong_key.calculate_binding_hash();
 
     let putter_env_report_for_wrong_key_box = test_env_report_for_client(
-        putter_node_id,
         putter_kx.public_key().as_bytes(),
         binding_hash_wrong_key_box.to_vec(),
     );

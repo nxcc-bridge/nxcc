@@ -26,7 +26,7 @@ pub fn test_secret_id(id: u64) -> SecretId {
 }
 
 // Helper function to create a default PolicyExecutionRequest for tests
-pub fn test_policy_request(node_id: &str, secret_ids: Vec<SecretId>) -> PolicyExecutionRequest {
+pub fn test_policy_request(secret_ids: Vec<SecretId>) -> PolicyExecutionRequest {
     PolicyExecutionRequest {
         secret_ids,
         attestation_claims: None,
@@ -42,14 +42,30 @@ pub fn test_policy_request(node_id: &str, secret_ids: Vec<SecretId>) -> PolicyEx
                 user_data: vec![8, 9],
             },
             operator_signature: None,
-            node_id: node_id.to_string(),
         },
     }
 }
 
 // Helper setup function
 pub fn setup() -> (Arc<Secrets>, RunnerService, MockVmServiceClient) {
-    let secrets = Secrets::new();
+    // Generate ephemeral keypair for the attestation manager
+    let ephemeral_kx_keypair = std::sync::Arc::new(crate::crypto::KeyExchangeKeyPair::generate());
+
+    // Initialize the platform attestation manager with a mock gateway provider
+    let mock_gateway = std::sync::Arc::new(crate::attestation::MockGatewayProvider);
+    if let Err(e) = crate::attestation::initialize_platform_attestation_manager(
+        ephemeral_kx_keypair.clone(),
+        mock_gateway,
+    ) {
+        // In tests, we can ignore initialization errors since the manager might already be initialized
+        // from a previous test run
+        eprintln!(
+            "Platform attestation manager already initialized or failed: {}",
+            e
+        );
+    }
+
+    let secrets = Secrets::new_with_keypair(ephemeral_kx_keypair);
     let runner_service = RunnerService::new(secrets.clone());
     let mock_client = MockVmServiceClient::new();
     (secrets, runner_service, mock_client)
