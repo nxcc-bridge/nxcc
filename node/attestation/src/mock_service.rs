@@ -298,7 +298,7 @@ impl AttestationProvider for MockTdxProvider {
 
         // Convert to standardized claims
         match self.extract_standardized_claims(&tdx_claims, &bundle.user_data_binding) {
-            Ok(claims) => Ok(VerificationResult::Verified(claims)),
+            Ok(claims) => Ok(VerificationResult::Verified(Box::new(claims))),
             Err(e) => Ok(VerificationResult::Failed(e.to_string())),
         }
     }
@@ -351,7 +351,7 @@ impl MockAttestationService {
         bundle: &AttestationBundle,
     ) -> Result<StandardizedClaims> {
         match self.provider.verify_attestation(bundle).await? {
-            VerificationResult::Verified(claims) => Ok(claims),
+            VerificationResult::Verified(claims) => Ok(*claims),
             VerificationResult::Unsupported => Err(anyhow!(
                 "Mock provider does not support this attestation type"
             )),
@@ -450,7 +450,7 @@ mod tests {
             "expected_measurements": {
                 "mrtd": hex::encode(
                     claims.measurements.iter()
-                        .find(|m| m.measurement_type.as_ref().map_or(false, |t| t.contains("application") || t.contains("mrtd")))
+                        .find(|m| m.measurement_type.as_ref().is_some_and(|t| t.contains("application") || t.contains("mrtd")))
                         .map(|m| &m.val)
                         .unwrap_or(&vec![0u8; 48])
                 )

@@ -330,7 +330,7 @@ impl AttestationProvider for TdxQvlProvider {
         {
             Ok(quote_data) => {
                 let claims = self.extract_standardized_claims(quote_data, bundle)?;
-                Ok(VerificationResult::Verified(claims))
+                Ok(VerificationResult::Verified(Box::new(claims)))
             }
             Err(e)
                 if e.to_string().contains("not available")
@@ -348,7 +348,7 @@ impl AttestationProvider for TdxQvlProvider {
                 {
                     Ok(quote_data) => {
                         let claims = self.extract_standardized_claims(quote_data, bundle)?;
-                        Ok(VerificationResult::Verified(claims))
+                        Ok(VerificationResult::Verified(Box::new(claims)))
                     }
                     Err(sim_err) => {
                         tracing::warn!(

@@ -56,6 +56,12 @@ pub struct TdxHardware {
     dev_file: Option<File>,
 }
 
+impl Default for TdxHardware {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TdxHardware {
     pub fn new() -> Self {
         Self { dev_file: None }
@@ -75,7 +81,7 @@ impl TdxHardware {
         for p in TDX_DEVICE_PATHS {
             if let Ok(f) = File::options().read(true).write(true).open(p) {
                 // ensure it is a char device
-                if f.metadata().ok().map_or(false, |m| {
+                if f.metadata().ok().is_some_and(|m| {
                     use std::os::unix::fs::FileTypeExt;
                     m.file_type().is_char_device()
                 }) {
@@ -256,7 +262,7 @@ impl TdxInterface for TdxHardware {
                     q.len()
                 );
                 Self::simple_quote_sanity(&q)?;
-                return Ok(q);
+                Ok(q)
             }
             Err(e) => {
                 tracing::warn!("TSM quote generation failed: {}", e);
@@ -302,6 +308,12 @@ impl Default for TdxSimulatorConfig {
             security_version: 0,
             quote_version: 4,
         }
+    }
+}
+
+impl Default for TdxSimulator {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -433,6 +445,6 @@ mod tests {
     fn hardware_detection_is_boolean() {
         let hw = TdxHardware::new();
         let _ = hw.is_hardware_available(); // should not panic
-        assert!(true);
+                                            // Test that TdxSimulator can be created
     }
 }

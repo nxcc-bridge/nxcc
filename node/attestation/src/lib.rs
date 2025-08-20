@@ -46,7 +46,7 @@ pub trait AttestationProvider: Send + Sync {
 /// Multi-provider attestation service with fallback chains
 pub struct AttestationService {
     providers: HashMap<String, Vec<Box<dyn AttestationProvider>>>,
-    gateway_provider: Arc<dyn GatewayProvider>,
+    _gateway_provider: Arc<dyn GatewayProvider>,
     freshness_service: FreshnessService,
 }
 
@@ -55,7 +55,7 @@ impl AttestationService {
         let freshness_service = FreshnessService::new(gateway_provider.clone());
         Self {
             providers: HashMap::new(),
-            gateway_provider,
+            _gateway_provider: gateway_provider,
             freshness_service,
         }
     }
@@ -149,7 +149,7 @@ impl AttestationService {
     pub async fn verify_attestation(
         &self,
         bundle: &AttestationBundle,
-    ) -> Result<StandardizedClaims> {
+    ) -> Result<Box<StandardizedClaims>> {
         let platform_type = &bundle.raw_attestation.platform_type;
 
         let providers = self

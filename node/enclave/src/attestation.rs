@@ -56,7 +56,7 @@ impl PlatformAttestationManager {
     pub async fn verify_and_extract_claims(
         &self,
         bundle: &AttestationBundle,
-    ) -> Result<StandardizedClaims> {
+    ) -> Result<Box<StandardizedClaims>> {
         self.service.verify_attestation(bundle).await
     }
 

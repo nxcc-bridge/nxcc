@@ -411,7 +411,7 @@ pub struct StandardizedClaims {
 #[derive(Debug)]
 pub enum VerificationResult {
     /// Verification successful with extracted claims
-    Verified(StandardizedClaims),
+    Verified(Box<StandardizedClaims>),
     /// Provider cannot handle this attestation type (try next provider)
     Unsupported,
     /// Verification failed definitively (attestation is invalid)

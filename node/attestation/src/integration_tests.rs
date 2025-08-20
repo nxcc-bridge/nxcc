@@ -511,7 +511,7 @@ mod tests {
         // MRTD should contain our custom value (allowing for some simulator structure differences)
         assert!(!claims.mrtd.iter().all(|&b| b == 0));
         // Check that at least some part of the MRTD contains our 0xFF pattern
-        assert!(claims.mrtd.iter().any(|&b| b == 0xFF));
+        assert!(claims.mrtd.contains(&0xFF));
     }
 
     #[tokio::test]
@@ -714,7 +714,7 @@ mod tests {
             Ok(VerificationResult::Verified(claims)) => {
                 // Verify basic EAT token structure
                 assert!(
-                    claims.measurements.len() > 0,
+                    !claims.measurements.is_empty(),
                     "Should have TDX measurements"
                 );
                 assert!(
@@ -725,7 +725,7 @@ mod tests {
 
                 // The actual user data should be in eat_nonce for TDX
                 let user_data = claims.eat_nonce.unwrap();
-                assert!(user_data.len() > 0, "User data should be present");
+                assert!(!user_data.is_empty(), "User data should be present");
             }
             Ok(VerificationResult::Failed(reason)) => {
                 eprintln!("dcap-qvl verification failed: {}", reason);

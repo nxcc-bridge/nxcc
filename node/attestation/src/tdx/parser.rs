@@ -324,7 +324,7 @@ impl TdxParser {
         measurements.insert("mr_seam".to_string(), td_report.mr_seam.to_vec());
 
         // Extract security version from TCB SVN
-        let security_version =
+        let _security_version =
             u64::from_le_bytes(td_report.tcb_svn[0..8].try_into().unwrap_or([0; 8]));
 
         // Determine hardware security level from debug bit
@@ -664,7 +664,7 @@ mod tests {
         let rtmr0_found = claims.measurements.iter().any(|m| {
             m.measurement_type
                 .as_ref()
-                .map_or(false, |t| t.contains("rtmr0"))
+                .is_some_and(|t| t.contains("rtmr0"))
         });
         assert!(rtmr0_found, "Should contain rtmr0 measurement");
 
@@ -672,7 +672,7 @@ mod tests {
         let mrtd_measurement = claims.measurements.iter().find(|m| {
             m.measurement_type
                 .as_ref()
-                .map_or(false, |t| t.contains("application") || t.contains("mrtd"))
+                .is_some_and(|t| t.contains("application") || t.contains("mrtd"))
         });
         if let Some(mrtd) = mrtd_measurement {
             assert!(!mrtd.val.iter().all(|&b| b == 0));

@@ -132,12 +132,12 @@ async fn main() -> eyre::Result<()> {
         for entry in fs::read_dir(OUTPUT_DIR)? {
             let entry = entry?;
             let path = entry.path();
-            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("json") {
-                if let Ok(content) = fs::read_to_string(&path) {
-                    if let Ok(existing_chain) = serde_json::from_str::<GeneratedChain>(&content) {
-                        oldest_last_updated = oldest_last_updated.min(existing_chain.last_updated);
-                    }
-                }
+            if path.is_file()
+                && path.extension().and_then(|s| s.to_str()) == Some("json")
+                && let Ok(content) = fs::read_to_string(&path)
+                && let Ok(existing_chain) = serde_json::from_str::<GeneratedChain>(&content)
+            {
+                oldest_last_updated = oldest_last_updated.min(existing_chain.last_updated);
             }
         }
     }
