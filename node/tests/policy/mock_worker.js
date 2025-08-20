@@ -9,28 +9,74 @@ export default {
     }
 
     try {
-      // The body is Vec<PolicyExecutionRequest> directly, not wrapped in VmEventInvocation
       const contextsArray = await request.json(); 
-      // console.log("Parsed JSON object (contextsArray):", contextsArray);
+      console.log("🔐 Operator Signature Policy executing with", contextsArray.length, "contexts");
+      
+      const results = [];
+      
+      for (let i = 0; i < contextsArray.length; i++) {
+        const context = contextsArray[i];
+        const nodeId = context.env_report.node_id;
+        
+        console.log(`\n🔍 Evaluating context ${i} for node: ${nodeId}`);
+        
+        let approved = true;
+        const denyReasons = [];
 
-      // For each context in the input array, decide if it's approved.
-      // This mock policy approves all contexts.
-      const resultsArray = contextsArray.map(context => true); 
+        // SECURITY CHECK 1: Operator signature validation
+        const operatorSignature = context.env_report.operator_signature;
+        
+        if (!operatorSignature) {
+          approved = false;
+          denyReasons.push("No operator signature provided");
+          console.log(`   ❌ No operator signature for ${nodeId}`);
+        } else {
+          // Check if the operator signature has the expected structure
+          if (!operatorSignature.cose_sign1 || operatorSignature.cose_sign1.length === 0) {
+            approved = false;
+            denyReasons.push("Invalid operator signature structure");
+            console.log(`   ❌ Invalid operator signature structure for ${nodeId}`);
+          } else {
+            console.log(`   ✅ Valid operator signature for ${nodeId} (${operatorSignature.cose_sign1.length} bytes)`);
+          }
+        }
 
-      return new Response(JSON.stringify(resultsArray), {
+        // SECURITY CHECK 2: Self-authorization (always allowed with valid signature)
+        if (nodeId === '@self') {
+          console.log(`   ✅ Self-authorization: ${nodeId} - allowed to access own secrets`);
+        } else {
+          console.log(`   ✅ Cross-node access: ${nodeId} with valid operator signature`);
+        }
+
+        // Final decision
+        if (approved) {
+          console.log(`✅ APPROVED: ${nodeId} - Valid operator signature`);
+          results.push(true);
+        } else {
+          console.log(`❌ DENIED: ${nodeId} - Security validation failed`);
+          denyReasons.forEach(reason => console.log(`   - ${reason}`));
+          results.push(false);
+        }
+      }
+      
+      console.log("\n📊 Policy Decision Summary:");
+      console.log(`   Approved: ${results.filter(r => r).length}/${results.length} contexts`);
+      console.log("   Results:", results);
+
+      return new Response(JSON.stringify(results), {
         status: 200,
         headers: { "content-type": "application/json; charset=utf-8" },
       });
     } catch (err) {
-      console.error("Policy worker error:", err); // Log error with context
+      console.error("Policy worker error:", err);
       return new Response(
         JSON.stringify({
           error: "Policy worker execution failed",
           message: err.message,
-          stack: err.stack, // Include stack for better debugging
+          stack: err.stack,
         }),
         {
-          status: 500, // Internal server error from policy worker
+          status: 500,
           headers: { "content-type": "application/json; charset=utf-8" },
         },
       );

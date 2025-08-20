@@ -45,6 +45,7 @@ cleanup_node() {
 #   $6 - Enclave binary path
 #   $7 - Workerd VM binary path
 #   $8 - HTTP listen address (e.g., "127.0.0.1:6922")
+#   $9 - Operator signing key path (optional)
 setup_node() {
 	NODE_NAME="$1"
 	TEST_DIR="$2"
@@ -54,6 +55,7 @@ setup_node() {
 	ENCLAVE_BIN="$6"
 	WORKERD_VM_BIN="$7"
 	HTTP_LISTEN_ADDR="$8"
+	OPERATOR_KEY_PATH="$9"
 
 	# Create node directory
 	NODE_DIR="$TEST_DIR/$NODE_NAME"
@@ -102,6 +104,12 @@ setup_node() {
 	# Add bootstrap peers if provided
 	if [ -n "$BOOTSTRAP_PEERS" ]; then
 		DAEMON_ARGS="$DAEMON_ARGS --bootstrap-peers '$BOOTSTRAP_PEERS'"
+	fi
+
+	# Add operator signing key if provided
+	if [ -n "$OPERATOR_KEY_PATH" ]; then
+		DAEMON_ARGS="$DAEMON_ARGS --operator-signing-key-path '$OPERATOR_KEY_PATH'"
+		echo "  Using operator signing key: $OPERATOR_KEY_PATH"
 	fi
 
 	# Use eval to properly handle quoted arguments
