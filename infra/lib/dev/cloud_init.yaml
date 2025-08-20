@@ -1,0 +1,43 @@
+#cloud-config
+# NXCC TDX Development VM - Declarative Configuration Only
+
+packages:
+  - curl
+  - wget
+  - git
+  - vim
+  - nano
+  - ca-certificates
+  - gnupg
+  - lsb-release
+  - build-essential
+  - pkg-config
+  - jq
+  - unzip
+  - apt-transport-https
+  - python3
+  - python3-dev
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-compose-plugin
+
+apt:
+  sources:
+    docker.list:
+      source: "deb [arch=amd64] https://download.docker.com/linux/ubuntu noble stable"
+      keyid: 9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+
+groups:
+  - docker
+
+users:
+  - default
+  - name: ubuntu
+    groups: [sudo, docker]
+    shell: /bin/bash
+    sudo: ['ALL=(ALL) NOPASSWD:ALL']
+
+runcmd:
+  - systemctl enable docker
+  - systemctl start docker

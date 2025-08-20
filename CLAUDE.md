@@ -89,6 +89,9 @@ cargo fmt
 # Check Rust formatting
 cargo fmt -- --check
 
+# Shell script formatting (POSIX sh - not bash)
+git ls-files '*.sh' | xargs shfmt -w
+
 # Documentation linting (Prettier)
 cd docs && pnpm lint
 ```
@@ -98,6 +101,7 @@ cd docs && pnpm lint
 * Always run tests, linters, and formatters after completing a set of changes.
 * Always add unit tests (and integration tests, if necessary) when adding new functionality.
 * When fixing a bug, always add regression test(s).
+* All shell scripts use POSIX sh syntax (not bash) for maximum compatibility.
 
 ## Architecture Overview
 

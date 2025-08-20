@@ -35,12 +35,16 @@ readonly TDX_VM_NAME="${TDX_VM_NAME:-nxcc-tdx-dev}"
 export TDX_VM_NAME
 readonly TDX_VM_ZONE="${TDX_VM_ZONE:-us-central1-a}"
 export TDX_VM_ZONE
-readonly TDX_VM_MACHINE_TYPE="${TDX_VM_MACHINE_TYPE:-c3d-highcpu-4}"
+readonly TDX_VM_MACHINE_TYPE="${TDX_VM_MACHINE_TYPE:-c3-standard-4}"
 export TDX_VM_MACHINE_TYPE
-readonly TDX_VM_IMAGE_FAMILY="${TDX_VM_IMAGE_FAMILY:-ubuntu-2204-lts}"
+readonly TDX_VM_IMAGE_FAMILY="${TDX_VM_IMAGE_FAMILY:-ubuntu-2404-lts-amd64}"
 export TDX_VM_IMAGE_FAMILY
 readonly TDX_VM_IMAGE_PROJECT="${TDX_VM_IMAGE_PROJECT:-ubuntu-os-cloud}"
 export TDX_VM_IMAGE_PROJECT
+readonly NXCC_DEV_IMAGE="${NXCC_DEV_IMAGE:-ghcr.io/nxcc-bridge/dev:latest}"
+export NXCC_DEV_IMAGE
+readonly TDX_VM_PREEMPTIBLE="${TDX_VM_PREEMPTIBLE:-true}"
+export TDX_VM_PREEMPTIBLE
 
 # --- GCP Locations ---
 # Override with environment variables if needed.
@@ -62,15 +66,18 @@ RESOLVED_PROJECT_ID=""
 info() { echo -e "${C_BLUE}INFO:${C_RESET} $1"; }
 success() { echo -e "${C_GREEN}SUCCESS:${C_RESET} $1"; }
 warn() { echo -e "${C_YELLOW}WARN:${C_RESET} $1"; }
-error() { echo -e "${C_RED}ERROR:${C_RESET} $1" >&2; exit 1; }
+error() {
+	echo -e "${C_RED}ERROR:${C_RESET} $1" >&2
+	exit 1
+}
 
 # --- Prerequisite Checks ---
 check_deps() {
-  for cmd in "$@"; do
-    if ! command -v "$cmd" &>/dev/null; then
-      error "'$cmd' CLI is not installed. Please install it to continue."
-    fi
-  done
+	for cmd in "$@"; do
+		if ! command -v "$cmd" &>/dev/null; then
+			error "'$cmd' CLI is not installed. Please install it to continue."
+		fi
+	done
 }
 
 # --- Identity Resolution ---
@@ -80,80 +87,80 @@ check_deps() {
 # Populates the global RESOLVED_GCP_ACCOUNT and RESOLVED_PROJECT_ID variables.
 ################################################################################
 resolve_gcp_identity() {
-  # If already resolved, do nothing.
-  if [[ -n "${RESOLVED_GCP_ACCOUNT}" && -n "${RESOLVED_PROJECT_ID}" ]]; then
-    return 0
-  fi
+	# If already resolved, do nothing.
+	if [[ -n "${RESOLVED_GCP_ACCOUNT}" && -n "${RESOLVED_PROJECT_ID}" ]]; then
+		return 0
+	fi
 
-  # If running in a CI environment, assume auth is handled externally (e.g., WIF).
-  if [[ -n "${CI}" ]]; then
-    info "CI environment detected. Assuming pre-configured GCP identity."
-    RESOLVED_PROJECT_ID=$(gcloud config get-value project 2>/dev/null)
-    if [[ -z "${RESOLVED_PROJECT_ID}" ]]; then
-      error "GCP Project ID not found in gcloud config. Ensure the 'google-github-actions/auth' step runs first."
-    fi
-    RESOLVED_GCP_ACCOUNT="[Service Account via WIF]"
-    success "Using project from CI environment: ${C_YELLOW}${RESOLVED_PROJECT_ID}${C_RESET}"
-    return
-  fi
+	# If running in a CI environment, assume auth is handled externally (e.g., WIF).
+	if [[ -n "${CI}" ]]; then
+		info "CI environment detected. Assuming pre-configured GCP identity."
+		RESOLVED_PROJECT_ID=$(gcloud config get-value project 2>/dev/null)
+		if [[ -z "${RESOLVED_PROJECT_ID}" ]]; then
+			error "GCP Project ID not found in gcloud config. Ensure the 'google-github-actions/auth' step runs first."
+		fi
+		RESOLVED_GCP_ACCOUNT="[Service Account via WIF]"
+		success "Using project from CI environment: ${C_YELLOW}${RESOLVED_PROJECT_ID}${C_RESET}"
+		return
+	fi
 
-  info "Resolving GCP identity..."
+	info "Resolving GCP identity..."
 
-  # --- Step 1: Resolve GCP Account ---
-  # Check if account is provided via environment variable
-  if [[ -n "${GCP_ACCOUNT:-}" ]]; then
-    info "Using account from GCP_ACCOUNT environment variable: ${GCP_ACCOUNT}"
-    # Verify the account is authenticated and set it as active
-    if gcloud auth list --format="value(account)" | grep -q "^${GCP_ACCOUNT}$"; then
-      gcloud config set account "${GCP_ACCOUNT}"
-      info "Set ${GCP_ACCOUNT} as active account"
-      RESOLVED_GCP_ACCOUNT="${GCP_ACCOUNT}"
-    else
-      error "Account ${GCP_ACCOUNT} is not authenticated. Please run 'gcloud auth login ${GCP_ACCOUNT}' first."
-    fi
-  else
-    local accounts=()
-    while IFS= read -r line; do
-        accounts+=("$line")
-    done < <(gcloud auth list --filter=status:ACTIVE --format="value(account)")
+	# --- Step 1: Resolve GCP Account ---
+	# Check if account is provided via environment variable
+	if [[ -n "${GCP_ACCOUNT:-}" ]]; then
+		info "Using account from GCP_ACCOUNT environment variable: ${GCP_ACCOUNT}"
+		# Verify the account is authenticated and set it as active
+		if gcloud auth list --format="value(account)" | grep -q "^${GCP_ACCOUNT}$"; then
+			gcloud config set account "${GCP_ACCOUNT}"
+			info "Set ${GCP_ACCOUNT} as active account"
+			RESOLVED_GCP_ACCOUNT="${GCP_ACCOUNT}"
+		else
+			error "Account ${GCP_ACCOUNT} is not authenticated. Please run 'gcloud auth login ${GCP_ACCOUNT}' first."
+		fi
+	else
+		local accounts=()
+		while IFS= read -r line; do
+			accounts+=("$line")
+		done < <(gcloud auth list --filter=status:ACTIVE --format="value(account)")
 
-    if [[ ${#accounts[@]} -eq 0 ]]; then
-      info "No active GCP account found. Opening browser for authentication..."
-      gcloud auth login
-      gcloud auth application-default login
-      RESOLVED_GCP_ACCOUNT=$(gcloud config get-value account)
-      success "Logged in successfully as: ${RESOLVED_GCP_ACCOUNT}"
-    elif [[ ${#accounts[@]} -eq 1 ]]; then
-      RESOLVED_GCP_ACCOUNT="${accounts[0]}"
-      info "Automatically selected the only available GCP account: ${RESOLVED_GCP_ACCOUNT}"
-    else
-      warn "Multiple GCP accounts found. Please choose which one to use:"
-      select account in "${accounts[@]}"; do
-        if [[ -n "$account" ]]; then
-          RESOLVED_GCP_ACCOUNT="$account"
-          break
-        else
-          echo "Invalid selection. Please try again."
-        fi
-      done
-    fi
-  fi
-  success "Using account: ${C_YELLOW}${RESOLVED_GCP_ACCOUNT}${C_RESET}"
+		if [[ ${#accounts[@]} -eq 0 ]]; then
+			info "No active GCP account found. Opening browser for authentication..."
+			gcloud auth login
+			gcloud auth application-default login
+			RESOLVED_GCP_ACCOUNT=$(gcloud config get-value account)
+			success "Logged in successfully as: ${RESOLVED_GCP_ACCOUNT}"
+		elif [[ ${#accounts[@]} -eq 1 ]]; then
+			RESOLVED_GCP_ACCOUNT="${accounts[0]}"
+			info "Automatically selected the only available GCP account: ${RESOLVED_GCP_ACCOUNT}"
+		else
+			warn "Multiple GCP accounts found. Please choose which one to use:"
+			select account in "${accounts[@]}"; do
+				if [[ -n "$account" ]]; then
+					RESOLVED_GCP_ACCOUNT="$account"
+					break
+				else
+					echo "Invalid selection. Please try again."
+				fi
+			done
+		fi
+	fi
+	success "Using account: ${C_YELLOW}${RESOLVED_GCP_ACCOUNT}${C_RESET}"
 
-  # --- Step 2: Resolve Project ID ---
-  if [[ -n "${GCP_PROJECT_ID}" ]]; then
-    RESOLVED_PROJECT_ID="${GCP_PROJECT_ID}"
-    info "Using project ID from GCP_PROJECT_ID environment variable: ${RESOLVED_PROJECT_ID}"
-  else
-    RESOLVED_PROJECT_ID=$(gcloud config get-value project --account="${RESOLVED_GCP_ACCOUNT}" 2>/dev/null)
-    if [[ -n "${RESOLVED_PROJECT_ID}" ]]; then
-      info "Inferred project ID from gcloud config for account ${RESOLVED_GCP_ACCOUNT}: ${RESOLVED_PROJECT_ID}"
-    else
-      error "Could not determine GCP Project ID.
+	# --- Step 2: Resolve Project ID ---
+	if [[ -n "${GCP_PROJECT_ID}" ]]; then
+		RESOLVED_PROJECT_ID="${GCP_PROJECT_ID}"
+		info "Using project ID from GCP_PROJECT_ID environment variable: ${RESOLVED_PROJECT_ID}"
+	else
+		RESOLVED_PROJECT_ID=$(gcloud config get-value project --account="${RESOLVED_GCP_ACCOUNT}" 2>/dev/null)
+		if [[ -n "${RESOLVED_PROJECT_ID}" ]]; then
+			info "Inferred project ID from gcloud config for account ${RESOLVED_GCP_ACCOUNT}: ${RESOLVED_PROJECT_ID}"
+		else
+			error "Could not determine GCP Project ID.
 Please set it by one of the following methods:
 1. Export the environment variable: export GCP_PROJECT_ID=\"your-project-id\"
 2. Set it in your gcloud config: gcloud config set project \"your-project-id\" --account=\"${RESOLVED_GCP_ACCOUNT}\""
-    fi
-  fi
-  success "Using project: ${C_YELLOW}${RESOLVED_PROJECT_ID}${C_RESET}"
+		fi
+	fi
+	success "Using project: ${C_YELLOW}${RESOLVED_PROJECT_ID}${C_RESET}"
 }
