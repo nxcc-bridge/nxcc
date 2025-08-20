@@ -238,13 +238,19 @@ dev_create_vm() {
 		fi
 	done
 
-	# Upload container setup script if it exists
+	# Upload container setup script if it exists and is not already present on VM
 	if [ -f "$container_script_path" ]; then
-		if ! gcloud compute scp --zone="${TDX_VM_ZONE}" --project="${RESOLVED_PROJECT_ID}" --account="${RESOLVED_GCP_ACCOUNT}" "$container_script_path" ubuntu@"${TDX_VM_NAME}:$temp_container_script"; then
-			error "Failed to upload container setup script"
-			return 1
+		# Check if container setup script already exists on VM
+		if gcloud compute ssh ubuntu@"${TDX_VM_NAME}" --zone="${TDX_VM_ZONE}" --project="${RESOLVED_PROJECT_ID}" --account="${RESOLVED_GCP_ACCOUNT}" --command="test -f $temp_container_script" 2>/dev/null; then
+			info "Container setup script already exists on VM, skipping upload"
+		else
+			if ! gcloud compute scp --zone="${TDX_VM_ZONE}" --project="${RESOLVED_PROJECT_ID}" --account="${RESOLVED_GCP_ACCOUNT}" "$container_script_path" ubuntu@"${TDX_VM_NAME}:$temp_container_script"; then
+				error "Failed to upload container setup script"
+				return 1
+			fi
+			info "Container setup script uploaded successfully"
 		fi
-		info "All setup scripts and supporting files uploaded successfully"
+		info "All setup scripts and supporting files processed successfully"
 	else
 		info "Setup scripts and supporting files uploaded (container script will use fallback method)"
 	fi
@@ -336,21 +342,26 @@ dev_start_container() {
 	# Upload and execute the setup script
 	local temp_script
 	temp_script="/tmp/setup_container_$(date +%s).sh"
-	info "Uploading container setup script..."
-	if gcloud compute scp --zone="${TDX_VM_ZONE}" --project="${RESOLVED_PROJECT_ID}" --account="${RESOLVED_GCP_ACCOUNT}" "$setup_script_path" ubuntu@"${TDX_VM_NAME}:$temp_script"; then
-		info "Executing container setup script..."
 
-		# Set environment variable and execute the setup script
-		local env_vars="NXCC_DEV_IMAGE=${NXCC_DEV_IMAGE:-ghcr.io/nxcc-bridge/dev:latest}"
-		if gcloud compute ssh ubuntu@"${TDX_VM_NAME}" --zone="${TDX_VM_ZONE}" --project="${RESOLVED_PROJECT_ID}" --account="${RESOLVED_GCP_ACCOUNT}" --command="$env_vars bash $temp_script && rm -f $temp_script"; then
-			success "Development container started successfully!"
-			return 0
-		else
-			error "Container setup script execution failed!"
+	# Check if container setup script already exists on VM
+	if gcloud compute ssh ubuntu@"${TDX_VM_NAME}" --zone="${TDX_VM_ZONE}" --project="${RESOLVED_PROJECT_ID}" --account="${RESOLVED_GCP_ACCOUNT}" --command="test -f $temp_script" 2>/dev/null; then
+		info "Container setup script already exists on VM, skipping upload"
+	else
+		info "Uploading container setup script..."
+		if ! gcloud compute scp --zone="${TDX_VM_ZONE}" --project="${RESOLVED_PROJECT_ID}" --account="${RESOLVED_GCP_ACCOUNT}" "$setup_script_path" ubuntu@"${TDX_VM_NAME}:$temp_script"; then
+			error "Failed to upload container setup script to VM"
 			return 1
 		fi
+	fi
+
+	info "Executing container setup script..."
+	# Set environment variable and execute the setup script
+	local env_vars="NXCC_DEV_IMAGE=${NXCC_DEV_IMAGE:-ghcr.io/nxcc-bridge/dev:latest}"
+	if gcloud compute ssh ubuntu@"${TDX_VM_NAME}" --zone="${TDX_VM_ZONE}" --project="${RESOLVED_PROJECT_ID}" --account="${RESOLVED_GCP_ACCOUNT}" --command="$env_vars bash $temp_script && rm -f $temp_script"; then
+		success "Development container started successfully!"
+		return 0
 	else
-		error "Failed to upload container setup script to VM"
+		error "Container setup script execution failed!"
 		return 1
 	fi
 }
@@ -379,8 +390,7 @@ dev_manage_container() {
 		if dev_start_container; then
 			success "Development container is running"
 			if [[ -z "$detached_flag" ]]; then
-				info "Connecting to container..."
-				gcloud compute ssh ubuntu@"${TDX_VM_NAME}" --zone="${TDX_VM_ZONE}" --project="${RESOLVED_PROJECT_ID}" --account="${RESOLVED_GCP_ACCOUNT}" --command="docker exec -it nxcc-dev-container bash"
+				info "Container started successfully. Use 'docker exec -it nxcc-dev-container bash' to connect."
 			fi
 		else
 			error "Failed to start development container"
@@ -528,13 +538,13 @@ dev_push_code() {
 		error "VM is not running (status: $vm_status). Start it first with: ./infra.sh dev ssh"
 	fi
 
-	info "Creating archive of git-tracked files only..."
+	info "Creating archive of all files (excluding gitignored)..."
 	local temp_archive="/tmp/nxcc-git-sync.$$.tar.gz"
-	if (cd "$source_dir" && git ls-files -z | tar --null -T - -czf "$temp_archive"); then
-		info "Uploading git-tracked files to VM..."
+	if (cd "$source_dir" && git ls-files -o -c --exclude-standard | while IFS= read -r file; do test -e "$file" && echo "$file"; done | tar -czf "$temp_archive" -T -); then
+		info "Uploading files to VM..."
 		if gcloud compute scp --zone="${TDX_VM_ZONE}" --project="${RESOLVED_PROJECT_ID}" --account="${RESOLVED_GCP_ACCOUNT}" "$temp_archive" ubuntu@"${TDX_VM_NAME}:/tmp/nxcc-sync.tar.gz"; then
 			info "Extracting files on VM..."
-			if gcloud compute ssh ubuntu@"${TDX_VM_NAME}" --zone="${TDX_VM_ZONE}" --project="${RESOLVED_PROJECT_ID}" --account="${RESOLVED_GCP_ACCOUNT}" --command="rm -rf /home/ubuntu/nxcc && mkdir -p /home/ubuntu/nxcc && cd /home/ubuntu/nxcc && tar -xzf /tmp/nxcc-sync.tar.gz && rm -f /tmp/nxcc-sync.tar.gz"; then
+			if gcloud compute ssh ubuntu@"${TDX_VM_NAME}" --zone="${TDX_VM_ZONE}" --project="${RESOLVED_PROJECT_ID}" --account="${RESOLVED_GCP_ACCOUNT}" --command="mkdir -p /home/ubuntu/nxcc && cd /home/ubuntu/nxcc && find . -maxdepth 1 -type f -delete && find . -maxdepth 1 -type d ! -name '.' ! -name 'target' ! -name 'node_modules' -exec rm -rf {} + && tar -xzf /tmp/nxcc-sync.tar.gz && rm -f /tmp/nxcc-sync.tar.gz"; then
 				success "Code synced successfully to VM!"
 				info "Remote path: /home/ubuntu/nxcc/"
 			else
@@ -545,6 +555,6 @@ dev_push_code() {
 		fi
 		rm -f "$temp_archive"
 	else
-		error "Failed to create git archive. Make sure you're in a git repository."
+		error "Failed to create file archive. Make sure you're in a git repository."
 	fi
 }

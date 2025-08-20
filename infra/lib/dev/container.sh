@@ -71,5 +71,5 @@ dev_run_container() {
 		-v "${project_root}:/workspace" \
 		-v /var/run/docker.sock:/var/run/docker.sock \
 		-w /workspace \
-		nxcc-dev /bin/bash
+		nxcc-dev
 }
