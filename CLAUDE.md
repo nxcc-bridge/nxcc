@@ -47,6 +47,28 @@ cd e2e && ./e2e_test.sh
 cd e2e && ./e2e_test.sh --env staging
 ```
 
+### TDX Attestation Test Modes
+
+The attestation system uses environment variables to control test behavior:
+
+**Development Mode** (default):
+```bash
+cargo test                              # Uses simulation for testing
+TDX_TESTS_REQUIRE_HARDWARE=false cargo test  # Explicit simulation mode
+```
+
+**Production/CI Mode** (TDX hardware required):
+```bash
+TDX_TESTS_REQUIRE_HARDWARE=true cargo test   # Requires real TDX hardware
+TDX_TESTS_REQUIRE_HARDWARE=1 cargo test      # Alternative syntax
+```
+
+Production test mode guarantees:
+- Simulation is NEVER used when hardware is explicitly requested
+- Panics immediately if TDX hardware unavailable but required
+- Cannot be bypassed at runtime - prevents test misconfiguration  
+- Use for CI/testing on TDX infrastructure
+
 ### Component-Specific Commands
 
 **Smart Contracts** (`contracts/evm/`):

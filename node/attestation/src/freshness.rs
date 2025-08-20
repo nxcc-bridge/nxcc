@@ -253,12 +253,12 @@ impl FreshnessService {
                 Ok(FreshnessProof::new(blocks, self.config.clone()))
             }
             Ok(Err(e)) => {
-                log::warn!("Failed to fetch freshness blocks: {}", e);
+                tracing::warn!("Failed to fetch freshness blocks: {}", e);
                 // Return disabled proof for fallback
                 Ok(FreshnessProof::disabled())
             }
             Err(_) => {
-                log::warn!("Timeout fetching freshness blocks");
+                tracing::warn!("Timeout fetching freshness blocks");
                 Ok(FreshnessProof::disabled())
             }
         }
@@ -272,7 +272,7 @@ impl FreshnessService {
             match self.fetch_chain_block(chain_id).await {
                 Ok(block) => blocks.push(block),
                 Err(e) => {
-                    log::warn!("Failed to fetch block from chain {}: {}", chain_id, e);
+                    tracing::warn!("Failed to fetch block from chain {}: {}", chain_id, e);
                     // Continue with other chains
                 }
             }
@@ -327,7 +327,7 @@ impl FreshnessService {
 
                 // Warn if block seems too old for this chain
                 if block_age > expected_block_time * 3 {
-                    log::warn!(
+                    tracing::warn!(
                         "Block {} on {} is older than expected for chain ({}s vs ~{}s)",
                         block.block_number,
                         chain_config.name,
@@ -344,7 +344,7 @@ impl FreshnessService {
     /// Verify freshness proof using Merkle commitment
     pub async fn verify_freshness_proof(&self, proof: &FreshnessProof) -> Result<()> {
         if !proof.config.enabled {
-            log::info!("Freshness verification disabled");
+            tracing::info!("Freshness verification disabled");
             return Ok(());
         }
 
@@ -372,7 +372,7 @@ impl FreshnessService {
             ));
         }
 
-        log::info!("Freshness proof verified successfully - prover saw real recent blocks");
+        tracing::info!("Freshness proof verified successfully - prover saw real recent blocks");
         Ok(())
     }
 
@@ -432,7 +432,7 @@ impl FreshnessService {
                 Ok(block) => {
                     // Verify the block number matches what the prover claimed
                     if block.block_number != block_ref.block_number {
-                        log::warn!(
+                        tracing::warn!(
                             "Block number mismatch for chain {}: fetched {}, expected {}",
                             block_ref.chain_id,
                             block.block_number,

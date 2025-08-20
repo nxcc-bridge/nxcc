@@ -181,7 +181,7 @@ impl TdxQuoteV4 {
 
         if quote_bytes.len() < sig_data_end {
             // Handle truncated quotes gracefully for testing
-            log::warn!(
+            tracing::warn!(
                 "Quote appears truncated: expected {} bytes for signature, only {} available",
                 signature_data_len,
                 quote_bytes.len().saturating_sub(sig_data_offset)
@@ -397,18 +397,11 @@ impl TdxQuoteV4 {
 
 #[cfg(test)]
 mod tests {
-    use base64::{engine::general_purpose, Engine as _};
-
     use super::*;
 
-    /// Real TDX quote from edgelesssys/go-tdx-qpl
-    /// "an example quote generated on an Intel TDX development platform"
-    const REAL_TDX_QUOTE_BASE64: &str = "BAACAIEAAAAAAAAAk5pyM/ecTKmUCg2zlX8GB5/OUj/OJupF09PbkG1RcaEAAAAAAwAFAAAAAAAAAAAAAAAAAC/SecFhZKk91b83PYNDKNRgCMK2k6+eu4ZbCLLO0yDJqJtIaan6tg++nQxaU2PGVgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAADnAgYAAAAAALZeoAnkJOb3Yf3T18iWJDlFOzfs32LaBPe8XTJ2hruLr8il0kqcMc7mDkq6h8L3GwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOGvdeYZJ0EOQrVLOfZoHPmwv7rlErFehw5MjZ1aXLOFVxsOHcL3C/nM7whWDworWCFf8fwMMUQsHwYaMXvkCUCxgsE9Q8bbLlsqV33em+6T1FKv091GxuEvmzA5EvMQsQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEhlbGxvIGZyb20gRWRnZWxlc3MgU3lzdGVtcyEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADMEAAAYbPmffGRNtL5ViDWxe44+/k3th7PC6R186hE9iAfQQG6Mf45s2kK";
-
-    fn get_real_tdx_quote() -> Vec<u8> {
-        general_purpose::STANDARD
-            .decode(REAL_TDX_QUOTE_BASE64)
-            .expect("Failed to decode real TDX quote")
+    fn get_nxcc_tdx_quote() -> Vec<u8> {
+        std::fs::read("test_data/real_tdx_quote.bin")
+            .expect("Failed to read real_tdx_quote.bin from test_data directory")
     }
 
     #[test]
@@ -446,7 +439,7 @@ mod tests {
 
     #[test]
     fn test_analyze_real_tdx_quote_structure() {
-        let quote_bytes = get_real_tdx_quote();
+        let quote_bytes = get_nxcc_tdx_quote();
         println!("Real TDX quote length: {} bytes", quote_bytes.len());
 
         // Parse header manually to see what we get
@@ -526,7 +519,7 @@ mod tests {
 
     #[test]
     fn test_parse_real_tdx_quote() {
-        let quote_bytes = get_real_tdx_quote();
+        let quote_bytes = get_nxcc_tdx_quote();
         println!("Real TDX quote length: {} bytes", quote_bytes.len());
 
         let result = TdxQuoteV4::parse(&quote_bytes);
@@ -577,7 +570,7 @@ mod tests {
 
     #[test]
     fn test_real_quote_structure_validation() {
-        let quote_bytes = get_real_tdx_quote();
+        let quote_bytes = get_nxcc_tdx_quote();
 
         // Test that we can successfully parse the structure
         let quote = TdxQuoteV4::parse(&quote_bytes).expect("Should parse real quote");
@@ -614,7 +607,7 @@ mod tests {
 
     #[test]
     fn test_extract_user_data_from_real_quote() {
-        let quote_bytes = get_real_tdx_quote();
+        let quote_bytes = get_nxcc_tdx_quote();
         let quote = TdxQuoteV4::parse(&quote_bytes).expect("Should parse real quote");
 
         // Extract user data from header (first 20 bytes)
@@ -658,7 +651,7 @@ mod tests {
 
     #[test]
     fn test_claims_extraction_comprehensive() {
-        let quote_bytes = get_real_tdx_quote();
+        let quote_bytes = get_nxcc_tdx_quote();
         let quote = TdxQuoteV4::parse(&quote_bytes).expect("Should parse real quote");
         let claims = quote.extract_claims();
 

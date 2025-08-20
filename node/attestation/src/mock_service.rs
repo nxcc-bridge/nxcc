@@ -53,10 +53,9 @@ impl MockTdxProvider {
 
     /// Generate a mock TDX quote with embedded user data
     pub fn generate_mock_quote(&self, user_data: &[u8]) -> Result<Vec<u8>> {
-        use base64::{engine::general_purpose, Engine as _};
-
-        // For testing, we'll use the real quote but modify the report data
-        let base_quote = general_purpose::STANDARD.decode("BAACAIEAAAAAAAAAk5pyM/ecTKmUCg2zlX8GB5/OUj/OJupF09PbkG1RcaEAAAAAAwAFAAAAAAAAAAAAAAAAAC/SecFhZKk91b83PYNDKNRgCMK2k6+eu4ZbCLLO0yDJqJtIaan6tg++nQxaU2PGVgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAADnAgYAAAAAALZeoAnkJOb3Yf3T18iWJDlFOzfs32LaBPe8XTJ2hruLr8il0kqcMc7mDkq6h8L3GwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOGvdeYZJ0EOQrVLOfZoHPmwv7rlErFehw5MjZ1aXLOFVxsOHcL3C/nM7whWDworWCFf8fwMMUQsHwYaMXvkCUCxgsE9Q8bbLlsqV33em+6T1FKv091GxuEvmzA5EvMQsQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEhlbGxvIGZyb20gRWRnZWxlc3MgU3lzdGVtcyEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADMEAAAYbPmffGRNtL5ViDWxe44+/k3th7PC6R186hE9iAfQQG6Mf45s2kK")?;
+        // Use real TDX quote as base and modify the report data
+        let base_quote = std::fs::read("test_data/real_tdx_quote.bin")
+            .expect("Failed to load real TDX quote from test_data/real_tdx_quote.bin");
 
         let mut mock_quote = base_quote;
 
@@ -143,19 +142,19 @@ impl MockTdxProvider {
         runtime_measurements.insert("mr_seam".to_string(), tdx_claims.mr_seam.clone());
 
         Ok(StandardizedClaims {
-            software_measurement: tdx_claims.mrtd.clone(),
+            software_component: tdx_claims.mrtd.clone(),
+            hardware_security_level: if tdx_claims.debug_enabled { 1 } else { 3 },
             security_version_number: u64::from_le_bytes(
                 tdx_claims.tcb_svn[..8].try_into().unwrap_or([0; 8]),
             ),
-            debug_disabled: !tdx_claims.debug_enabled,
-            platform_id: "mock-tdx".to_string(),
-            runtime_measurements,
-            timestamp: std::time::SystemTime::now()
+            unique_entity_id: tdx_claims.mrtd[0..32.min(tdx_claims.mrtd.len())].to_vec(),
+            nonce: user_data_binding.embedded_hash.clone(),
+            issued_at: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs(),
-            bound_user_data: user_data_binding.embedded_hash.clone(),
-            ephemeral_public_key: tdx_claims.ephemeral_key.clone().unwrap_or_default(),
+            measurements: runtime_measurements,
+            oem_id: "mock-intel-tdx".to_string(),
         })
     }
 }
@@ -351,9 +350,9 @@ mod tests {
 
         // Verify attestation
         let claims = service.verify_attestation(&bundle).await.unwrap();
-        assert_eq!(claims.platform_id, "mock-tdx");
-        assert!(claims.debug_disabled);
-        assert!(!claims.software_measurement.iter().all(|&b| b == 0));
+        assert_eq!(claims.oem_id, "mock-intel-tdx");
+        assert_eq!(claims.hardware_security_level, 3); // Production (not debug)
+        assert!(!claims.software_component.iter().all(|&b| b == 0));
     }
 
     #[tokio::test]
@@ -396,7 +395,7 @@ mod tests {
         // Configure with the actual MRTD as expected
         let config = serde_json::json!({
             "expected_measurements": {
-                "mrtd": hex::encode(&claims.software_measurement)
+                "mrtd": hex::encode(&claims.software_component)
             }
         });
 
@@ -405,8 +404,8 @@ mod tests {
         // Verification should succeed now
         let verified_claims = service.verify_attestation(&bundle).await.unwrap();
         assert_eq!(
-            verified_claims.software_measurement,
-            claims.software_measurement
+            verified_claims.software_component,
+            claims.software_component
         );
     }
 
@@ -428,7 +427,7 @@ mod tests {
         // Verification should still work
         let claims = service.verify_attestation(&bundle).await.unwrap();
         assert_eq!(
-            claims.bound_user_data,
+            claims.nonce,
             bundle.user_data_binding.embedded_hash
         );
     }

@@ -148,33 +148,43 @@ pub struct RawAttestation {
     pub certificates: Option<Vec<Vec<u8>>>, // Certificate chain for verification
 }
 
-/// Standardized attestation claims following RATS/IEATS principles
-/// Only contains platform-agnostic, security-relevant information
+/// Standardized attestation claims following IEATS/RATS format
+/// Based on draft-ietf-rats-eat and draft-ietf-rats-architecture
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StandardizedClaims {
-    /// Primary software measurement (MRENCLAVE/MRTD equivalent)
-    pub software_measurement: Vec<u8>,
+    /// EAT claim: Software components (primary measurement)
+    /// TDX: MRTD, SGX: MRENCLAVE
+    #[serde(rename = "swcomp")]
+    pub software_component: Vec<u8>,
 
-    /// Security version number
+    /// EAT claim: Hardware security level
+    /// 1=debug, 3=hardware/production
+    #[serde(rename = "hwslvl")]
+    pub hardware_security_level: u32,
+
+    /// EAT claim: Security version number
+    #[serde(rename = "svn")]
     pub security_version_number: u64,
 
-    /// Whether debug mode is disabled
-    pub debug_disabled: bool,
+    /// EAT claim: Platform instance identifier
+    #[serde(rename = "ueid")]
+    pub unique_entity_id: Vec<u8>,
 
-    /// Hardware/platform identifier
-    pub platform_id: String, // "tdx-gcs", "sgx-dcap", etc.
+    /// EAT claim: Nonce bound to attestation
+    #[serde(rename = "nonce")]
+    pub nonce: Vec<u8>,
 
-    /// Additional runtime measurements (PCRs, RTMRs, etc.)
-    pub runtime_measurements: HashMap<String, Vec<u8>>,
+    /// EAT claim: Issued at timestamp (Unix epoch)
+    #[serde(rename = "iat")]
+    pub issued_at: u64,
 
-    /// Timestamp when attestation was generated
-    pub timestamp: u64,
+    /// Platform-specific measurements (RTMRs, PCRs)
+    #[serde(rename = "measur")]
+    pub measurements: HashMap<String, Vec<u8>>,
 
-    /// User data that was bound to this attestation
-    pub bound_user_data: Vec<u8>,
-
-    /// Ephemeral public key extracted from attestation
-    pub ephemeral_public_key: Vec<u8>,
+    /// Platform identifier
+    #[serde(rename = "oemid")]
+    pub oem_id: String,
 }
 
 // BlockInfo is now defined in nxcc_interface::gateway

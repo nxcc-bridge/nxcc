@@ -3,6 +3,12 @@ name = "nxcc-attestation"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+# Production feature: Require actual TDX hardware, never allow simulation fallback
+# Use with: cargo build --features tdx-hardware-required
+# Use for: Production deployments, CI/CD on TDX infrastructure
+tdx-hardware-required = []
+
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1"
@@ -18,3 +24,11 @@ libc = "0.2"
 chrono = { version = "0.4", features = ["serde"] }
 tokio = { version = "1.0", features = ["time"] }
 nxcc-interface = { path = "../interface" }
+x509-parser = "0.16"
+ring = "0.17"
+der = "0.7"
+time = "0.3"
+nix = { version = "0.29", features = ["ioctl"] }
+scopeguard = "1.2"
+tracing = "0.1"
+tracing-test = "0.2"

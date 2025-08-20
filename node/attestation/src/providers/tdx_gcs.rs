@@ -10,7 +10,7 @@ use serde_json;
 
 use crate::{
     tdx::{
-        hardware::{TdxInterface, TdxSimulator},
+        hardware::{TdxInterface, TdxHardware, TdxSimulator},
         parser::TdxParser,
         TdxQuoteData,
     },
@@ -30,7 +30,7 @@ pub struct GcsConfig {
 pub struct TdxGcsRemoteProvider {
     config: Option<GcsConfig>,
     client: reqwest::Client,
-    tdx_interface: TdxInterface,
+    tdx_interface: Box<dyn TdxInterface>,
 }
 
 impl Default for TdxGcsRemoteProvider {
@@ -41,10 +41,44 @@ impl Default for TdxGcsRemoteProvider {
 
 impl TdxGcsRemoteProvider {
     pub fn new() -> Self {
-        // Initialize with simulator for testing when hardware is not available
-        let simulator = TdxSimulator::new();
-        let tdx_interface = TdxInterface::new().with_simulator(simulator);
-
+        #[cfg(feature = "tdx-hardware-required")]
+        {
+            // PRODUCTION MODE: Hardware required, no simulation
+            let hardware = TdxHardware::new();
+            if !hardware.is_hardware_available() {
+                panic!(
+                    "FATAL: TDX hardware required (compiled with --features tdx-hardware-required) \
+                     but TDX device not available in TdxGcsRemoteProvider"
+                );
+            }
+            Self {
+                config: None,
+                client: reqwest::Client::new(),
+                tdx_interface: Box::new(hardware),
+            }
+        }
+        
+        #[cfg(not(feature = "tdx-hardware-required"))]
+        {
+            // DEVELOPMENT MODE: Allow simulation fallback
+            let hardware = TdxHardware::new();
+            if hardware.is_hardware_available() {
+                Self {
+                    config: None,
+                    client: reqwest::Client::new(),
+                    tdx_interface: Box::new(hardware),
+                }
+            } else {
+                Self {
+                    config: None,
+                    client: reqwest::Client::new(),
+                    tdx_interface: Box::new(TdxSimulator::new()),
+                }
+            }
+        }
+    }
+    
+    pub fn new_with_interface(tdx_interface: Box<dyn TdxInterface>) -> Self {
         Self {
             config: None,
             client: reqwest::Client::new(),
@@ -134,7 +168,7 @@ impl TdxGcsRemoteProvider {
                             rtmrs.insert(key.clone(), rtmr_bytes);
                         }
                         Err(e) => {
-                            log::warn!("Failed to decode RTMR {}: {}", key, e);
+                            tracing::warn!("Failed to decode RTMR {}: {}", key, e);
                         }
                     }
                 }
@@ -201,29 +235,37 @@ impl TdxGcsRemoteProvider {
         quote_data: TdxQuoteData,
         bundle: &AttestationBundle,
     ) -> Result<StandardizedClaims> {
-        // Extract ephemeral public key from user data
-        // The user data binding contains ephemeral key + original user data
-        let ephemeral_key_len = 32; // Assuming 32-byte public key
-        let bound_data = &bundle.user_data_binding.embedded_hash;
+        // Convert RTMR map to measurements map
+        let mut measurements = std::collections::HashMap::new();
+        for (key, value) in quote_data.rtmrs {
+            measurements.insert(key, value);
+        }
+        
+        // Add additional measurements
+        measurements.insert("mrtd".to_string(), quote_data.mrtd.clone());
+        if !quote_data.tcb_svn.is_empty() {
+            measurements.insert("tcb_svn".to_string(), quote_data.tcb_svn.clone());
+        }
 
-        let (ephemeral_key, user_data) = if bound_data.len() >= ephemeral_key_len {
-            (
-                bound_data[..ephemeral_key_len].to_vec(),
-                bound_data[ephemeral_key_len..].to_vec(),
-            )
+        // Determine hardware security level (1=debug, 3=production)
+        let hardware_security_level = if quote_data.debug_disabled { 3 } else { 1 };
+
+        // Use MRTD as unique entity ID (first 32 bytes)
+        let unique_entity_id = if quote_data.mrtd.len() >= 32 {
+            quote_data.mrtd[0..32].to_vec()
         } else {
-            (Vec::new(), bound_data.clone())
+            quote_data.mrtd.clone()
         };
 
         Ok(StandardizedClaims {
-            software_measurement: quote_data.mrtd,
+            software_component: quote_data.mrtd,
+            hardware_security_level,
             security_version_number: quote_data.security_version,
-            debug_disabled: quote_data.debug_disabled,
-            platform_id: "tdx-gcs".to_string(),
-            runtime_measurements: quote_data.rtmrs,
-            timestamp: quote_data.timestamp,
-            bound_user_data: user_data,
-            ephemeral_public_key: ephemeral_key,
+            unique_entity_id,
+            nonce: quote_data.user_data,
+            issued_at: quote_data.timestamp,
+            measurements,
+            oem_id: "intel-tdx-gcs".to_string(),
         })
     }
 }
@@ -248,7 +290,7 @@ impl AttestationProvider for TdxGcsRemoteProvider {
         &self,
         user_data_binding: &UserDataBinding,
     ) -> Result<RawAttestation> {
-        log::info!("Generating TDX attestation using hardware/simulator interface");
+        tracing::info!("Generating TDX attestation using hardware/simulator interface");
 
         // Use the unified TDX interface to generate quote
         let quote_bytes = self
@@ -290,7 +332,7 @@ impl AttestationProvider for TdxGcsRemoteProvider {
 
 /// Local TDX verification provider (future implementation)
 pub struct TdxLocalProvider {
-    tdx_interface: TdxInterface,
+    tdx_interface: Box<dyn TdxInterface>,
 }
 
 impl Default for TdxLocalProvider {
@@ -301,9 +343,38 @@ impl Default for TdxLocalProvider {
 
 impl TdxLocalProvider {
     pub fn new() -> Self {
-        let simulator = TdxSimulator::new();
-        let tdx_interface = TdxInterface::new().with_simulator(simulator);
-
+        #[cfg(feature = "tdx-hardware-required")]
+        {
+            // PRODUCTION MODE: Hardware required, no simulation
+            let hardware = TdxHardware::new();
+            if !hardware.is_hardware_available() {
+                panic!(
+                    "FATAL: TDX hardware required (compiled with --features tdx-hardware-required) \
+                     but TDX device not available in TdxLocalProvider"
+                );
+            }
+            Self { 
+                tdx_interface: Box::new(hardware) 
+            }
+        }
+        
+        #[cfg(not(feature = "tdx-hardware-required"))]
+        {
+            // DEVELOPMENT MODE: Allow simulation fallback
+            let hardware = TdxHardware::new();
+            if hardware.is_hardware_available() {
+                Self { 
+                    tdx_interface: Box::new(hardware) 
+                }
+            } else {
+                Self { 
+                    tdx_interface: Box::new(TdxSimulator::new()) 
+                }
+            }
+        }
+    }
+    
+    pub fn new_with_interface(tdx_interface: Box<dyn TdxInterface>) -> Self {
         Self { tdx_interface }
     }
 
@@ -350,7 +421,7 @@ impl TdxLocalProvider {
             anyhow::bail!("Invalid MRTD in quote");
         }
 
-        log::info!("Local TDX quote verification completed successfully");
+        tracing::info!("Local TDX quote verification completed successfully");
         Ok(quote_data)
     }
 
@@ -359,28 +430,37 @@ impl TdxLocalProvider {
         quote_data: TdxQuoteData,
         bundle: &AttestationBundle,
     ) -> Result<StandardizedClaims> {
-        // Same logic as GCS provider
-        let ephemeral_key_len = 32;
-        let bound_data = &bundle.user_data_binding.embedded_hash;
+        // Convert RTMR map to measurements map
+        let mut measurements = std::collections::HashMap::new();
+        for (key, value) in quote_data.rtmrs {
+            measurements.insert(key, value);
+        }
+        
+        // Add additional measurements
+        measurements.insert("mrtd".to_string(), quote_data.mrtd.clone());
+        if !quote_data.tcb_svn.is_empty() {
+            measurements.insert("tcb_svn".to_string(), quote_data.tcb_svn.clone());
+        }
 
-        let (ephemeral_key, user_data) = if bound_data.len() >= ephemeral_key_len {
-            (
-                bound_data[..ephemeral_key_len].to_vec(),
-                bound_data[ephemeral_key_len..].to_vec(),
-            )
+        // Determine hardware security level (1=debug, 3=production)
+        let hardware_security_level = if quote_data.debug_disabled { 3 } else { 1 };
+
+        // Use MRTD as unique entity ID (first 32 bytes)
+        let unique_entity_id = if quote_data.mrtd.len() >= 32 {
+            quote_data.mrtd[0..32].to_vec()
         } else {
-            (Vec::new(), bound_data.clone())
+            quote_data.mrtd.clone()
         };
 
         Ok(StandardizedClaims {
-            software_measurement: quote_data.mrtd,
+            software_component: quote_data.mrtd,
+            hardware_security_level,
             security_version_number: quote_data.security_version,
-            debug_disabled: quote_data.debug_disabled,
-            platform_id: "tdx-local".to_string(),
-            runtime_measurements: quote_data.rtmrs,
-            timestamp: quote_data.timestamp,
-            bound_user_data: user_data,
-            ephemeral_public_key: ephemeral_key,
+            unique_entity_id,
+            nonce: quote_data.user_data,
+            issued_at: quote_data.timestamp,
+            measurements,
+            oem_id: "intel-tdx-local".to_string(),
         })
     }
 }
@@ -403,7 +483,7 @@ impl AttestationProvider for TdxLocalProvider {
         &self,
         user_data_binding: &UserDataBinding,
     ) -> Result<RawAttestation> {
-        log::info!("Generating TDX attestation using local interface");
+        tracing::info!("Generating TDX attestation using local interface");
 
         // Use the unified TDX interface to generate quote
         let quote_bytes = self

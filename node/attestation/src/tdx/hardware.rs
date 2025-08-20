@@ -1,441 +1,395 @@
-// TDX Hardware Integration
-// Implements actual TDX quote generation using /dev/tdx_guest device
-
-use std::{fs::File, io, os::unix::io::AsRawFd};
-
 use anyhow::{anyhow, Result};
+use nix::errno::Errno;
+use std::{
+    fs::{self, File},
+    io::Write,
+    os::unix::io::AsRawFd,
+    path::Path,
+};
 
-/// TDX IOCTL commands as defined in Linux kernel
-const TDX_CMD_GET_REPORT0: u32 = 0xc4004401;
+const TDX_DEVICE_PATHS: &[&str] = &["/dev/tdx_guest", "/dev/tdx-guest"];
 
-/// Maximum size for TDREPORT structure (1024 bytes as per TDX spec)
+// Sizes from TDX UAPI
 const TDREPORT_SIZE: usize = 1024;
-
-/// Maximum user data size for TDX reports (64 bytes)
 const TDX_REPORT_DATA_SIZE: usize = 64;
 
-/// TDX report request structure matching kernel interface
+// ===== Kernel UAPI structs / ioctls =====
+
 #[repr(C)]
-#[derive(Debug)]
 struct TdxReportReq {
-    /// Subtype (currently only 0 is supported)
-    subtype: u8,
-    /// User data to include in report (up to 64 bytes)
     reportdata: [u8; TDX_REPORT_DATA_SIZE],
-    /// Output buffer for TDREPORT (1024 bytes)
     tdreport: [u8; TDREPORT_SIZE],
 }
 
-impl Default for TdxReportReq {
-    fn default() -> Self {
-        Self {
-            subtype: 0,
-            reportdata: [0; TDX_REPORT_DATA_SIZE],
-            tdreport: [0; TDREPORT_SIZE],
-        }
-    }
+#[repr(C)]
+struct TdxQuoteHdr {
+    version: u64, // set to 1
+    status: u64,  // kernel/VMM fills
+    in_len: u32,  // TDREPORT_SIZE (1024)
+    out_len: u32, // kernel/VMM fills
 }
 
-/// TDX hardware interface for quote generation
+#[repr(C)]
+struct TdxQuoteReq {
+    buf: u64, // userspace VA of (TdxQuoteHdr + data[])
+    len: u64, // total buffer length
+}
+
+nix::ioctl_readwrite!(tdx_get_report0, b'T', 1, TdxReportReq);
+nix::ioctl_readwrite!(tdx_get_quote, b'T', 2, TdxQuoteReq);
+
+// ===== Public interface =====
+
+pub trait TdxInterface: Send + Sync {
+    fn is_hardware_available(&self) -> bool;
+    fn generate_quote(&self, report_data: &[u8]) -> Result<Vec<u8>>;
+}
+
+// ===== Real hardware implementation =====
+
 pub struct TdxHardware {
-    device_path: String,
-}
-
-impl Default for TdxHardware {
-    fn default() -> Self {
-        Self::new()
-    }
+    dev_file: Option<File>,
 }
 
 impl TdxHardware {
     pub fn new() -> Self {
-        Self {
-            device_path: "/dev/tdx_guest".to_string(),
-        }
+        Self { dev_file: None }
     }
 
-    /// Check if TDX hardware is available
-    pub fn is_available(&self) -> bool {
-        std::path::Path::new(&self.device_path).exists()
+    fn in_tdx_guest() -> bool {
+        // Check multiple possible indicators of TDX guest environment
+        Path::new("/sys/firmware/tdx_guest").exists()
+            || Path::new("/sys/kernel/config/tsm/report").exists()
+            || TDX_DEVICE_PATHS.iter().any(|p| Path::new(p).exists())
     }
 
-    /// Get TDX report from hardware
-    pub fn get_tdreport(&self, user_data: &[u8]) -> Result<Vec<u8>> {
-        if !self.is_available() {
-            return Err(anyhow!("TDX device not available at {}", self.device_path));
+    fn open_device(&mut self) -> Result<i32> {
+        if let Some(f) = &self.dev_file {
+            return Ok(f.as_raw_fd());
+        }
+        for p in TDX_DEVICE_PATHS {
+            if let Ok(f) = File::options().read(true).write(true).open(p) {
+                // ensure it is a char device
+                if f.metadata().ok().map_or(false, |m| {
+                    use std::os::unix::fs::FileTypeExt;
+                    m.file_type().is_char_device()
+                }) {
+                    let fd = f.as_raw_fd();
+                    self.dev_file = Some(f);
+                    return Ok(fd);
+                }
+            }
+        }
+        Err(anyhow!(
+            "TDX device not found. Tried: {}",
+            TDX_DEVICE_PATHS.join(", ")
+        ))
+    }
+
+    // Preferred path: configfs TSM
+    fn quote_via_tsm(&self, report_data: [u8; 64]) -> Result<Vec<u8>> {
+        let cfg = Path::new("/sys/kernel/config");
+        if !cfg.exists() {
+            return Err(anyhow!(
+                "configfs not mounted: mount -t configfs none /sys/kernel/config"
+            ));
+        }
+        let base = Path::new("/sys/kernel/config/tsm/report");
+        if !base.exists() {
+            // Try to create the subtree; requires CAP_SYS_ADMIN
+            fs::create_dir_all(base)
+                .map_err(|e| anyhow!("create {} failed: {e}", base.display()))?;
         }
 
-        // Prepare report request
-        let mut req = TdxReportReq::default();
-
-        // Copy user data (up to 64 bytes)
-        let copy_len = std::cmp::min(user_data.len(), TDX_REPORT_DATA_SIZE);
-        req.reportdata[..copy_len].copy_from_slice(&user_data[..copy_len]);
-
-        // Open device and perform IOCTL
-        let file = File::options()
-            .read(true)
-            .write(true)
-            .open(&self.device_path)
-            .map_err(|e| anyhow!("Failed to open TDX device: {}", e))?;
-
-        let fd = file.as_raw_fd();
-
-        // Perform IOCTL call
-        let result = unsafe {
-            libc::ioctl(
-                fd,
-                TDX_CMD_GET_REPORT0 as libc::c_ulong,
-                &mut req as *mut TdxReportReq,
-            )
+        let dir = base.join(format!("report{}", std::process::id()));
+        // Best-effort cleanup guard
+        let cleanup = |d: &std::path::Path| {
+            let _ = fs::remove_file(d.join("inblob"));
+            let _ = fs::remove_file(d.join("outblob"));
+            let _ = fs::remove_dir(d);
         };
 
-        if result != 0 {
-            let errno = io::Error::last_os_error();
-            return Err(anyhow!("TDX IOCTL failed: {}", errno));
-        }
+        fs::create_dir(&dir).map_err(|e| anyhow!("mkdir {}: {e}", dir.display()))?;
 
-        // Return the TDREPORT
-        Ok(req.tdreport.to_vec())
+        let res = (|| -> Result<Vec<u8>> {
+            // write 64B REPORTDATA
+            let mut inblob =
+                File::create(dir.join("inblob")).map_err(|e| anyhow!("open inblob: {e}"))?;
+            inblob
+                .write_all(&report_data)
+                .map_err(|e| anyhow!("write inblob: {e}"))?;
+            drop(inblob);
+
+            // read quote
+            let quote = fs::read(dir.join("outblob")).map_err(|e| anyhow!("read outblob: {e}"))?;
+            if quote.is_empty() {
+                return Err(anyhow!("TSM outblob empty"));
+            }
+            Ok(quote)
+        })();
+
+        cleanup(&dir);
+        res
     }
 
-    /// Generate a complete TDX quote using Quoting Enclave
-    pub fn generate_quote(&self, user_data: &[u8]) -> Result<Vec<u8>> {
-        // Step 1: Get TDREPORT from hardware
-        let tdreport = self.get_tdreport(user_data)?;
-        log::info!("Generated TDREPORT of {} bytes", tdreport.len());
+    // Legacy path: GET_REPORT0 ioctl + GET_QUOTE ioctl (if supported)
+    fn quote_via_legacy(&mut self, report_data: [u8; 64]) -> Result<Vec<u8>> {
+        let fd = self.open_device()?;
 
-        // Step 2: Send TDREPORT to Quoting Enclave (QE) for quote generation
-        // Try different quote generation methods in order of preference
-        
-        // Method 1: Try local AESM service (Intel Architecture Enclave Service Manager)
-        if let Ok(quote) = self.try_local_aesm_quote(&tdreport) {
-            log::info!("Successfully generated quote via local AESM service");
-            return Ok(quote);
+        // 1) TDREPORT
+        let mut req = TdxReportReq {
+            reportdata: report_data,
+            tdreport: [0u8; TDREPORT_SIZE],
+        };
+        unsafe {
+            tdx_get_report0(fd, &mut req).map_err(|e| match e {
+                Errno::ENOTTY => anyhow!("GET_REPORT0 not supported by this kernel/device"),
+                Errno::EOPNOTSUPP => anyhow!("GET_REPORT0 not supported by VMM/hypervisor"),
+                Errno::ENOSYS => anyhow!("GET_REPORT0 not implemented"),
+                _ => anyhow!("GET_REPORT0 failed: {e}"),
+            })?;
         }
 
-        // Method 2: Try Intel Attestation Service (cloud-based)
-        if let Ok(quote) = self.try_intel_attestation_service(&tdreport) {
-            log::info!("Successfully generated quote via Intel Attestation Service");
-            return Ok(quote);
+        // 2) GET_QUOTE (may not exist)
+        let hdr_len = std::mem::size_of::<TdxQuoteHdr>();
+        let data_off = (hdr_len + 7) & !7; // 8B align
+        let mut buf = vec![0u8; 16 * 1024];
+
+        {
+            let hdr = unsafe { &mut *(buf.as_mut_ptr() as *mut TdxQuoteHdr) };
+            hdr.version = 1;
+            hdr.status = 0;
+            hdr.in_len = TDREPORT_SIZE as u32;
+            hdr.out_len = 0;
+        }
+        buf[data_off..data_off + TDREPORT_SIZE].copy_from_slice(&req.tdreport);
+
+        let mut qreq = TdxQuoteReq {
+            buf: buf.as_mut_ptr() as u64,
+            len: buf.len() as u64,
+        };
+        unsafe {
+            tdx_get_quote(fd, &mut qreq).map_err(|e| match e {
+                Errno::ENOTTY => anyhow!("GET_QUOTE not supported by this kernel/device"),
+                Errno::EOPNOTSUPP => anyhow!("GET_QUOTE not supported by VMM/QGS"),
+                Errno::ENOSYS => anyhow!("GET_QUOTE not implemented"),
+                _ => anyhow!("GET_QUOTE failed: {e}"),
+            })?;
         }
 
-        // Method 3: Try system's quote generation service
-        if let Ok(quote) = self.try_system_quote_service(&tdreport) {
-            log::info!("Successfully generated quote via system service");
-            return Ok(quote);
+        let hdr = unsafe { &*(buf.as_ptr() as *const TdxQuoteHdr) };
+        let qlen = hdr.out_len as usize;
+        if qlen == 0 || qlen > buf.len() - data_off {
+            return Err(anyhow!("invalid quote length {qlen}"));
         }
-
-        Err(anyhow!(
-            "Failed to generate TDX quote: No available Quoting Enclave found. \
-             Ensure one of the following is available: \
-             1. Local AESM service (Intel SGX/TDX PSW installed) \
-             2. Intel Attestation Service access \
-             3. System attestation service"
-        ))
+        Ok(buf[data_off..data_off + qlen].to_vec())
     }
 
-    /// Try to generate quote using local AESM service
-    fn try_local_aesm_quote(&self, tdreport: &[u8]) -> Result<Vec<u8>> {
-        // AESM typically listens on a Unix domain socket
-        // This would require implementing the AESM protocol
-        log::debug!("Attempting quote generation via local AESM service");
-        
-        // Check if AESM socket exists
-        if !std::path::Path::new("/var/run/aesmd/aesm.socket").exists() {
-            return Err(anyhow!("AESM socket not found"));
+    fn simple_quote_sanity(quote: &[u8]) -> Result<()> {
+        // Minimal structural checks: version + tee_type at fixed offsets
+        if quote.len() < 48 {
+            return Err(anyhow!("quote too small: {}", quote.len()));
         }
-
-        // TODO: Implement AESM protocol communication
-        // This requires sending the TDREPORT and receiving back a quote
-        Err(anyhow!("AESM integration not yet implemented"))
-    }
-
-    /// Try to generate quote using Intel Attestation Service
-    fn try_intel_attestation_service(&self, tdreport: &[u8]) -> Result<Vec<u8>> {
-        log::debug!("Attempting quote generation via Intel Attestation Service");
-        
-        // Intel's cloud-based attestation would require:
-        // 1. API authentication
-        // 2. Sending TDREPORT to Intel's service
-        // 3. Receiving back a signed quote
-        
-        // TODO: Implement Intel Attestation Service integration
-        Err(anyhow!("Intel Attestation Service integration not yet implemented"))
-    }
-
-    /// Try to generate quote using system-provided service
-    fn try_system_quote_service(&self, tdreport: &[u8]) -> Result<Vec<u8>> {
-        log::debug!("Attempting quote generation via system service");
-        
-        // Some systems may provide their own quote generation service
-        // This could be cloud provider specific (GCP, Azure, AWS)
-        
-        // TODO: Implement system-specific quote generation
-        Err(anyhow!("System quote service not available"))
-    }
-
-    /// Verify a TDX quote against Intel's root of trust
-    pub fn verify_quote(&self, quote: &[u8]) -> Result<bool> {
-        log::info!("Verifying TDX quote of {} bytes", quote.len());
-        
-        // TDX quote verification involves:
-        // 1. Parse quote structure
-        // 2. Verify signature chain back to Intel's root
-        // 3. Check certificate validity
-        // 4. Verify measurements and claims
-        
-        // Method 1: Try local verification with Intel certificates
-        if let Ok(verified) = self.try_local_quote_verification(quote) {
-            return Ok(verified);
+        let version = u16::from_le_bytes([quote[0], quote[1]]);
+        let tee_type = u32::from_le_bytes([quote[4], quote[5], quote[6], quote[7]]);
+        if version != 4 && version != 5 {
+            return Err(anyhow!("unexpected quote version: {}", version));
         }
-
-        // Method 2: Try Intel Verification Service
-        if let Ok(verified) = self.try_intel_verification_service(quote) {
-            return Ok(verified);
+        if tee_type != 0x0000_0081 {
+            return Err(anyhow!(
+                "unexpected TEE type 0x{:08x} (expect 0x00000081 for TDX)",
+                tee_type
+            ));
         }
-
-        Err(anyhow!(
-            "Failed to verify TDX quote: No verification method available. \
-             Ensure Intel TDX certificates are installed or Intel Verification Service is accessible."
-        ))
-    }
-
-    /// Try to verify quote using local Intel certificates
-    fn try_local_quote_verification(&self, quote: &[u8]) -> Result<bool> {
-        log::debug!("Attempting local quote verification");
-        
-        // Local verification requires:
-        // 1. Intel's root certificates
-        // 2. Parsing the quote's certificate chain
-        // 3. Verifying signatures
-        // 4. Checking certificate validity dates
-        
-        // TODO: Implement local quote verification
-        // This would parse the quote structure and verify the signature chain
-        Err(anyhow!("Local quote verification not yet implemented"))
-    }
-
-    /// Try to verify quote using Intel Verification Service
-    fn try_intel_verification_service(&self, quote: &[u8]) -> Result<bool> {
-        log::debug!("Attempting quote verification via Intel Verification Service");
-        
-        // Remote verification would:
-        // 1. Send quote to Intel's verification service
-        // 2. Receive verification result
-        // 3. Parse and return the result
-        
-        // TODO: Implement Intel Verification Service integration
-        Err(anyhow!("Intel Verification Service not yet implemented"))
+        Ok(())
     }
 }
 
-/// TDX hardware simulator for testing without real hardware
+impl TdxInterface for TdxHardware {
+    fn is_hardware_available(&self) -> bool {
+        let in_tdx = Self::in_tdx_guest();
+        let device_available = TDX_DEVICE_PATHS.iter().any(|p| Path::new(p).exists());
+        tracing::info!("TDX hardware detection: in_tdx_guest={}, device_available={}", in_tdx, device_available);
+        
+        if !in_tdx {
+            tracing::warn!("Not in TDX guest environment");
+            return false;
+        }
+        device_available
+    }
+
+    fn generate_quote(&self, report_data: &[u8]) -> Result<Vec<u8>> {
+        tracing::info!("Generating TDX quote with {} bytes of report data", report_data.len());
+        
+        if report_data.len() > TDX_REPORT_DATA_SIZE {
+            return Err(anyhow!(
+                "report_data too large: {} > {}",
+                report_data.len(),
+                TDX_REPORT_DATA_SIZE
+            ));
+        }
+        let mut rd = [0u8; 64];
+        rd[..report_data.len()].copy_from_slice(report_data);
+
+        // Need &mut self for legacy path; clone a fresh handle holder.
+        let mut hw = TdxHardware::new();
+
+        // Try TSM first
+        tracing::info!("Attempting quote generation via TSM configfs");
+        match hw.quote_via_tsm(rd) {
+            Ok(q) => {
+                tracing::info!("Successfully generated quote via TSM, length: {} bytes", q.len());
+                Self::simple_quote_sanity(&q)?;
+                return Ok(q);
+            }
+            Err(e) => {
+                tracing::warn!("TSM quote generation failed: {}", e);
+                // Fall back to legacy only if device exists
+                if !TDX_DEVICE_PATHS.iter().any(|p| Path::new(p).exists()) {
+                    return Err(anyhow!("TSM failed: {e}"));
+                }
+                // Legacy
+                tracing::info!("Attempting quote generation via legacy ioctl");
+                let q = hw.quote_via_legacy(rd)?;
+                tracing::info!("Successfully generated quote via legacy ioctl, length: {} bytes", q.len());
+                Self::simple_quote_sanity(&q)?;
+                Ok(q)
+            }
+        }
+    }
+}
+
+// ===== Simple simulator (no SGX dependencies) =====
+
 pub struct TdxSimulator {
-    simulate_failures: bool,
-    custom_measurements: Option<TdxSimulatorConfig>,
+    cfg: TdxSimulatorConfig,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct TdxSimulatorConfig {
     pub mrtd: [u8; 48],
-    pub rtmr0: [u8; 48],
-    pub rtmr1: [u8; 48],
-    pub rtmr2: [u8; 48],
-    pub rtmr3: [u8; 48],
+    pub td_attributes: [u8; 8],
     pub debug_enabled: bool,
+    pub security_version: u32,
+    pub quote_version: u16, // 4 or 5
 }
 
 impl Default for TdxSimulatorConfig {
     fn default() -> Self {
         Self {
-            mrtd: [0x42; 48], // Dummy measurement
-            rtmr0: [0x11; 48],
-            rtmr1: [0x22; 48],
-            rtmr2: [0x33; 48],
-            rtmr3: [0x44; 48],
+            mrtd: [0x42; 48],
+            td_attributes: [0x00; 8],
             debug_enabled: false,
+            security_version: 0,
+            quote_version: 4,
         }
-    }
-}
-
-impl Default for TdxSimulator {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
 impl TdxSimulator {
     pub fn new() -> Self {
         Self {
-            simulate_failures: false,
-            custom_measurements: None,
+            cfg: TdxSimulatorConfig::default(),
         }
     }
-
-    pub fn with_config(config: TdxSimulatorConfig) -> Self {
-        Self {
-            simulate_failures: false,
-            custom_measurements: Some(config),
-        }
+    pub fn new_with_config(cfg: TdxSimulatorConfig) -> Self {
+        Self { cfg }
     }
 
-    pub fn with_failures(mut self) -> Self {
-        self.simulate_failures = true;
-        self
-    }
+    fn make_mock_quote(&self, report_data: &[u8]) -> Vec<u8> {
+        let mut q = Vec::new();
 
-    /// Simulate TDX TDREPORT generation
-    pub fn get_tdreport(&self, user_data: &[u8]) -> Result<Vec<u8>> {
-        if self.simulate_failures {
-            return Err(anyhow!("Simulated TDX hardware failure"));
+        // Quote header (48 bytes)
+        q.extend_from_slice(&self.cfg.quote_version.to_le_bytes()); // version
+        q.extend_from_slice(&[0x02, 0x00]); // att_key_type = ECDSA
+        q.extend_from_slice(&0x00000081u32.to_le_bytes()); // tee_type TDX
+        q.extend_from_slice(&[0x00; 4]); // reserved
+        q.extend_from_slice(&[0x00, 0x00]); // qe_svn
+        q.extend_from_slice(&[0x00, 0x00]); // pce_svn
+        q.extend_from_slice(&[0u8; 16]); // qe_vendor_id
+
+        // first 20 bytes of report_data
+        let mut user20 = [0u8; 20];
+        let n = user20.len().min(report_data.len());
+        user20[..n].copy_from_slice(&report_data[..n]);
+        q.extend_from_slice(&user20);
+
+        // Fake TD report body (584 bytes) - proper TDX structure
+        let mut body = vec![0u8; 584];
+        
+        // TCB SVN (16 bytes) at offset 0
+        body[0..16].copy_from_slice(&[0x01; 16]);
+        
+        // MR_SEAM (48 bytes) at offset 16
+        body[16..64].copy_from_slice(&[0x33; 48]);
+        
+        // MR_SIGNER_SEAM (48 bytes) at offset 64
+        body[64..112].copy_from_slice(&[0x44; 48]);
+        
+        // SEAM attributes (8 bytes) at offset 112
+        body[112..120].copy_from_slice(&[0x00; 8]);
+        
+        // TD attributes (8 bytes) at offset 120
+        let mut td_attrs = [0u8; 8];
+        if self.cfg.debug_enabled {
+            td_attrs[0] |= 0x01; // Set debug bit
         }
+        body[120..128].copy_from_slice(&td_attrs);
+        
+        // XFAM (8 bytes) at offset 128
+        body[128..136].copy_from_slice(&[0x03; 8]);
+        
+        // MRTD (48 bytes) at offset 136 - use configured value
+        body[136..184].copy_from_slice(&self.cfg.mrtd);
+        
+        // MR_CONFIG_ID (48 bytes) at offset 184
+        body[184..232].copy_from_slice(&[0x55; 48]);
+        
+        // MR_OWNER (48 bytes) at offset 232
+        body[232..280].copy_from_slice(&[0x66; 48]);
+        
+        // MR_OWNER_CONFIG (48 bytes) at offset 280
+        body[280..328].copy_from_slice(&[0x77; 48]);
+        
+        // RTMR 0-3 (4 * 48 bytes) at offset 328
+        body[328..376].copy_from_slice(&[0x11; 48]); // RTMR0
+        body[376..424].copy_from_slice(&[0x22; 48]); // RTMR1
+        body[424..472].copy_from_slice(&[0x33; 48]); // RTMR2
+        body[472..520].copy_from_slice(&[0x44; 48]); // RTMR3
+        
+        // Report data (64 bytes) at offset 520
+        let mut rd64 = [0u8; 64];
+        let m = rd64.len().min(report_data.len());
+        rd64[..m].copy_from_slice(&report_data[..m]);
+        body[520..584].copy_from_slice(&rd64);
 
-        // Create a simulated TDREPORT structure
-        let mut tdreport = vec![0u8; TDREPORT_SIZE];
+        q.extend_from_slice(&body);
 
-        let default_config = TdxSimulatorConfig::default();
-        let config = self.custom_measurements.as_ref().unwrap_or(&default_config);
+        // Signature data length + mock signature bytes
+        let sig = b"MOCK_TDX_SIGNATURE_DATA";
+        q.extend_from_slice(&(sig.len() as u32).to_le_bytes());
+        q.extend_from_slice(sig);
 
-        // Simulate TDREPORT structure (simplified version)
-        // Real TDREPORT has complex structure with many fields
-
-        // TEE TCB SVN (16 bytes at offset 0)
-        tdreport[0..16].copy_from_slice(&[
-            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
-            0x0f, 0x10,
-        ]);
-
-        // MRTD (48 bytes at offset 112)
-        tdreport[112..160].copy_from_slice(&config.mrtd);
-
-        // RTMRs (4 x 48 bytes starting at offset 304)
-        tdreport[304..352].copy_from_slice(&config.rtmr0);
-        tdreport[352..400].copy_from_slice(&config.rtmr1);
-        tdreport[400..448].copy_from_slice(&config.rtmr2);
-        tdreport[448..496].copy_from_slice(&config.rtmr3);
-
-        // TD Attributes (8 bytes at offset 64) - include debug flag
-        let mut attributes = 0u64;
-        if config.debug_enabled {
-            attributes |= 0x1; // Debug bit
-        }
-        tdreport[64..72].copy_from_slice(&attributes.to_le_bytes());
-
-        // Report data (64 bytes at offset 960)
-        let copy_len = std::cmp::min(user_data.len(), TDX_REPORT_DATA_SIZE);
-        tdreport[960..960 + copy_len].copy_from_slice(&user_data[..copy_len]);
-
-        Ok(tdreport)
-    }
-
-    /// Simulate complete quote generation with simulated QE
-    pub fn generate_quote(&self, user_data: &[u8]) -> Result<Vec<u8>> {
-        // Get simulated TDREPORT
-        let tdreport = self.get_tdreport(user_data)?;
-
-        // Create a simulated quote using our real parser's test data as template
-        use base64::{engine::general_purpose, Engine as _};
-        let base_quote = general_purpose::STANDARD.decode(
-            "BAACAIEAAAAAAAAAk5pyM/ecTKmUCg2zlX8GB5/OUj/OJupF09PbkG1RcaEAAAAAAwAFAAAAAAAAAAAAAAAAAC/SecFhZKk91b83PYNDKNRgCMK2k6+eu4ZbCLLO0yDJqJtIaan6tg++nQxaU2PGVgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAADnAgYAAAAAALZeoAnkJOb3Yf3T18iWJDlFOzfs32LaBPe8XTJ2hruLr8il0kqcMc7mDkq6h8L3GwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOGvdeYZJ0EOQrVLOfZoHPmwv7rlErFehw5MjZ1aXLOFVxsOHcL3C/nM7whWDworWCFf8fwMMUQsHwYaMXvkCUCxgsE9Q8bbLlsqV33em+6T1FKv091GxuEvmzA5EvMQsQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEhlbGxvIGZyb20gRWRnZWxlc3MgU3lzdGVtcyEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADMEAAAYbPmffGRNtL5ViDWxe44+/k3th7PC6R186hE9iAfQQG6Mf45s2kK"
-        ).map_err(|e| anyhow!("Failed to decode base quote: {}", e))?;
-
-        let mut quote = base_quote;
-
-        // Replace TD Report section with our simulated data
-        // Quote structure: Header(48) + TD Report(584) + Signature Length(4) + Signature Data
-        let tdreport_in_quote = &tdreport[0..584]; // TD Report is first 584 bytes of TDREPORT
-        quote[48..48 + 584].copy_from_slice(tdreport_in_quote);
-
-        // Update user data in the quote (offset 48 + 520 = 568)
-        let report_data_offset = 48 + 520;
-        let copy_len = std::cmp::min(user_data.len(), TDX_REPORT_DATA_SIZE);
-        quote[report_data_offset..report_data_offset + copy_len]
-            .copy_from_slice(&user_data[..copy_len]);
-
-        Ok(quote)
+        q
     }
 }
 
-/// Unified TDX interface that tries hardware first, falls back to simulator
-pub struct TdxInterface {
-    hardware: TdxHardware,
-    simulator: Option<TdxSimulator>,
-    force_simulation: bool,
-}
-
-impl Default for TdxInterface {
-    fn default() -> Self {
-        Self::new()
+impl TdxInterface for TdxSimulator {
+    fn is_hardware_available(&self) -> bool {
+        tracing::info!("TDX simulator always reports hardware available");
+        true
     }
-}
 
-impl TdxInterface {
-    pub fn new() -> Self {
-        Self {
-            hardware: TdxHardware::new(),
-            simulator: None,
-            force_simulation: false,
+    fn generate_quote(&self, report_data: &[u8]) -> Result<Vec<u8>> {
+        tracing::info!("Generating SIMULATED TDX quote with {} bytes of report data", report_data.len());
+        if report_data.len() > TDX_REPORT_DATA_SIZE {
+            return Err(anyhow!(
+                "report_data too large: {} > {}",
+                report_data.len(),
+                TDX_REPORT_DATA_SIZE
+            ));
         }
-    }
-
-    pub fn with_simulator(mut self, simulator: TdxSimulator) -> Self {
-        self.simulator = Some(simulator);
-        self
-    }
-
-    pub fn force_simulation(mut self) -> Self {
-        self.force_simulation = true;
-        self
-    }
-
-    pub fn is_hardware_available(&self) -> bool {
-        !self.force_simulation && self.hardware.is_available()
-    }
-
-    /// Get TDREPORT using hardware or simulator
-    pub fn get_tdreport(&self, user_data: &[u8]) -> Result<Vec<u8>> {
-        if self.is_hardware_available() {
-            log::info!("Using TDX hardware for TDREPORT generation");
-            self.hardware.get_tdreport(user_data)
-        } else if let Some(ref simulator) = self.simulator {
-            log::info!("Using TDX simulator for TDREPORT generation");
-            simulator.get_tdreport(user_data)
-        } else {
-            Err(anyhow!(
-                "No TDX hardware available and no simulator configured"
-            ))
-        }
-    }
-
-    /// Generate quote using hardware or simulator
-    /// In production mode, this should NOT fall back to simulation
-    pub fn generate_quote(&self, user_data: &[u8]) -> Result<Vec<u8>> {
-        if self.is_hardware_available() {
-            log::info!("Attempting TDX hardware quote generation");
-            // Try hardware - this should either succeed or fail with clear error
-            self.hardware.generate_quote(user_data)
-        } else if self.force_simulation && self.simulator.is_some() {
-            log::warn!("TDX hardware not available, using simulator (force_simulation=true)");
-            if let Some(ref simulator) = self.simulator {
-                simulator.generate_quote(user_data)
-            } else {
-                Err(anyhow!("Simulator requested but not configured"))
-            }
-        } else {
-            Err(anyhow!(
-                "TDX hardware not available at {} - cannot generate attestation quote. \
-                 For production use, ensure this system has Intel TDX support and /dev/tdx_guest device. \
-                 For testing, use .force_simulation()",
-                self.hardware.device_path
-            ))
-        }
-    }
-
-    /// Verify a TDX quote
-    pub fn verify_quote(&self, quote: &[u8]) -> Result<bool> {
-        // Always use hardware verification for production quotes
-        self.hardware.verify_quote(quote)
+        Ok(self.make_mock_quote(report_data))
     }
 }
 
@@ -444,81 +398,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_tdx_hardware_availability() {
+    fn sanity_simulator_quote() {
+        let sim = TdxSimulator::new();
+        let q = sim.generate_quote(b"hello tdx").unwrap();
+        assert!(q.len() > 600);
+        assert_eq!(&q[0..2], &4u16.to_le_bytes()); // version 4 default
+        assert_eq!(&q[2..4], &[0x02, 0x00]); // ECDSA
+        assert_eq!(&q[4..8], &0x00000081u32.to_le_bytes()); // TDX tee_type
+    }
+
+    #[test]
+    fn hardware_detection_is_boolean() {
         let hw = TdxHardware::new();
-        // This will be false on non-TDX systems
-        let available = hw.is_available();
-        println!("TDX hardware available: {}", available);
-    }
-
-    #[test]
-    fn test_tdx_simulator_tdreport() {
-        let sim = TdxSimulator::new();
-        let user_data = b"test data for simulator";
-
-        let tdreport = sim.get_tdreport(user_data).unwrap();
-        assert_eq!(tdreport.len(), TDREPORT_SIZE);
-
-        // Check that user data was embedded
-        assert_eq!(&tdreport[960..960 + user_data.len()], user_data);
-    }
-
-    #[test]
-    fn test_tdx_simulator_custom_config() {
-        let config = TdxSimulatorConfig {
-            mrtd: [0xFF; 48],
-            debug_enabled: true,
-            ..Default::default()
-        };
-
-        let sim = TdxSimulator::with_config(config);
-        let tdreport = sim.get_tdreport(b"test").unwrap();
-
-        // Check custom MRTD
-        assert_eq!(&tdreport[112..160], &[0xFF; 48]);
-
-        // Check debug flag is set
-        let attributes = u64::from_le_bytes(tdreport[64..72].try_into().unwrap());
-        assert_eq!(attributes & 0x1, 1);
-    }
-
-    #[test]
-    fn test_tdx_simulator_quote_generation() {
-        let sim = TdxSimulator::new();
-        let user_data = b"quote test data";
-
-        let quote = sim.generate_quote(user_data).unwrap();
-        assert!(quote.len() > 600); // Should be a valid quote size
-
-        // Parse the quote to verify it's valid
-        use crate::tdx::parser::TdxParser;
-        let parsed_quote = TdxParser::parse_quote(&quote).unwrap();
-        let claims = TdxParser::extract_claims(&parsed_quote);
-
-        // Verify user data was embedded
-        let extracted_msg = TdxParser::extract_user_message(&claims.report_data);
-        assert!(extracted_msg.starts_with("quote test"));
-    }
-
-    #[test]
-    fn test_tdx_interface_simulation() {
-        let sim = TdxSimulator::new();
-        let interface = TdxInterface::new().with_simulator(sim).force_simulation();
-
-        assert!(!interface.is_hardware_available());
-
-        let quote = interface.generate_quote(b"interface test").unwrap();
-        assert!(quote.len() > 600);
-    }
-
-    #[test]
-    fn test_tdx_simulator_failure_mode() {
-        let sim = TdxSimulator::new().with_failures();
-        let result = sim.get_tdreport(b"test");
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Simulated TDX hardware failure"));
+        let _ = hw.is_hardware_available(); // should not panic
+        assert!(true);
     }
 }

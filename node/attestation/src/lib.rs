@@ -182,11 +182,11 @@ impl AttestationService {
                             .verify_freshness_proof(&freshness_proof)
                             .await
                         {
-                            log::warn!("Freshness verification failed: {}", e);
+                            tracing::warn!("Freshness verification failed: {}", e);
                             // Continue verification but log warning
                         }
                     } else {
-                        log::warn!("No block hashes provided for freshness verification");
+                        tracing::warn!("No block hashes provided for freshness verification");
                     }
 
                     return Ok(claims);
@@ -222,7 +222,7 @@ impl AttestationService {
             // Note: We can't call mutable methods on trait objects in a Vec
             // This is a design limitation that would need to be addressed
             // For now, we'll implement a different approach in the concrete implementation
-            log::warn!("Provider config update not implemented for trait objects");
+            tracing::warn!("Provider config update not implemented for trait objects");
         }
         Ok(())
     }
