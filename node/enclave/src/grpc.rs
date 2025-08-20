@@ -483,13 +483,15 @@ impl Runner for EnclaveRunnerGrpcService {
 // --- Server Setup ---
 
 pub async fn start_grpc_server(config: &EnclaveConfig) -> Result<(), Box<dyn std::error::Error>> {
-    // Instantiate shared services
-    let secrets_service = Secrets::new();
+    // Generate shared ephemeral keypair for both secrets service and attestation manager
+    let ephemeral_kx_keypair = std::sync::Arc::new(crate::crypto::KeyExchangeKeyPair::generate());
+
+    // Instantiate shared services with the shared keypair
+    let secrets_service = Secrets::new_with_keypair(ephemeral_kx_keypair.clone());
     let runner_service = Arc::new(RunnerService::new(secrets_service.clone()));
 
-    // Initialize the platform attestation manager with a mock gateway provider
+    // Initialize the platform attestation manager with a mock gateway provider and shared keypair
     let mock_gateway = std::sync::Arc::new(crate::attestation::MockGatewayProvider);
-    let ephemeral_kx_keypair = std::sync::Arc::new(crate::crypto::KeyExchangeKeyPair::generate());
 
     if let Err(e) = crate::attestation::initialize_platform_attestation_manager(
         ephemeral_kx_keypair,

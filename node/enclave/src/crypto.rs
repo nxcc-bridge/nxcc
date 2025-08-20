@@ -228,12 +228,23 @@ pub fn decrypt_secrets_box(
 pub fn generate_attestation(ephemeral_kx_pk: &PublicKey, user_data: Vec<u8>) -> AttestationReport {
     use crate::attestation::get_platform_attestation_manager;
 
+    tracing::debug!(
+        "generate_attestation called with ephemeral_key: {} and user_data: {} bytes",
+        hex::encode(ephemeral_kx_pk.as_bytes()),
+        user_data.len()
+    );
+
     // Try to use the platform attestation manager if initialized
     if let Some(manager) = std::panic::catch_unwind(|| get_platform_attestation_manager()).ok() {
+        tracing::debug!("Platform attestation manager available, generating bound attestation");
         match futures::executor::block_on(async {
             manager.generate_bound_attestation(&user_data).await
         }) {
             Ok(bundle) => {
+                tracing::info!(
+                    "Successfully generated platform attestation with {} block hashes",
+                    bundle.block_hashes.len()
+                );
                 // Convert AttestationBundle to AttestationReport for backward compatibility
                 return AttestationReport {
                     ephemeral_public_key: ephemeral_kx_pk.as_bytes().to_vec(),
@@ -258,6 +269,7 @@ pub fn generate_attestation(ephemeral_kx_pk: &PublicKey, user_data: Vec<u8>) -> 
     }
 
     // Fallback to dummy attestation
+    tracing::debug!("Using dummy attestation fallback");
     AttestationReport {
         ephemeral_public_key: ephemeral_kx_pk.as_bytes().to_vec(),
         measurement: vec![0u8; 32],                       // Placeholder
