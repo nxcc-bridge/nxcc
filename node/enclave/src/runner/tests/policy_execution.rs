@@ -423,7 +423,7 @@ async fn test_execute_policy_with_attestation_claims() {
     let env_report = EnvReport {
         node_id: node_id.to_string(),
         attestation: attestation_report,
-        operator_signature: vec![], // Not needed for this test
+        operator_signature: None, // Not needed for this test
     };
 
     let mut context = PolicyExecutionRequest {
@@ -522,7 +522,7 @@ async fn test_execute_policy_bad_quote_no_claims() {
     let env_report = EnvReport {
         node_id: node_id.to_string(),
         attestation: bad_attestation,
-        operator_signature: vec![],
+        operator_signature: None,
     };
 
     let context = PolicyExecutionRequest {
@@ -612,7 +612,7 @@ async fn test_execute_policy_verification_before_execution() {
     let env_report = EnvReport {
         node_id: node_id.to_string(),
         attestation: good_attestation,
-        operator_signature: vec![],
+        operator_signature: None,
     };
 
     let context = PolicyExecutionRequest {

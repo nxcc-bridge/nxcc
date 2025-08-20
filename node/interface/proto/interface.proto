@@ -13,6 +13,10 @@ message AttestationReport {
   bytes user_data = 4;
 }
 
+message OperatorSignature {
+  bytes cose_sign1 = 1;         // COSE_Sign1 signature (RFC 8152) containing the operator signature
+}
+
 message SecretsBox {
   bytes encrypted_payload = 1;
   bytes sender_public_key = 2;
@@ -39,7 +43,7 @@ message SecretRequest {
 
 message EnvReport {
   AttestationReport attestation = 1;
-  bytes operator_signature = 2;
+  OperatorSignature operator_signature = 2;  // Changed from bytes to structured OperatorSignature
   string node_id = 3;
 }
 

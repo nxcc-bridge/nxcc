@@ -52,7 +52,7 @@ pub fn test_env_report_for_client(
             block_hashes: vec![vec![1, 2]], // Consistent block_hashes
             user_data: user_data_for_attestation,
         },
-        operator_signature: vec![3; 64], // Consistent operator_signature
+        operator_signature: None, // Consistent operator_signature
         node_id: node_id.to_string(),
     }
 }
@@ -266,7 +266,7 @@ pub async fn authorize_self_generation(secrets_service: &Secrets, secret_id: &Se
         .expect("Failed to get self-report for auth");
     let self_env_report = EnvReport {
         attestation: self_attestation,
-        operator_signature: vec![], // Not relevant for self-auth policy
+        operator_signature: None, // Not relevant for self-auth policy
         node_id: "self-enclave".to_string(), // Identifier for logging/policy
     };
     let request = PolicyExecutionRequest {

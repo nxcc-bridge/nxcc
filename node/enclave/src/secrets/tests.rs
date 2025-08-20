@@ -29,7 +29,7 @@ fn test_attestation_report(ephemeral_pk: Vec<u8>, user_data: Vec<u8>) -> Attesta
 fn test_env_report(node_id: &str, attestation: AttestationReport) -> EnvReport {
     EnvReport {
         attestation,
-        operator_signature: vec![7; 64], // Consistent signature
+        operator_signature: None, // No operator signature for test
         node_id: node_id.to_string(),
     }
 }

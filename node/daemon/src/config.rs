@@ -305,6 +305,12 @@ pub struct AttestationConfig {
     #[clap(long, value_delimiter = ',')]
     #[serde(default = "default_freshness_chain_ids")]
     pub freshness_chain_ids: Vec<u64>,
+
+    /// Path to the operator signing key file (Ed25519 private key)
+    /// If not provided, operator signatures will not be included in attestations
+    /// The public key will be automatically derived from the private key
+    #[clap(long, env = "NXCC_OPERATOR_SIGNING_KEY")]
+    pub operator_signing_key_path: Option<PathBuf>,
 }
 
 impl Default for AttestationConfig {
@@ -317,6 +323,7 @@ impl Default for AttestationConfig {
             max_block_age: default_max_block_age(),
             min_chain_count: default_min_chain_count(),
             freshness_chain_ids: default_freshness_chain_ids(),
+            operator_signing_key_path: None,
         }
     }
 }
@@ -525,5 +532,6 @@ mod tests {
         assert_eq!(base_config.attestation.prefer_local_verification, true); // Should remain from base
         assert_eq!(base_config.attestation.min_chain_count, 2); // Should remain from base
         assert_eq!(base_config.attestation.freshness_chain_ids, vec![1, 2]); // Should remain from base
+        assert_eq!(base_config.attestation.operator_signing_key_path, None); // Default None
     }
 }

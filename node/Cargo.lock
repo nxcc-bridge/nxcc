@@ -1698,6 +1698,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "coset"
+version = "0.3.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4c8cc80f631f8307b887faca24dcc3abc427cd0367f6eb6188f6e8f5b7ad8fb"
+dependencies = [
+ "ciborium",
+ "ciborium-io",
+]
+
+[[package]]
 name = "cpufeatures"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2043,6 +2053,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "115531babc129696a58c64a4fef0a8bf9e9698629fb97e9e40767d235cfbcd53"
 dependencies = [
  "pkcs8",
+ "serde",
  "signature",
 ]
 
@@ -4118,6 +4129,7 @@ dependencies = [
  "async-trait",
  "base64",
  "der",
+ "ed25519-dalek",
  "hex",
  "libc",
  "log",
@@ -4175,11 +4187,14 @@ dependencies = [
  "chrono",
  "ciborium",
  "clap",
+ "coset",
+ "ed25519-dalek",
  "figment",
  "futures",
  "futures-util",
  "hyper-util",
  "libp2p",
+ "nxcc-attestation",
  "nxcc-chainlist",
  "nxcc-interface",
  "percent-encoding",

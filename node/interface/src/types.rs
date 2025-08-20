@@ -277,10 +277,31 @@ impl From<SecretRequest> for interface::SecretRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OperatorSignature {
+    pub cose_sign1: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnvReport {
     pub attestation: AttestationReport,
-    pub operator_signature: Vec<u8>,
+    pub operator_signature: Option<OperatorSignature>,
     pub node_id: String,
+}
+
+impl From<interface::OperatorSignature> for OperatorSignature {
+    fn from(p: interface::OperatorSignature) -> Self {
+        Self {
+            cose_sign1: p.cose_sign1,
+        }
+    }
+}
+
+impl From<OperatorSignature> for interface::OperatorSignature {
+    fn from(value: OperatorSignature) -> Self {
+        interface::OperatorSignature {
+            cose_sign1: value.cose_sign1,
+        }
+    }
 }
 
 impl TryFrom<interface::EnvReport> for EnvReport {
@@ -291,7 +312,7 @@ impl TryFrom<interface::EnvReport> for EnvReport {
                 .attestation
                 .map(AttestationReport::from)
                 .ok_or(ConversionError::MissingField("attestation".to_string()))?,
-            operator_signature: p.operator_signature,
+            operator_signature: p.operator_signature.map(OperatorSignature::from),
             node_id: p.node_id,
         })
     }
@@ -301,7 +322,7 @@ impl From<EnvReport> for interface::EnvReport {
     fn from(value: EnvReport) -> Self {
         interface::EnvReport {
             attestation: Some(value.attestation.into()),
-            operator_signature: value.operator_signature,
+            operator_signature: value.operator_signature.map(|sig| sig.into()),
             node_id: value.node_id,
         }
     }
@@ -311,7 +332,7 @@ impl From<&EnvReport> for interface::EnvReport {
     fn from(value: &EnvReport) -> Self {
         interface::EnvReport {
             attestation: Some(value.attestation.clone().into()),
-            operator_signature: value.operator_signature.clone(),
+            operator_signature: value.operator_signature.clone().map(|sig| sig.into()),
             node_id: value.node_id.clone(),
         }
     }

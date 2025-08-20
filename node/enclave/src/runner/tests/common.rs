@@ -41,7 +41,7 @@ pub fn test_policy_request(node_id: &str, secret_ids: Vec<SecretId>) -> PolicyEx
                 block_hashes: vec![vec![4, 5], vec![6, 7]],
                 user_data: vec![8, 9],
             },
-            operator_signature: vec![10; 64],
+            operator_signature: None,
             node_id: node_id.to_string(),
         },
     }

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use ed25519_dalek::{Signer, Verifier};
 use nxcc_interface::gateway::BlockInfo;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -129,6 +130,77 @@ impl UserDataBinding {
         let expected_user_data = self.extract_user_data();
 
         ephemeral_key == expected_ephemeral && user_data == expected_user_data
+    }
+}
+
+/// Operator signature over attestation evidence  
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OperatorSignature {
+    /// Ed25519 signature over the hash of the raw attestation evidence
+    pub signature: Vec<u8>,
+    /// Ed25519 public key of the operator who signed
+    pub public_key: Vec<u8>,
+    /// Algorithm identifier: "Ed25519"
+    pub algorithm: String,
+}
+
+impl OperatorSignature {
+    /// Create a new operator signature over raw attestation evidence
+    pub fn new(signing_key: &[u8], raw_attestation: &RawAttestation) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        if signing_key.len() != 32 {
+            return Err("Ed25519 signing key must be 32 bytes".into());
+        }
+
+        // Hash the raw attestation evidence
+        let mut hasher = Sha256::new();
+        hasher.update(&raw_attestation.evidence);
+        let evidence_hash = hasher.finalize();
+
+        // Sign the hash using Ed25519
+        let signing_key_array: [u8; 32] = signing_key.try_into()
+            .map_err(|_| "Signing key must be exactly 32 bytes")?;
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&signing_key_array);
+        let public_key = signing_key.verifying_key();
+        let signature = signing_key.sign(&evidence_hash);
+
+        Ok(Self {
+            signature: signature.to_bytes().to_vec(),
+            public_key: public_key.to_bytes().to_vec(),
+            algorithm: "Ed25519".to_string(),
+        })
+    }
+
+    /// Verify the operator signature against raw attestation evidence
+    pub fn verify(&self, raw_attestation: &RawAttestation) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if self.algorithm != "Ed25519" {
+            return Err(format!("Unsupported signature algorithm: {}", self.algorithm).into());
+        }
+
+        if self.public_key.len() != 32 {
+            return Err("Ed25519 public key must be 32 bytes".into());
+        }
+
+        if self.signature.len() != 64 {
+            return Err("Ed25519 signature must be 64 bytes".into());
+        }
+
+        // Hash the raw attestation evidence
+        let mut hasher = Sha256::new();
+        hasher.update(&raw_attestation.evidence);
+        let evidence_hash = hasher.finalize();
+
+        // Verify the signature
+        let public_key_array: [u8; 32] = self.public_key.as_slice().try_into()
+            .map_err(|_| "Public key must be exactly 32 bytes")?;
+        let signature_array: [u8; 64] = self.signature.as_slice().try_into()
+            .map_err(|_| "Signature must be exactly 64 bytes")?;
+
+        let verifying_key = ed25519_dalek::VerifyingKey::from_bytes(&public_key_array)
+            .map_err(|e| format!("Invalid Ed25519 public key: {}", e))?;
+        let signature = ed25519_dalek::Signature::from_bytes(&signature_array);
+
+        verifying_key.verify(&evidence_hash, &signature)
+            .map_err(|e| format!("Signature verification failed: {}", e).into())
     }
 }
 
@@ -330,4 +402,77 @@ pub enum VerificationResult {
     Unsupported,
     /// Verification failed definitively (attestation is invalid)
     Failed(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_operator_signature_creation_and_verification() {
+        // Create a test signing key
+        let signing_key = [0u8; 32]; // Simple test key
+        
+        // Create a mock raw attestation
+        let raw_attestation = RawAttestation {
+            platform_type: "test".to_string(),
+            evidence: vec![1, 2, 3, 4, 5], // Simple test evidence
+            certificates: None,
+        };
+
+        // Create operator signature
+        let operator_signature = OperatorSignature::new(&signing_key, &raw_attestation)
+            .expect("Failed to create operator signature");
+
+        // Verify the signature
+        assert!(operator_signature.verify(&raw_attestation).is_ok(), 
+                "Operator signature verification should succeed");
+        
+        // Verify algorithm is correct
+        assert_eq!(operator_signature.algorithm, "Ed25519");
+        
+        // Verify public key is 32 bytes
+        assert_eq!(operator_signature.public_key.len(), 32);
+        
+        // Verify signature is 64 bytes
+        assert_eq!(operator_signature.signature.len(), 64);
+    }
+
+    #[test]
+    fn test_operator_signature_verification_fails_with_wrong_evidence() {
+        let signing_key = [0u8; 32];
+        
+        let original_attestation = RawAttestation {
+            platform_type: "test".to_string(),
+            evidence: vec![1, 2, 3, 4, 5],
+            certificates: None,
+        };
+
+        let modified_attestation = RawAttestation {
+            platform_type: "test".to_string(),
+            evidence: vec![1, 2, 3, 4, 6], // Different evidence
+            certificates: None,
+        };
+
+        // Create signature with original evidence
+        let operator_signature = OperatorSignature::new(&signing_key, &original_attestation)
+            .expect("Failed to create operator signature");
+
+        // Verify should fail with modified evidence
+        assert!(operator_signature.verify(&modified_attestation).is_err(),
+                "Operator signature verification should fail with modified evidence");
+    }
+
+    #[test]
+    fn test_operator_signature_invalid_key_size() {
+        let invalid_key = [0u8; 16]; // Wrong size
+        let raw_attestation = RawAttestation {
+            platform_type: "test".to_string(),
+            evidence: vec![1, 2, 3],
+            certificates: None,
+        };
+
+        let result = OperatorSignature::new(&invalid_key, &raw_attestation);
+        assert!(result.is_err(), "Should fail with invalid key size");
+    }
 }

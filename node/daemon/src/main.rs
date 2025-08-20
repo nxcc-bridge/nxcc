@@ -110,6 +110,7 @@ async fn main() -> anyhow::Result<()> {
         policy_manager.clone(),
         runner_service.clone(), // Inject RunnerService
         local_key.clone(),      // Pass the local keypair
+        Arc::new(config.clone()), // Pass config
     );
 
     let mut network = NetworkManager::new(

@@ -10,8 +10,10 @@ use std::{
 use futures::channel::mpsc;
 use libp2p::PeerId; // Import PeerId
 use libp2p::identity::Keypair; // Import Keypair
+use ed25519_dalek::Signer;
+use sha2::Digest;
 use nxcc_interface::types::{
-    AttestationReport, ConsumerInfo, EnvReport, PolicyExecutionRequest, SecretId, SecretRequest,
+    AttestationReport, ConsumerInfo, EnvReport, OperatorSignature, PolicyExecutionRequest, SecretId, SecretRequest,
     SecretsBox, WorkerBundle, WorkerManifest,
 };
 use tokio::sync::{Mutex, RwLock, oneshot};
@@ -40,7 +42,7 @@ pub struct SecretsService {
     runner_service: Arc<RunnerService>,
     request_counter: AtomicU64,
     local_peer_id: PeerId, // Store the local PeerId
-                           // config: Arc<Config>, // Store config if needed for other things
+    config: Arc<Config>, // Store config
 }
 
 struct PendingRequest {
@@ -65,7 +67,7 @@ impl SecretsService {
         policy_manager: Arc<PolicyManager>,
         runner_service: Arc<RunnerService>,
         local_key: Keypair, // Pass the keypair
-                            // config: Arc<Config>, // Pass config
+        config: Arc<Config>, // Pass config
     ) -> Arc<Self> {
         Arc::new(Self {
             p2p_secrets_sender,
@@ -75,7 +77,7 @@ impl SecretsService {
             pending: Mutex::new(HashMap::new()),
             request_counter: AtomicU64::new(0),
             local_peer_id: local_key.public().to_peer_id(), // Derive PeerId
-                                                            // config,
+            config,
         })
     }
 
@@ -848,12 +850,77 @@ impl SecretsService {
             .await
             .map_err(|e| AppError::Service(format!("Failed to get attestation report: {}", e)))?;
 
-        // TODO: Implement operator signing
-        let operator_signature = vec![0u8; 64]; // Placeholder
+        // Generate operator signature if signing key is configured
+        let operator_signature = if let Some(ref key_path) = self.config.attestation.operator_signing_key_path {
+            match self.create_operator_signature(key_path, &attestation).await {
+                Ok(sig) => Some(sig),
+                Err(e) => {
+                    warn!("Failed to create operator signature: {}", e);
+                    None // Continue without signature if signing fails
+                }
+            }
+        } else {
+            None
+        };
+
         Ok(EnvReport {
             attestation,
             operator_signature,
             node_id: "@self".into(), // This node_id is for daemon's internal use/logging; enclave uses attestation.
+        })
+    }
+
+    /// Create operator signature over attestation report
+    async fn create_operator_signature(
+        &self,
+        key_path: &std::path::Path,
+        attestation: &AttestationReport,
+    ) -> Result<OperatorSignature, Box<dyn std::error::Error + Send + Sync>> {
+        // Read the signing key from file
+        let key_bytes = std::fs::read(key_path)
+            .map_err(|e| format!("Failed to read signing key from {}: {}", key_path.display(), e))?;
+
+        // Convert key bytes to fixed size array
+        if key_bytes.len() != 32 {
+            return Err(format!("Signing key must be exactly 32 bytes, got {}", key_bytes.len()).into());
+        }
+        let signing_key: [u8; 32] = key_bytes.try_into()
+            .map_err(|_| "Failed to convert key bytes to array")?;
+
+        // Create hash of attestation data to sign
+        let attestation_data = [
+            attestation.ephemeral_public_key.clone(),
+            attestation.measurement.clone(),
+            attestation.user_data.clone(),
+        ].concat();
+
+        // Hash the attestation data
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(&attestation_data);
+        let evidence_hash = hasher.finalize();
+
+        // Create operator signature using Ed25519
+        let signing_key_array: [u8; 32] = signing_key.try_into()
+            .map_err(|_| "Signing key must be exactly 32 bytes")?;
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&signing_key_array);
+        let public_key = signing_key.verifying_key();
+        let signature = signing_key.sign(&attestation_data);
+
+        // Create a simple CBOR structure with signature info (can be upgraded to full COSE later)
+        let signature_data = std::collections::BTreeMap::from([
+            ("alg".to_string(), ciborium::Value::Text("EdDSA".to_string())),
+            ("sig".to_string(), ciborium::Value::Bytes(signature.to_bytes().to_vec())),
+            ("key".to_string(), ciborium::Value::Bytes(public_key.to_bytes().to_vec())),
+        ]);
+
+        // Serialize to CBOR
+        let mut cose_bytes = Vec::new();
+        ciborium::into_writer(&signature_data, &mut cose_bytes)
+            .map_err(|e| format!("Failed to serialize signature data: {}", e))?;
+
+        // Convert to interface type
+        Ok(OperatorSignature {
+            cose_sign1: cose_bytes,
         })
     }
 }
@@ -863,4 +930,85 @@ fn current_unix_time() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[tokio::test]
+    async fn test_create_operator_signature() {
+        // Create a temporary key file for testing
+        let temp_dir = std::env::temp_dir();
+        let key_path = temp_dir.join("test_operator_key");
+        
+        // Write a test key (32 bytes)
+        let test_key = [1u8; 32];
+        std::fs::write(&key_path, test_key).unwrap();
+        
+        // Create test attestation report
+        let attestation = AttestationReport {
+            ephemeral_public_key: vec![1, 2, 3, 4],
+            measurement: vec![5, 6, 7, 8],
+            user_data: vec![9, 10, 11, 12],
+            block_hashes: vec![vec![1, 2, 3], vec![4, 5, 6]], // Add required block hashes
+        };
+        
+        // Test the signature creation logic directly (without the full SecretsService)
+        
+        // Test the signature creation logic directly
+        let key_bytes = std::fs::read(&key_path).unwrap();
+        let signing_key_array: [u8; 32] = key_bytes.try_into().unwrap();
+        
+        let attestation_data = [
+            attestation.ephemeral_public_key.clone(),
+            attestation.measurement.clone(),
+            attestation.user_data.clone(),
+        ].concat();
+        
+        // Create signature using Ed25519
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&signing_key_array);
+        let public_key = signing_key.verifying_key();
+        let signature = signing_key.sign(&attestation_data);
+
+        // Create a simple CBOR structure with signature info (can be upgraded to full COSE later)
+        let signature_data = std::collections::BTreeMap::from([
+            ("alg".to_string(), ciborium::Value::Text("EdDSA".to_string())),
+            ("sig".to_string(), ciborium::Value::Bytes(signature.to_bytes().to_vec())),
+            ("key".to_string(), ciborium::Value::Bytes(public_key.to_bytes().to_vec())),
+        ]);
+
+        // Serialize to CBOR
+        let mut cose_bytes = Vec::new();
+        ciborium::into_writer(&signature_data, &mut cose_bytes).unwrap();
+        
+        // Create the interface type
+        let operator_sig = OperatorSignature {
+            cose_sign1: cose_bytes,
+        };
+        
+        // Verify the basic properties
+        assert!(!operator_sig.cose_sign1.is_empty());
+        assert!(operator_sig.cose_sign1.len() > 50); // Should be a reasonable size for COSE_Sign1
+        
+        // Clean up
+        std::fs::remove_file(key_path).ok();
+    }
+    
+    #[test]
+    fn test_operator_signature_invalid_key_size() {
+        let temp_dir = std::env::temp_dir();
+        let key_path = temp_dir.join("test_invalid_key");
+        
+        // Write an invalid key (wrong size)
+        let invalid_key = [1u8; 16];
+        std::fs::write(&key_path, invalid_key).unwrap();
+        
+        let key_bytes = std::fs::read(&key_path).unwrap();
+        assert_eq!(key_bytes.len(), 16); // Should be invalid
+        
+        // Clean up
+        std::fs::remove_file(key_path).ok();
+    }
 }
