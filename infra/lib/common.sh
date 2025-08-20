@@ -51,12 +51,6 @@ export TDX_VM_PREEMPTIBLE
 readonly GCP_AR_LOCATION="${GCP_AR_LOCATION:-europe}"
 readonly GCP_GKE_REGION="${GCP_GKE_REGION:-europe-west1}"
 
-# --- TDX Development VM Config ---
-readonly TDX_VM_NAME="${TDX_VM_NAME:-nxcc-tdx-dev}"
-readonly TDX_VM_ZONE="${TDX_VM_ZONE:-us-central1-a}"                  # TDX available region
-readonly TDX_VM_MACHINE_TYPE="${TDX_VM_MACHINE_TYPE:-n2d-standard-2}" # Confidential computing supported
-readonly TDX_VM_IMAGE_FAMILY="${TDX_VM_IMAGE_FAMILY:-ubuntu-2204-lts}"
-readonly TDX_VM_IMAGE_PROJECT="${TDX_VM_IMAGE_PROJECT:-ubuntu-os-cloud}"
 
 # --- Color Codes for Output ---
 readonly C_GREEN='\033[0;32m'

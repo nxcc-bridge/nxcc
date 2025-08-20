@@ -518,7 +518,7 @@ dev_status_vm() {
 }
 
 ################################################################################
-# Syncs local code to the TDX development VM using rsync.
+# Syncs local code to the TDX development VM using rsync with gitignore support.
 # Arguments:
 #   <source_dir>  The local directory to sync (defaults to current directory)
 ################################################################################
@@ -530,31 +530,66 @@ dev_push_code() {
 
 	if ! gcloud compute instances describe "${TDX_VM_NAME}" --zone="${TDX_VM_ZONE}" --project="${RESOLVED_PROJECT_ID}" --account="${RESOLVED_GCP_ACCOUNT}" &>/dev/null; then
 		error "VM ${TDX_VM_NAME} does not exist. Create it first with: ./infra.sh dev create"
+		return 1
 	fi
 
 	local vm_status
 	vm_status=$(gcloud compute instances describe "${TDX_VM_NAME}" --zone="${TDX_VM_ZONE}" --project="${RESOLVED_PROJECT_ID}" --account="${RESOLVED_GCP_ACCOUNT}" --format="value(status)")
 	if [[ "$vm_status" != "RUNNING" ]]; then
 		error "VM is not running (status: $vm_status). Start it first with: ./infra.sh dev ssh"
+		return 1
 	fi
 
-	info "Creating archive of all files (excluding gitignored)..."
-	local temp_archive="/tmp/nxcc-git-sync.$$.tar.gz"
-	if (cd "$source_dir" && git ls-files -o -c --exclude-standard | while IFS= read -r file; do test -e "$file" && echo "$file"; done | tar -czf "$temp_archive" -T -); then
-		info "Uploading files to VM..."
-		if gcloud compute scp --zone="${TDX_VM_ZONE}" --project="${RESOLVED_PROJECT_ID}" --account="${RESOLVED_GCP_ACCOUNT}" "$temp_archive" ubuntu@"${TDX_VM_NAME}:/tmp/nxcc-sync.tar.gz"; then
-			info "Extracting files on VM..."
-			if gcloud compute ssh ubuntu@"${TDX_VM_NAME}" --zone="${TDX_VM_ZONE}" --project="${RESOLVED_PROJECT_ID}" --account="${RESOLVED_GCP_ACCOUNT}" --command="mkdir -p /home/ubuntu/nxcc && cd /home/ubuntu/nxcc && find . -maxdepth 1 -type f -delete && find . -maxdepth 1 -type d ! -name '.' ! -name 'target' ! -name 'node_modules' -exec rm -rf {} + && tar -xzf /tmp/nxcc-sync.tar.gz && rm -f /tmp/nxcc-sync.tar.gz"; then
-				success "Code synced successfully to VM!"
-				info "Remote path: /home/ubuntu/nxcc/"
-			else
-				error "Failed to extract files on VM"
+	# Ensure the remote directory exists
+	if ! gcloud compute ssh ubuntu@"${TDX_VM_NAME}" --zone="${TDX_VM_ZONE}" --project="${RESOLVED_PROJECT_ID}" --account="${RESOLVED_GCP_ACCOUNT}" --command="mkdir -p /home/ubuntu/nxcc"; then
+		error "Failed to create remote directory"
+		return 1
+	fi
+
+	info "Syncing files with rsync (respecting .gitignore)..."
+
+	# Create rsync exclude patterns from .gitignore
+	local rsync_excludes=""
+	if [[ -f "$source_dir/.gitignore" ]]; then
+		# Convert .gitignore patterns to rsync exclude patterns
+		while IFS= read -r line; do
+			# Skip empty lines and comments
+			if [[ -n "$line" && ! "$line" =~ ^[[:space:]]*# ]]; then
+				# Remove trailing slashes for rsync
+				line="${line%/}"
+				rsync_excludes="$rsync_excludes --exclude=$line"
 			fi
-		else
-			error "Failed to upload files to VM"
-		fi
-		rm -f "$temp_archive"
+		done <"$source_dir/.gitignore"
+	fi
+
+	# Additional excludes for common cache directories and files that should never sync
+	rsync_excludes="$rsync_excludes --exclude=.git --exclude=.DS_Store --exclude=*.swp --exclude=*.tmp"
+
+	# Get the external IP and prepare SSH configuration matching gcloud
+	local external_ip
+	external_ip=$(gcloud compute instances describe "${TDX_VM_NAME}" --zone="${TDX_VM_ZONE}" --project="${RESOLVED_PROJECT_ID}" --account="${RESOLVED_GCP_ACCOUNT}" --format="value(networkInterfaces[0].accessConfigs[0].natIP)")
+
+	if [[ -z "$external_ip" ]]; then
+		error "No external IP found for VM"
+		return 1
+	fi
+
+	# Use the exact SSH configuration that gcloud uses
+	local ssh_key_path="$HOME/.ssh/google_compute_engine"
+	local known_hosts_path="$HOME/.ssh/google_compute_known_hosts"
+	local host_key_alias="compute.$(gcloud compute instances describe "${TDX_VM_NAME}" --zone="${TDX_VM_ZONE}" --project="${RESOLVED_PROJECT_ID}" --account="${RESOLVED_GCP_ACCOUNT}" --format="value(id)")"
+
+	# Build SSH command exactly like gcloud does
+	local ssh_cmd="ssh -i $ssh_key_path -o CheckHostIP=no -o HashKnownHosts=no -o HostKeyAlias=$host_key_alias -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts_path"
+
+	info "Using rsync with gcloud SSH configuration to $external_ip..."
+
+	# Run rsync with the exact SSH configuration gcloud uses
+	if rsync -avz --delete $rsync_excludes -e "$ssh_cmd" "$source_dir/" ubuntu@"$external_ip":/home/ubuntu/nxcc/; then
+		success "Code synced successfully to VM!"
+		info "Remote path: /home/ubuntu/nxcc/"
 	else
-		error "Failed to create file archive. Make sure you're in a git repository."
+		error "rsync failed to sync code to VM"
+		return 1
 	fi
 }

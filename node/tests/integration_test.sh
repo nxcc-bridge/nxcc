@@ -7,9 +7,9 @@ set -e # Exit immediately if a command exits with a non-zero status.
 # NXCC Comprehensive Integration Test
 # =============================================================================
 # This test combines all NXCC functionality into a single comprehensive test:
-# - 3-node attestation-based architecture (Alice, Bob trusted; Charlie untrusted) 
+# - 3-node attestation-based architecture (Alice, Bob trusted; Charlie untrusted)
 # - Secret sharing with real attestation policies
-# - Cross-chain event handling 
+# - Cross-chain event handling
 # - HTTP worker testing
 # - Worker log streaming
 # - Scheduled events
@@ -30,7 +30,7 @@ generate_operator_key() {
 	local key_path="$1"
 	# Generate a 32-byte random key file for Ed25519 private key
 	# The NXCC daemon will interpret this as raw key bytes
-	head -c 32 /dev/urandom > "$key_path"
+	head -c 32 /dev/urandom >"$key_path"
 }
 
 TEST_DIR=$(create_tmp_dir "nxcc-comprehensive-test")
@@ -93,7 +93,7 @@ TEST_WORKER_JS_PATH="$SCRIPT_DIR/policy/test_worker_integration.js"
 DSSE_WORK_ORDER_PAYLOAD_TYPE="application/vnd.nxcc.workorderpayload.v1+json"
 
 NODE1_NAME="alice"   # Trusted node
-NODE2_NAME="bob"     # Trusted node  
+NODE2_NAME="bob"     # Trusted node
 NODE3_NAME="charlie" # Untrusted node (will be blocked by attestation policy)
 NODE1_P2P_PORT=9001
 NODE2_P2P_PORT=9002
@@ -268,7 +268,7 @@ jq -n \
 	'{work_order_dsse_bytes: $work_order_dsse_bytes}' >"$GRPCURL_SUBMIT_ORIG_WO_PAYLOAD_FILE"
 
 # ==============================================================================
-# PHASE 1: Multi-Node Setup with Attestation-Based Architecture  
+# PHASE 1: Multi-Node Setup with Attestation-Based Architecture
 # ==============================================================================
 echo "🚀 === PHASE 1: Setting up 3-Node Attestation Architecture ==="
 
@@ -435,7 +435,7 @@ for i in $( # Poll for up to 15 seconds
 		CHARLIE_DERIVED_BITS=$(grep "stdout:.*DERIVED_BASE64:" "$charlie_DAEMON_LOG" | tail -n 1 | sed -E 's/.*DERIVED_BASE64: ([A-Za-z0-9+/=]*).*/\1/')
 		break
 	fi
-	
+
 	# Check daemon logs for policy blocking
 	# shellcheck disable=SC2154  # charlie_DAEMON_LOG is set by setup_node
 	if [ -f "$charlie_DAEMON_LOG" ] && (grep -q "DENIED" "$charlie_DAEMON_LOG" || grep -q "not in trusted whitelist" "$charlie_DAEMON_LOG"); then
@@ -443,7 +443,7 @@ for i in $( # Poll for up to 15 seconds
 		echo "  🔍 Found policy denial in Charlie's logs"
 		break
 	fi
-	
+
 	sleep 1
 done
 
@@ -1055,7 +1055,7 @@ fi
 echo ""
 echo "🛡️ Step 5c: Security Validation and Forgery Protection"
 
-# Add comprehensive security validation 
+# Add comprehensive security validation
 echo "🔍 Validating attestation security architecture..."
 
 echo "✅ Quote Verification Protection:"
@@ -1077,7 +1077,7 @@ echo "                ↑                        ↑                   ↑"
 echo "           Crypto validation        EAT compliance      Business logic"
 
 # Create verification flow documentation
-cat > "$TEST_DIR/verification_flow_demo.txt" << 'EOF'
+cat >"$TEST_DIR/verification_flow_demo.txt" <<'EOF'
 NXCC Attestation Verification Security Flow:
 
 1. Work Order Received
