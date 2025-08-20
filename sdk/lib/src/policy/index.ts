@@ -1,14 +1,83 @@
 /**
+ * Standardized attestation claims following IETF EAT (RFC 9711)
+ * These are the verified claims extracted from the attestation
+ */
+export interface AttestationClaims {
+  /** Issued-at time of the evidence production or verification moment */
+  iat: number;
+  /** Verifier challenge to prevent replay (if used) */
+  eat_nonce?: Uint8Array;
+  /** Stable device/realm identity */
+  ueid?: Uint8Array;
+  /** Manufacturer identifier */
+  oemid?: string;
+  /** Hardware model descriptor */
+  hwmodel?: string;
+  /** Hardware/firmware version string */
+  hwversion?: string;
+  /** Debug/production mode: 0=debug disabled (production), 4=debug enabled */
+  dbgstat: number;
+  /** OEM-authorized secure boot active */
+  oemboot?: boolean;
+  /** Product or component name of the attested software root */
+  swname?: string;
+  /** Version string of the attested software root */
+  swversion?: string;
+  /** Cryptographic measurements relevant to trust decisions */
+  measurements: Array<{
+    /** Hash value */
+    val: Uint8Array;
+    /** Hash algorithm: "sha-256", "sha-384", or "sha-512" */
+    alg: string;
+    /** Category: "boot", "firmware", "kernel", "initrd", "vmm", "application", "policy", etc. */
+    measurement_type?: string;
+    /** Vendor information */
+    vendor?: string;
+    /** Version information */
+    version?: string;
+  }>;
+  /** Proof-of-possession key bound to this attested state */
+  cnf?: {
+    jwk?: {
+      /** Key type: "EC", "RSA", "OKP" */
+      kty: string;
+      /** Curve for EC/OKP keys: "P-256", "P-384", "P-521", "X25519", "Ed25519" */
+      crv?: string;
+      /** X coordinate (for EC keys) or raw key (for OKP) */
+      x?: string;
+      /** Y coordinate (for EC keys) */
+      y?: string;
+    };
+    cose_key?: Uint8Array;
+  };
+  /** Intended use for the token/key (typically 5 for proof-of-possession) */
+  intuse?: number;
+  /** Seconds since last boot according to the attested environment */
+  uptime?: number;
+  /** Number of boots observed */
+  bootcount?: number;
+  /** Per-boot unique random seed to distinguish boot instances */
+  bootseed?: Uint8Array;
+  /** URI-like identifier of the interpretation profile for platform specifics */
+  eat_profile: string;
+}
+
+/**
  * Policy execution request from the NXCC platform.
  * Contains attestation data and other context for authorization decisions.
  */
 export interface PolicyExecutionRequest {
   env_report: {
     node_id: string;
-    attestation: any; // RATS/IEATS attestation token claims
+    attestation: any; // Raw attestation report for backward compatibility
   };
   secret_ids: string[];
   consumer: any;
+  /** Standardized attestation claims extracted from the verified attestation.
+   * Available when the attestation system successfully verifies the report.
+   * Policies should check for the presence of this field to ensure attestation was verified.
+   */
+  attestation_claims?: AttestationClaims;
 }
 
 /**

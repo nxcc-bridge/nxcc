@@ -21,7 +21,6 @@ base64 = "0.22.1"
 log = "0.4"
 thiserror = "2.0.15"
 libc = "0.2"
-chrono = { version = "0.4", features = ["serde"] }
 tokio = { version = "1.0", features = ["time"] }
 nxcc-interface = { path = "../interface" }
 x509-parser = "0.16"

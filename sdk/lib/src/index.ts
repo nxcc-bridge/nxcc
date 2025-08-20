@@ -1,5 +1,5 @@
 export * as crypto from "./crypto/index";
-export { policy, type PolicyExecutionRequest, type PolicyHandler } from "./policy/index";
+export { policy, type PolicyExecutionRequest, type PolicyHandler, type AttestationClaims } from "./policy/index";
 export {
   worker,
   type WorkerConfig,
