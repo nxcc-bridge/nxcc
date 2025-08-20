@@ -13,9 +13,9 @@ use nxcc_interface::{
         InvokeWorkerRequest as ProtoInvokeWorkerRequest, TrustedConfig, UntrustedConfig,
     },
     types::{
-        AttestationReport, ConsumerInfo, EventPayload, PolicyExecutionReport,
-        PolicyExecutionRequest, StandardizedAttestationClaims, VmAddress, Web3Log, WorkerBundle,
-        WorkerManifest,
+        AttestationReport, ConsumerInfo, EventPayload, InterfaceConfirmationMethod, InterfaceJwk,
+        InterfaceMeasurement, PolicyExecutionReport, PolicyExecutionRequest,
+        StandardizedAttestationClaims, VmAddress, Web3Log, WorkerBundle, WorkerManifest,
     },
 };
 #[cfg(test)]
@@ -610,7 +610,7 @@ impl RunnerService {
                     Ok(claims) => {
                         info!(
                             "Successfully verified attestation for node {} with platform {}",
-                            context.env_report.node_id, claims.platform_id
+                            context.env_report.node_id, claims.eat_profile
                         );
                         context.attestation_claims = Some(claims);
                     }
@@ -738,6 +738,9 @@ impl RunnerService {
             ephemeral_key_len: 32, // Standard key length
         };
 
+        // Extract ephemeral key before moving user_data_binding
+        let ephemeral_public_key = user_data_binding.extract_ephemeral_key();
+
         // Reconstruct block info from block hashes
         let block_hashes = report
             .block_hashes
@@ -768,16 +771,61 @@ impl RunnerService {
             .await
         {
             Ok(claims) => {
-                // Convert nxcc_attestation::StandardizedClaims to interface::StandardizedAttestationClaims
+                // Convert attestation Measurement to interface InterfaceMeasurement
+                let interface_measurements: Vec<InterfaceMeasurement> = claims
+                    .measurements
+                    .into_iter()
+                    .map(|m| InterfaceMeasurement {
+                        val: m.val,
+                        alg: m.alg,
+                        measurement_type: m.measurement_type,
+                        vendor: m.vendor,
+                        version: m.version,
+                    })
+                    .collect();
+
+                // Convert confirmation method if present
+                let cnf = claims.cnf.map(|cm| match cm {
+                    nxcc_attestation::types::ConfirmationMethod::Jwk { jwk } => {
+                        InterfaceConfirmationMethod::Jwk {
+                            jwk: InterfaceJwk {
+                                kty: jwk.kty,
+                                crv: jwk.crv,
+                                x: jwk.x,
+                                y: jwk.y,
+                            },
+                        }
+                    }
+                    nxcc_attestation::types::ConfirmationMethod::CoseKey { cose_key } => {
+                        InterfaceConfirmationMethod::CoseKey { cose_key }
+                    }
+                });
+
+                // Clone fields that will be used multiple times
+                let eat_profile = claims.eat_profile.clone();
+                let eat_nonce = claims.eat_nonce.clone();
+                let iat = claims.iat;
+
+                // Convert EAT StandardizedClaims to interface StandardizedAttestationClaims
                 Ok(StandardizedAttestationClaims {
-                    software_measurement: claims.software_measurement,
-                    security_version_number: claims.security_version_number,
-                    debug_disabled: claims.debug_disabled,
-                    platform_id: claims.platform_id,
-                    runtime_measurements: claims.runtime_measurements,
-                    timestamp: claims.timestamp,
-                    bound_user_data: claims.bound_user_data,
-                    ephemeral_public_key: claims.ephemeral_public_key,
+                    // EAT-compliant fields (using exact claim names)
+                    iat,
+                    eat_nonce: eat_nonce.clone(),
+                    ueid: claims.ueid,
+                    oemid: claims.oemid,
+                    hwmodel: claims.hwmodel,
+                    hwversion: claims.hwversion,
+                    dbgstat: claims.dbgstat,
+                    oemboot: claims.oemboot,
+                    swname: claims.swname,
+                    swversion: claims.swversion,
+                    measurements: interface_measurements.clone(),
+                    cnf,
+                    intuse: claims.intuse,
+                    uptime: claims.uptime,
+                    bootcount: claims.bootcount,
+                    bootseed: claims.bootseed,
+                    eat_profile: eat_profile.clone(),
                 })
             }
             Err(e) => Err(format!("Attestation verification failed: {}", e)),

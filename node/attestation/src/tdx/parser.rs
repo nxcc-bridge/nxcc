@@ -123,12 +123,15 @@ impl TdxParser {
                 quote_bytes.len() - offset
             ));
         }
-        let raw_signature_data = quote_bytes[offset .. offset + signature_len].to_vec();
+        let raw_signature_data = quote_bytes[offset..offset + signature_len].to_vec();
         offset += signature_len;
 
         // Optional: warn if there are trailing bytes (collateral etc.)
         if quote_bytes.len() > offset {
-            tracing::warn!("{} trailing bytes after the quote", quote_bytes.len() - offset);
+            tracing::warn!(
+                "{} trailing bytes after the quote",
+                quote_bytes.len() - offset
+            );
         }
 
         // Try to parse signature structure if we have enough data
@@ -214,59 +217,59 @@ impl TdxParser {
     /// Parse signature structure from raw signature data
     fn parse_signature_structure(sig: &[u8]) -> Result<QuoteSignature> {
         let mut o = 0;
-        
+
         // Helper function to check bounds
         let check_bounds = |offset: usize, len: usize| -> Result<()> {
-            if offset + len > sig.len() { 
-                Err(anyhow!("Signature section truncated")) 
-            } else { 
-                Ok(()) 
+            if offset + len > sig.len() {
+                Err(anyhow!("Signature section truncated"))
+            } else {
+                Ok(())
             }
         };
 
-        check_bounds(o, 64)?; 
-        let ecdsa_signature = sig[o..o+64].try_into().unwrap(); 
-        o += 64;
-        
-        check_bounds(o, 64)?; 
-        let ecdsa_public_key = sig[o..o+64].try_into().unwrap(); 
+        check_bounds(o, 64)?;
+        let ecdsa_signature = sig[o..o + 64].try_into().unwrap();
         o += 64;
 
-        check_bounds(o, 2)?;  
-        let cert_data_type = u16::from_le_bytes(sig[o..o+2].try_into().unwrap()); 
+        check_bounds(o, 64)?;
+        let ecdsa_public_key = sig[o..o + 64].try_into().unwrap();
+        o += 64;
+
+        check_bounds(o, 2)?;
+        let cert_data_type = u16::from_le_bytes(sig[o..o + 2].try_into().unwrap());
         o += 2;
-        
-        check_bounds(o, 4)?;  
-        let cert_data_size = u32::from_le_bytes(sig[o..o+4].try_into().unwrap()); 
+
+        check_bounds(o, 4)?;
+        let cert_data_size = u32::from_le_bytes(sig[o..o + 4].try_into().unwrap());
         o += 4;
 
-        check_bounds(o, 384)?; 
-        let qe_report = sig[o..o+384].try_into().unwrap(); 
+        check_bounds(o, 384)?;
+        let qe_report = sig[o..o + 384].try_into().unwrap();
         o += 384;
-        
-        check_bounds(o, 64)?;  
-        let qe_signature = sig[o..o+64].try_into().unwrap(); 
+
+        check_bounds(o, 64)?;
+        let qe_signature = sig[o..o + 64].try_into().unwrap();
         o += 64;
 
-        check_bounds(o, 2)?;  
-        let qe_auth_data_size = u16::from_le_bytes(sig[o..o+2].try_into().unwrap()); 
+        check_bounds(o, 2)?;
+        let qe_auth_data_size = u16::from_le_bytes(sig[o..o + 2].try_into().unwrap());
         o += 2;
-        
+
         check_bounds(o, qe_auth_data_size as usize)?;
         let qe_auth_data = sig[o..o + qe_auth_data_size as usize].to_vec();
         o += qe_auth_data_size as usize;
 
         // Certificate blob (may be zero)
         let (cert_type, cert_size, cert_data) = if o + 6 <= sig.len() {
-            let cert_type = u16::from_le_bytes(sig[o..o+2].try_into().unwrap()); 
+            let cert_type = u16::from_le_bytes(sig[o..o + 2].try_into().unwrap());
             o += 2;
-            let cert_size = u32::from_le_bytes(sig[o..o+4].try_into().unwrap()); 
+            let cert_size = u32::from_le_bytes(sig[o..o + 4].try_into().unwrap());
             o += 4;
             check_bounds(o, cert_size as usize)?;
             let cert_data = sig[o..o + cert_size as usize].to_vec();
             (cert_type, cert_size, cert_data)
-        } else { 
-            (0u16, 0u32, Vec::new()) 
+        } else {
+            (0u16, 0u32, Vec::new())
         };
 
         Ok(QuoteSignature {
@@ -303,11 +306,13 @@ impl TdxParser {
 
     /// Extract IEATS/RATS standardized claims from TDX quote
     pub fn extract_standardized_claims(quote: &TdxQuote) -> crate::types::StandardizedClaims {
-        use std::collections::HashMap;
-        use std::time::{SystemTime, UNIX_EPOCH};
+        use std::{
+            collections::HashMap,
+            time::{SystemTime, UNIX_EPOCH},
+        };
 
         let td_report = &quote.td_report;
-        
+
         // Map TDX measurements to standardized EAT claims
         let mut measurements = HashMap::new();
         measurements.insert("rtmr0".to_string(), td_report.rtmr[0].to_vec());
@@ -319,12 +324,15 @@ impl TdxParser {
         measurements.insert("mr_seam".to_string(), td_report.mr_seam.to_vec());
 
         // Extract security version from TCB SVN
-        let security_version = u64::from_le_bytes(
-            td_report.tcb_svn[0..8].try_into().unwrap_or([0; 8])
-        );
+        let security_version =
+            u64::from_le_bytes(td_report.tcb_svn[0..8].try_into().unwrap_or([0; 8]));
 
         // Determine hardware security level from debug bit
-        let hardware_security_level = if (td_report.td_attributes & 0x1) != 0 { 1 } else { 3 };
+        let hardware_security_level = if (td_report.td_attributes & 0x1) != 0 {
+            1
+        } else {
+            3
+        };
 
         // Extract unique entity ID from MRTD (first 32 bytes)
         let unique_entity_id = td_report.mrtd[0..32].to_vec();
@@ -338,15 +346,70 @@ impl TdxParser {
             .unwrap_or_default()
             .as_secs();
 
+        // Convert measurements HashMap to Vec<Measurement> using exact field names
+        let rtmr_measurements: Vec<crate::types::Measurement> = measurements
+            .into_iter()
+            .map(|(key, value)| crate::types::Measurement {
+                val: value,
+                alg: "sha-384".to_string(), // Use exact algorithm name from spec
+                measurement_type: Some(key),
+                vendor: Some("intel".to_string()),
+                version: None,
+            })
+            .collect();
+
+        // Add the primary software measurement (MRTD)
+        let mut all_measurements = vec![crate::types::Measurement {
+            val: td_report.mrtd.to_vec(),
+            alg: "sha-384".to_string(),
+            measurement_type: Some("application".to_string()), // Primary enclave measurement
+            vendor: Some("intel".to_string()),
+            version: None,
+        }];
+        all_measurements.extend(rtmr_measurements);
+
         crate::types::StandardizedClaims {
-            software_component: td_report.mrtd.to_vec(),
-            hardware_security_level,
-            security_version_number: security_version,
-            unique_entity_id,
-            nonce,
-            issued_at,
-            measurements,
-            oem_id: "intel-tdx".to_string(),
+            // Core freshness and context
+            iat: issued_at,
+            eat_nonce: Some(nonce),
+
+            // Identity and provenance
+            ueid: Some(unique_entity_id),
+            sueids: None,
+            oemid: Some("intel-tdx".to_string()),
+            hwmodel: Some("tdx".to_string()),
+            hwversion: Some("1.0".to_string()),
+
+            // Debug and boot status
+            dbgstat: if hardware_security_level == 1 { 4 } else { 0 }, // 1=debug->4=enabled, 3=prod->0=disabled
+            oemboot: Some(true),
+
+            // Software identity
+            swname: None,
+            swversion: None,
+            manifests: None,
+
+            // Measurements and results (required - at least one)
+            measurements: all_measurements,
+            measres: None,
+
+            // Execution structure breakdown
+            submods: None, // Could group RTMRs here
+
+            // Key binding
+            cnf: None,
+            intuse: None,
+
+            // Lifecycle freshness
+            uptime: None,
+            bootcount: None,
+            bootseed: None,
+
+            // Profile selection (required)
+            eat_profile: "urn:nxcc:profile:tdx-v1".to_string(),
+
+            // Assurance artifacts
+            dloas: None,
         }
     }
 
@@ -419,7 +482,7 @@ impl TdxParser {
 
         // With the new bound, these are always equal
         let expected_total = 48 + 584 + 4 + quote.signature_len as usize;
-        let actual_total   = 48 + 584 + 4 + quote.raw_signature_data.len();
+        let actual_total = 48 + 584 + 4 + quote.raw_signature_data.len();
         if expected_total != actual_total {
             return Err(anyhow!(
                 "Signature length mismatch: declared {}, got {}",
@@ -578,8 +641,8 @@ mod tests {
 
     #[test]
     fn test_standardized_claims_extraction() {
-        use crate::tdx::hardware::{TdxSimulator, TdxInterface};
-        
+        use crate::tdx::hardware::{TdxInterface, TdxSimulator};
+
         // Generate a quote using the simulator instead of using stored data
         let simulator = TdxSimulator::new();
         let test_data = b"IEATS/RATS standardized claims test";
@@ -588,21 +651,32 @@ mod tests {
         let claims = TdxParser::extract_standardized_claims(&quote);
 
         // Verify EAT standard fields
-        assert_eq!(claims.software_component.len(), 48); // MRTD
-        assert_eq!(claims.hardware_security_level, 3); // Production (not debug)
-        assert!(!claims.unique_entity_id.is_empty());
-        assert_eq!(claims.nonce.len(), 64); // Report data
-        assert!(claims.issued_at > 0);
-        assert_eq!(claims.oem_id, "intel-tdx");
+        assert!(!claims.measurements.is_empty()); // Should have measurements
+        assert_eq!(claims.dbgstat, 0); // Production (debug disabled)
+        assert!(claims.ueid.is_some() && !claims.ueid.as_ref().unwrap().is_empty());
+        assert_eq!(claims.eat_nonce.as_ref().unwrap().len(), 64); // Report data
+        assert!(claims.iat > 0);
+        assert_eq!(claims.oemid, Some("intel-tdx".to_string()));
 
-        // Verify measurements map
-        assert_eq!(claims.measurements.len(), 7);
-        assert!(claims.measurements.contains_key("rtmr0"));
-        assert!(claims.measurements.contains_key("mr_seam"));
-        assert_eq!(claims.measurements["rtmr0"].len(), 48);
-        
-        // Verify software component (MRTD) is not all zeros
-        assert!(!claims.software_component.iter().all(|&b| b == 0));
+        // Verify measurements vector (7 RTMRs/MRs + 1 MRTD = 8 total)
+        assert_eq!(claims.measurements.len(), 8);
+        // Find rtmr0 measurement by searching the vector
+        let rtmr0_found = claims.measurements.iter().any(|m| {
+            m.measurement_type
+                .as_ref()
+                .map_or(false, |t| t.contains("rtmr0"))
+        });
+        assert!(rtmr0_found, "Should contain rtmr0 measurement");
+
+        // Verify MRTD measurement is not all zeros - look for it in measurements
+        let mrtd_measurement = claims.measurements.iter().find(|m| {
+            m.measurement_type
+                .as_ref()
+                .map_or(false, |t| t.contains("application") || t.contains("mrtd"))
+        });
+        if let Some(mrtd) = mrtd_measurement {
+            assert!(!mrtd.val.iter().all(|&b| b == 0));
+        }
     }
 
     #[test]

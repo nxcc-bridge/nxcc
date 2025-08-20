@@ -148,43 +148,175 @@ pub struct RawAttestation {
     pub certificates: Option<Vec<Vec<u8>>>, // Certificate chain for verification
 }
 
-/// Standardized attestation claims following IEATS/RATS format
-/// Based on draft-ietf-rats-eat and draft-ietf-rats-architecture
+/// EAT-compliant measurement entry following exact specification
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Measurement {
+    /// Hash value
+    #[serde(rename = "val")]
+    pub val: Vec<u8>,
+    /// Hash algorithm: "sha-256", "sha-384", or "sha-512"
+    #[serde(rename = "alg")]
+    pub alg: String,
+    /// Category: "boot", "firmware", "kernel", "initrd", "vmm", "application", "policy", etc.
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub measurement_type: Option<String>,
+    /// Vendor information
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vendor: Option<String>,
+    /// Version information
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+}
+
+/// JWK structure for cnf claim (JSON-profile style)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Jwk {
+    /// Key type: "EC", "RSA", "OKP"
+    pub kty: String,
+    /// Curve for EC/OKP keys: "P-256", "P-384", "P-521", "X25519", "Ed25519"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub crv: Option<String>,
+    /// X coordinate (for EC keys) or raw key (for OKP)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub x: Option<String>,
+    /// Y coordinate (for EC keys)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub y: Option<String>,
+}
+
+/// EAT confirmation claim for ephemeral key proof-of-possession
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ConfirmationMethod {
+    /// JSON-profile style
+    Jwk { jwk: Jwk },
+    /// COSE-profile style
+    CoseKey { cose_key: Vec<u8> },
+}
+
+/// Measurement comparison result
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeasurementResult {
+    /// Label of the reference check
+    pub name: String,
+    /// Pass/fail result
+    pub result: bool,
+    /// Reference identifier or version
+    #[serde(rename = "ref", skip_serializing_if = "Option::is_none")]
+    pub reference: Option<String>,
+}
+
+/// Manifest reference
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Manifest {
+    /// URI to the manifest
+    pub uri: String,
+    /// Hash of the manifest payload
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hash: Option<Vec<u8>>,
+}
+
+/// Standardized attestation claims following exact EAT/RATS specification
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StandardizedClaims {
-    /// EAT claim: Software components (primary measurement)
-    /// TDX: MRTD, SGX: MRENCLAVE
-    #[serde(rename = "swcomp")]
-    pub software_component: Vec<u8>,
-
-    /// EAT claim: Hardware security level
-    /// 1=debug, 3=hardware/production
-    #[serde(rename = "hwslvl")]
-    pub hardware_security_level: u32,
-
-    /// EAT claim: Security version number
-    #[serde(rename = "svn")]
-    pub security_version_number: u64,
-
-    /// EAT claim: Platform instance identifier
-    #[serde(rename = "ueid")]
-    pub unique_entity_id: Vec<u8>,
-
-    /// EAT claim: Nonce bound to attestation
-    #[serde(rename = "nonce")]
-    pub nonce: Vec<u8>,
-
-    /// EAT claim: Issued at timestamp (Unix epoch)
+    // == Core freshness and context ==
+    /// Issued-at time of the evidence production or verification moment
     #[serde(rename = "iat")]
-    pub issued_at: u64,
+    pub iat: u64,
 
-    /// Platform-specific measurements (RTMRs, PCRs)
-    #[serde(rename = "measur")]
-    pub measurements: HashMap<String, Vec<u8>>,
+    /// Verifier challenge to prevent replay (omit if no challenge used)
+    #[serde(rename = "eat_nonce", skip_serializing_if = "Option::is_none")]
+    pub eat_nonce: Option<Vec<u8>>,
 
-    /// Platform identifier
-    #[serde(rename = "oemid")]
-    pub oem_id: String,
+    // == Identity and provenance ==
+    /// Stable device/realm identity (omit if not available)
+    #[serde(rename = "ueid", skip_serializing_if = "Option::is_none")]
+    pub ueid: Option<Vec<u8>>,
+
+    /// Semi-permanent or auxiliary IDs
+    #[serde(rename = "sueids", skip_serializing_if = "Option::is_none")]
+    pub sueids: Option<Vec<Vec<u8>>>,
+
+    /// Manufacturer identifier
+    #[serde(rename = "oemid", skip_serializing_if = "Option::is_none")]
+    pub oemid: Option<String>,
+
+    /// Hardware model descriptor
+    #[serde(rename = "hwmodel", skip_serializing_if = "Option::is_none")]
+    pub hwmodel: Option<String>,
+
+    /// Hardware/firmware version string
+    #[serde(rename = "hwversion", skip_serializing_if = "Option::is_none")]
+    pub hwversion: Option<String>,
+
+    // == Debug and boot status ==
+    /// Debug/production mode: 0=debug disabled (production), 1=debug disabled since boot,
+    /// 2=debug disabled permanently, 3=debug fully and permanently disabled, 4=debug enabled
+    #[serde(rename = "dbgstat")]
+    pub dbgstat: u8,
+
+    /// OEM-authorized secure boot active
+    #[serde(rename = "oemboot", skip_serializing_if = "Option::is_none")]
+    pub oemboot: Option<bool>,
+
+    // == Software identity ==
+    /// Product or component name of the attested software root
+    #[serde(rename = "swname", skip_serializing_if = "Option::is_none")]
+    pub swname: Option<String>,
+
+    /// Version string of the attested software root
+    #[serde(rename = "swversion", skip_serializing_if = "Option::is_none")]
+    pub swversion: Option<String>,
+
+    /// References to accepted software manifests or SBOMs
+    #[serde(rename = "manifests", skip_serializing_if = "Option::is_none")]
+    pub manifests: Option<Vec<Manifest>>,
+
+    // == Measurements and results ==
+    /// Cryptographic measurements relevant to trust decisions (required - at least one)
+    #[serde(rename = "measurements")]
+    pub measurements: Vec<Measurement>,
+
+    /// Comparison outcomes against known-good references
+    #[serde(rename = "measres", skip_serializing_if = "Option::is_none")]
+    pub measres: Option<Vec<MeasurementResult>>,
+
+    // == Execution structure breakdown ==
+    /// Hierarchical submodules for component-scoped claims
+    #[serde(rename = "submods", skip_serializing_if = "Option::is_none")]
+    pub submods: Option<HashMap<String, StandardizedClaims>>,
+
+    // == Key binding ==
+    /// Proof-of-possession key bound to this attested state
+    #[serde(rename = "cnf", skip_serializing_if = "Option::is_none")]
+    pub cnf: Option<ConfirmationMethod>,
+
+    /// Intended use for the token/key (typically 5 for proof-of-possession)
+    #[serde(rename = "intuse", skip_serializing_if = "Option::is_none")]
+    pub intuse: Option<u8>,
+
+    // == Lifecycle freshness ==
+    /// Seconds since last boot according to the attested environment
+    #[serde(rename = "uptime", skip_serializing_if = "Option::is_none")]
+    pub uptime: Option<u64>,
+
+    /// Number of boots observed
+    #[serde(rename = "bootcount", skip_serializing_if = "Option::is_none")]
+    pub bootcount: Option<u64>,
+
+    /// Per-boot unique random seed to distinguish boot instances
+    #[serde(rename = "bootseed", skip_serializing_if = "Option::is_none")]
+    pub bootseed: Option<Vec<u8>>,
+
+    // == Profile selection ==
+    /// URI-like identifier of the interpretation profile for platform specifics (required)
+    #[serde(rename = "eat_profile")]
+    pub eat_profile: String,
+
+    // == Assurance artifacts ==
+    /// Declarations of conformity, certifications, or assurance statements
+    #[serde(rename = "dloas", skip_serializing_if = "Option::is_none")]
+    pub dloas: Option<Vec<String>>,
 }
 
 // BlockInfo is now defined in nxcc_interface::gateway

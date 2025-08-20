@@ -9,25 +9,97 @@ use thiserror::Error;
 
 use crate::proto::{enclave, interface};
 
-/// Standardized attestation claims compatible with RATS/IEATS
+/// EAT-compliant measurement entry for interface
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InterfaceMeasurement {
+    /// Hash value
+    pub val: Vec<u8>,
+    /// Hash algorithm: "sha-256", "sha-384", or "sha-512"
+    pub alg: String,
+    /// Category: "boot", "firmware", "kernel", "initrd", "vmm", "application", "policy", etc.
+    pub measurement_type: Option<String>,
+    /// Vendor information
+    pub vendor: Option<String>,
+    /// Version information
+    pub version: Option<String>,
+}
+
+/// JWK structure for cnf claim (interface)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InterfaceJwk {
+    /// Key type: "EC", "RSA", "OKP"
+    pub kty: String,
+    /// Curve for EC/OKP keys: "P-256", "P-384", "P-521", "X25519", "Ed25519"
+    pub crv: Option<String>,
+    /// X coordinate (for EC keys) or raw key (for OKP)
+    pub x: Option<String>,
+    /// Y coordinate (for EC keys)
+    pub y: Option<String>,
+}
+
+/// EAT confirmation claim for interface
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum InterfaceConfirmationMethod {
+    /// JSON-profile style
+    Jwk { jwk: InterfaceJwk },
+    /// COSE-profile style
+    CoseKey { cose_key: Vec<u8> },
+}
+
+/// Standardized attestation claims following IETF EAT (RFC 9711) - Interface Version
+/// This contains the essential claims needed by interface consumers
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StandardizedAttestationClaims {
-    /// Software measurement (e.g., MRTD for TDX)
-    pub software_measurement: Vec<u8>,
-    /// Security version number
-    pub security_version_number: u64,
-    /// Whether debug mode is disabled
-    pub debug_disabled: bool,
-    /// Platform identifier (e.g., "tdx-gcs", "tdx-local")
-    pub platform_id: String,
-    /// Runtime measurements (e.g., RTMRs for TDX)
-    pub runtime_measurements: HashMap<String, Vec<u8>>,
-    /// Timestamp when the attestation was verified
-    pub timestamp: u64,
-    /// User data bound to the attestation
-    pub bound_user_data: Vec<u8>,
-    /// Ephemeral public key used in the attestation
-    pub ephemeral_public_key: Vec<u8>,
+    // == Core freshness and context ==
+    /// Issued-at time of the evidence production or verification moment
+    pub iat: u64,
+    /// Verifier challenge to prevent replay (if used)
+    pub eat_nonce: Option<Vec<u8>>,
+
+    // == Identity and provenance ==
+    /// Stable device/realm identity
+    pub ueid: Option<Vec<u8>>,
+    /// Manufacturer identifier
+    pub oemid: Option<String>,
+    /// Hardware model descriptor
+    pub hwmodel: Option<String>,
+    /// Hardware/firmware version string
+    pub hwversion: Option<String>,
+
+    // == Debug and boot status ==
+    /// Debug/production mode: 0=debug disabled (production), 4=debug enabled
+    pub dbgstat: u8,
+    /// OEM-authorized secure boot active
+    pub oemboot: Option<bool>,
+
+    // == Software identity ==
+    /// Product or component name of the attested software root
+    pub swname: Option<String>,
+    /// Version string of the attested software root
+    pub swversion: Option<String>,
+
+    // == Measurements and results ==
+    /// Cryptographic measurements relevant to trust decisions (required - at least one)
+    pub measurements: Vec<InterfaceMeasurement>,
+
+    // == Key binding ==
+    /// Proof-of-possession key bound to this attested state
+    pub cnf: Option<InterfaceConfirmationMethod>,
+    /// Intended use for the token/key (typically 5 for proof-of-possession)
+    pub intuse: Option<u8>,
+
+    // == Lifecycle freshness ==
+    /// Seconds since last boot according to the attested environment
+    pub uptime: Option<u64>,
+    /// Number of boots observed
+    pub bootcount: Option<u64>,
+    /// Per-boot unique random seed to distinguish boot instances
+    pub bootseed: Option<Vec<u8>>,
+
+    // == Profile selection ==
+    /// URI-like identifier of the interpretation profile for platform specifics
+    pub eat_profile: String,
 }
 
 #[derive(Debug, Error)]

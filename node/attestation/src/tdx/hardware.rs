@@ -1,11 +1,12 @@
-use anyhow::{anyhow, Result};
-use nix::errno::Errno;
 use std::{
     fs::{self, File},
     io::Write,
     os::unix::io::AsRawFd,
     path::Path,
 };
+
+use anyhow::{anyhow, Result};
+use nix::errno::Errno;
 
 const TDX_DEVICE_PATHS: &[&str] = &["/dev/tdx_guest", "/dev/tdx-guest"];
 
@@ -209,8 +210,12 @@ impl TdxInterface for TdxHardware {
     fn is_hardware_available(&self) -> bool {
         let in_tdx = Self::in_tdx_guest();
         let device_available = TDX_DEVICE_PATHS.iter().any(|p| Path::new(p).exists());
-        tracing::info!("TDX hardware detection: in_tdx_guest={}, device_available={}", in_tdx, device_available);
-        
+        tracing::info!(
+            "TDX hardware detection: in_tdx_guest={}, device_available={}",
+            in_tdx,
+            device_available
+        );
+
         if !in_tdx {
             tracing::warn!("Not in TDX guest environment");
             return false;
@@ -219,8 +224,11 @@ impl TdxInterface for TdxHardware {
     }
 
     fn generate_quote(&self, report_data: &[u8]) -> Result<Vec<u8>> {
-        tracing::info!("Generating TDX quote with {} bytes of report data", report_data.len());
-        
+        tracing::info!(
+            "Generating TDX quote with {} bytes of report data",
+            report_data.len()
+        );
+
         if report_data.len() > TDX_REPORT_DATA_SIZE {
             return Err(anyhow!(
                 "report_data too large: {} > {}",
@@ -238,7 +246,10 @@ impl TdxInterface for TdxHardware {
         tracing::info!("Attempting quote generation via TSM configfs");
         match hw.quote_via_tsm(rd) {
             Ok(q) => {
-                tracing::info!("Successfully generated quote via TSM, length: {} bytes", q.len());
+                tracing::info!(
+                    "Successfully generated quote via TSM, length: {} bytes",
+                    q.len()
+                );
                 Self::simple_quote_sanity(&q)?;
                 return Ok(q);
             }
@@ -251,7 +262,10 @@ impl TdxInterface for TdxHardware {
                 // Legacy
                 tracing::info!("Attempting quote generation via legacy ioctl");
                 let q = hw.quote_via_legacy(rd)?;
-                tracing::info!("Successfully generated quote via legacy ioctl, length: {} bytes", q.len());
+                tracing::info!(
+                    "Successfully generated quote via legacy ioctl, length: {} bytes",
+                    q.len()
+                );
                 Self::simple_quote_sanity(&q)?;
                 Ok(q)
             }
@@ -316,47 +330,47 @@ impl TdxSimulator {
 
         // Fake TD report body (584 bytes) - proper TDX structure
         let mut body = vec![0u8; 584];
-        
+
         // TCB SVN (16 bytes) at offset 0
         body[0..16].copy_from_slice(&[0x01; 16]);
-        
+
         // MR_SEAM (48 bytes) at offset 16
         body[16..64].copy_from_slice(&[0x33; 48]);
-        
+
         // MR_SIGNER_SEAM (48 bytes) at offset 64
         body[64..112].copy_from_slice(&[0x44; 48]);
-        
+
         // SEAM attributes (8 bytes) at offset 112
         body[112..120].copy_from_slice(&[0x00; 8]);
-        
+
         // TD attributes (8 bytes) at offset 120
         let mut td_attrs = [0u8; 8];
         if self.cfg.debug_enabled {
             td_attrs[0] |= 0x01; // Set debug bit
         }
         body[120..128].copy_from_slice(&td_attrs);
-        
+
         // XFAM (8 bytes) at offset 128
         body[128..136].copy_from_slice(&[0x03; 8]);
-        
+
         // MRTD (48 bytes) at offset 136 - use configured value
         body[136..184].copy_from_slice(&self.cfg.mrtd);
-        
+
         // MR_CONFIG_ID (48 bytes) at offset 184
         body[184..232].copy_from_slice(&[0x55; 48]);
-        
+
         // MR_OWNER (48 bytes) at offset 232
         body[232..280].copy_from_slice(&[0x66; 48]);
-        
+
         // MR_OWNER_CONFIG (48 bytes) at offset 280
         body[280..328].copy_from_slice(&[0x77; 48]);
-        
+
         // RTMR 0-3 (4 * 48 bytes) at offset 328
         body[328..376].copy_from_slice(&[0x11; 48]); // RTMR0
         body[376..424].copy_from_slice(&[0x22; 48]); // RTMR1
         body[424..472].copy_from_slice(&[0x33; 48]); // RTMR2
         body[472..520].copy_from_slice(&[0x44; 48]); // RTMR3
-        
+
         // Report data (64 bytes) at offset 520
         let mut rd64 = [0u8; 64];
         let m = rd64.len().min(report_data.len());
@@ -381,7 +395,10 @@ impl TdxInterface for TdxSimulator {
     }
 
     fn generate_quote(&self, report_data: &[u8]) -> Result<Vec<u8>> {
-        tracing::info!("Generating SIMULATED TDX quote with {} bytes of report data", report_data.len());
+        tracing::info!(
+            "Generating SIMULATED TDX quote with {} bytes of report data",
+            report_data.len()
+        );
         if report_data.len() > TDX_REPORT_DATA_SIZE {
             return Err(anyhow!(
                 "report_data too large: {} > {}",

@@ -10,6 +10,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Building the Project
 ```bash
+cd node
+
 # Build all components (Rust workspace)
 cargo build
 
@@ -31,6 +33,8 @@ cargo build -p nxcc-daemon -p nxcc-platform-enclave -p nxcc-workerd-vm
 
 ### Testing
 ```bash
+cd node
+
 # Run Rust unit tests
 cargo test
 
@@ -41,10 +45,10 @@ cargo build && sh node/tests/integration_test.sh
 cargo test -p nxcc-daemon
 
 # Run end-to-end tests (local environment)
-cd e2e && ./e2e_test.sh
+cd ../e2e && ./e2e_test.sh
 
 # Run end-to-end tests (staging environment - requires GCP setup)
-cd e2e && ./e2e_test.sh --env staging
+cd ../e2e && ./e2e_test.sh --env staging
 ```
 
 ### TDX Attestation Test Modes

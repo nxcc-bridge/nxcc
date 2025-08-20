@@ -10,10 +10,11 @@ use serde_json;
 
 use crate::{
     tdx::{
-        hardware::{TdxInterface, TdxHardware, TdxSimulator},
+        hardware::{TdxHardware, TdxInterface, TdxSimulator},
         parser::TdxParser,
         TdxQuoteData,
     },
+    types::Measurement,
     AttestationBundle, AttestationProvider, RawAttestation, StandardizedClaims, UserDataBinding,
     VerificationResult,
 };
@@ -47,8 +48,8 @@ impl TdxGcsRemoteProvider {
             let hardware = TdxHardware::new();
             if !hardware.is_hardware_available() {
                 panic!(
-                    "FATAL: TDX hardware required (compiled with --features tdx-hardware-required) \
-                     but TDX device not available in TdxGcsRemoteProvider"
+                    "FATAL: TDX hardware required (compiled with --features \
+                     tdx-hardware-required) but TDX device not available in TdxGcsRemoteProvider"
                 );
             }
             Self {
@@ -57,7 +58,7 @@ impl TdxGcsRemoteProvider {
                 tdx_interface: Box::new(hardware),
             }
         }
-        
+
         #[cfg(not(feature = "tdx-hardware-required"))]
         {
             // DEVELOPMENT MODE: Allow simulation fallback
@@ -77,7 +78,7 @@ impl TdxGcsRemoteProvider {
             }
         }
     }
-    
+
     pub fn new_with_interface(tdx_interface: Box<dyn TdxInterface>) -> Self {
         Self {
             config: None,
@@ -240,7 +241,7 @@ impl TdxGcsRemoteProvider {
         for (key, value) in quote_data.rtmrs {
             measurements.insert(key, value);
         }
-        
+
         // Add additional measurements
         measurements.insert("mrtd".to_string(), quote_data.mrtd.clone());
         if !quote_data.tcb_svn.is_empty() {
@@ -257,15 +258,70 @@ impl TdxGcsRemoteProvider {
             quote_data.mrtd.clone()
         };
 
+        // Convert measurements HashMap to Vec<Measurement> using exact field names
+        let rtmr_measurements: Vec<Measurement> = measurements
+            .into_iter()
+            .map(|(key, value)| Measurement {
+                val: value,
+                alg: "sha-384".to_string(), // Use exact algorithm name from spec
+                measurement_type: Some(key),
+                vendor: Some("intel".to_string()),
+                version: None,
+            })
+            .collect();
+
+        // Add the primary software measurement (MRTD)
+        let mut all_measurements = vec![Measurement {
+            val: quote_data.mrtd,
+            alg: "sha-384".to_string(),
+            measurement_type: Some("application".to_string()), // Primary enclave measurement
+            vendor: Some("intel".to_string()),
+            version: None,
+        }];
+        all_measurements.extend(rtmr_measurements);
+
         Ok(StandardizedClaims {
-            software_component: quote_data.mrtd,
-            hardware_security_level,
-            security_version_number: quote_data.security_version,
-            unique_entity_id,
-            nonce: quote_data.user_data,
-            issued_at: quote_data.timestamp,
-            measurements,
-            oem_id: "intel-tdx-gcs".to_string(),
+            // Core freshness and context
+            iat: quote_data.timestamp,
+            eat_nonce: Some(quote_data.user_data),
+
+            // Identity and provenance
+            ueid: Some(unique_entity_id),
+            sueids: None,
+            oemid: Some("intel-tdx-gcs".to_string()),
+            hwmodel: Some("tdx".to_string()),
+            hwversion: Some("1.0".to_string()),
+
+            // Debug and boot status
+            dbgstat: if hardware_security_level == 1 { 4 } else { 0 }, // 1=debug->4=enabled, 3=prod->0=disabled
+            oemboot: Some(true),
+
+            // Software identity
+            swname: None,
+            swversion: None,
+            manifests: None,
+
+            // Measurements and results (required - at least one)
+            measurements: all_measurements,
+            measres: None,
+
+            // Execution structure breakdown
+            submods: None, // Could group RTMRs here
+
+            // Key binding
+            cnf: None,
+            intuse: None,
+
+            // Lifecycle freshness
+            uptime: None,
+            bootcount: None,
+            bootseed: None,
+
+            // Profile selection (required)
+            eat_profile: "urn:nxcc:profile:tdx-v1".to_string(),
+
+            // Assurance artifacts
+            dloas: None,
         })
     }
 }
@@ -349,31 +405,31 @@ impl TdxLocalProvider {
             let hardware = TdxHardware::new();
             if !hardware.is_hardware_available() {
                 panic!(
-                    "FATAL: TDX hardware required (compiled with --features tdx-hardware-required) \
-                     but TDX device not available in TdxLocalProvider"
+                    "FATAL: TDX hardware required (compiled with --features \
+                     tdx-hardware-required) but TDX device not available in TdxLocalProvider"
                 );
             }
-            Self { 
-                tdx_interface: Box::new(hardware) 
+            Self {
+                tdx_interface: Box::new(hardware),
             }
         }
-        
+
         #[cfg(not(feature = "tdx-hardware-required"))]
         {
             // DEVELOPMENT MODE: Allow simulation fallback
             let hardware = TdxHardware::new();
             if hardware.is_hardware_available() {
-                Self { 
-                    tdx_interface: Box::new(hardware) 
+                Self {
+                    tdx_interface: Box::new(hardware),
                 }
             } else {
-                Self { 
-                    tdx_interface: Box::new(TdxSimulator::new()) 
+                Self {
+                    tdx_interface: Box::new(TdxSimulator::new()),
                 }
             }
         }
     }
-    
+
     pub fn new_with_interface(tdx_interface: Box<dyn TdxInterface>) -> Self {
         Self { tdx_interface }
     }
@@ -435,7 +491,7 @@ impl TdxLocalProvider {
         for (key, value) in quote_data.rtmrs {
             measurements.insert(key, value);
         }
-        
+
         // Add additional measurements
         measurements.insert("mrtd".to_string(), quote_data.mrtd.clone());
         if !quote_data.tcb_svn.is_empty() {
@@ -452,15 +508,70 @@ impl TdxLocalProvider {
             quote_data.mrtd.clone()
         };
 
+        // Convert measurements HashMap to Vec<Measurement> using exact field names
+        let rtmr_measurements: Vec<Measurement> = measurements
+            .into_iter()
+            .map(|(key, value)| Measurement {
+                val: value,
+                alg: "sha-384".to_string(), // Use exact algorithm name from spec
+                measurement_type: Some(key),
+                vendor: Some("intel".to_string()),
+                version: None,
+            })
+            .collect();
+
+        // Add the primary software measurement (MRTD)
+        let mut all_measurements = vec![Measurement {
+            val: quote_data.mrtd,
+            alg: "sha-384".to_string(),
+            measurement_type: Some("application".to_string()), // Primary enclave measurement
+            vendor: Some("intel".to_string()),
+            version: None,
+        }];
+        all_measurements.extend(rtmr_measurements);
+
         Ok(StandardizedClaims {
-            software_component: quote_data.mrtd,
-            hardware_security_level,
-            security_version_number: quote_data.security_version,
-            unique_entity_id,
-            nonce: quote_data.user_data,
-            issued_at: quote_data.timestamp,
-            measurements,
-            oem_id: "intel-tdx-local".to_string(),
+            // Core freshness and context
+            iat: quote_data.timestamp,
+            eat_nonce: Some(quote_data.user_data),
+
+            // Identity and provenance
+            ueid: Some(unique_entity_id),
+            sueids: None,
+            oemid: Some("intel-tdx-local".to_string()),
+            hwmodel: Some("tdx".to_string()),
+            hwversion: Some("1.0".to_string()),
+
+            // Debug and boot status
+            dbgstat: if hardware_security_level == 1 { 4 } else { 0 }, // 1=debug->4=enabled, 3=prod->0=disabled
+            oemboot: Some(true),
+
+            // Software identity
+            swname: None,
+            swversion: None,
+            manifests: None,
+
+            // Measurements and results (required - at least one)
+            measurements: all_measurements,
+            measres: None,
+
+            // Execution structure breakdown
+            submods: None, // Could group RTMRs here
+
+            // Key binding
+            cnf: None,
+            intuse: None,
+
+            // Lifecycle freshness
+            uptime: None,
+            bootcount: None,
+            bootseed: None,
+
+            // Profile selection (required)
+            eat_profile: "urn:nxcc:profile:tdx-v1".to_string(),
+
+            // Assurance artifacts
+            dloas: None,
         })
     }
 }

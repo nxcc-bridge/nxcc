@@ -115,12 +115,19 @@ fn verify_attestation(report: &AttestationReport) -> Result<Vec<u8>, String> {
                 .await
         }) {
             Ok(claims) => {
+                // Log the first measurement if available, otherwise use a placeholder
+                let measurement_info = claims
+                    .measurements
+                    .first()
+                    .map(|m| format!("{} ({})", hex::encode(&m.val), m.alg))
+                    .unwrap_or_else(|| "no measurements".to_string());
+
                 info!(
                     "Attestation verified successfully for measurement: {}",
-                    hex::encode(&claims.software_measurement)
+                    measurement_info
                 );
                 // Return the bound user data from verified claims
-                Ok(claims.bound_user_data)
+                Ok(claims.eat_nonce.unwrap_or_default())
             }
             Err(e) => {
                 error!("Attestation verification failed: {}", e);

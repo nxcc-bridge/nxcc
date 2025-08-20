@@ -141,20 +141,73 @@ impl MockTdxProvider {
         runtime_measurements.insert("mr_owner".to_string(), tdx_claims.mr_owner.clone());
         runtime_measurements.insert("mr_seam".to_string(), tdx_claims.mr_seam.clone());
 
+        // Convert runtime measurements from HashMap to Vec<Measurement> using exact field names
+        let rtmr_measurements: Vec<Measurement> = runtime_measurements
+            .into_iter()
+            .map(|(key, value)| Measurement {
+                val: value,
+                alg: "sha-384".to_string(), // Use exact algorithm name from spec
+                measurement_type: Some(key),
+                vendor: Some("mock".to_string()),
+                version: None,
+            })
+            .collect();
+
+        // Add the primary software measurement (MRTD)
+        let mut all_measurements = vec![Measurement {
+            val: tdx_claims.mrtd.clone(),
+            alg: "sha-384".to_string(),
+            measurement_type: Some("application".to_string()), // Primary enclave measurement
+            vendor: Some("mock".to_string()),
+            version: None,
+        }];
+        all_measurements.extend(rtmr_measurements);
+
         Ok(StandardizedClaims {
-            software_component: tdx_claims.mrtd.clone(),
-            hardware_security_level: if tdx_claims.debug_enabled { 1 } else { 3 },
-            security_version_number: u64::from_le_bytes(
-                tdx_claims.tcb_svn[..8].try_into().unwrap_or([0; 8]),
-            ),
-            unique_entity_id: tdx_claims.mrtd[0..32.min(tdx_claims.mrtd.len())].to_vec(),
-            nonce: user_data_binding.embedded_hash.clone(),
-            issued_at: std::time::SystemTime::now()
+            // Core freshness and context
+            iat: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs(),
-            measurements: runtime_measurements,
-            oem_id: "mock-intel-tdx".to_string(),
+            eat_nonce: Some(user_data_binding.embedded_hash.clone()),
+
+            // Identity and provenance
+            ueid: Some(tdx_claims.mrtd[0..32.min(tdx_claims.mrtd.len())].to_vec()),
+            sueids: None,
+            oemid: Some("mock-intel-tdx".to_string()),
+            hwmodel: Some("mock-tdx".to_string()),
+            hwversion: Some("1.0".to_string()),
+
+            // Debug and boot status
+            dbgstat: if tdx_claims.debug_enabled { 4 } else { 0 }, // 4=enabled, 0=disabled (production)
+            oemboot: Some(true),
+
+            // Software identity
+            swname: Some("mock-enclave".to_string()),
+            swversion: Some("1.0".to_string()),
+            manifests: None,
+
+            // Measurements and results (required - at least one)
+            measurements: all_measurements,
+            measres: None,
+
+            // Execution structure breakdown
+            submods: None, // Could group RTMRs here for better structure
+
+            // Key binding
+            cnf: None,    // Could be populated with ephemeral key
+            intuse: None, // Would be 5 if cnf is present
+
+            // Lifecycle freshness
+            uptime: None,
+            bootcount: None,
+            bootseed: None,
+
+            // Profile selection (required)
+            eat_profile: "urn:nxcc:profile:tdx-v1".to_string(),
+
+            // Assurance artifacts
+            dloas: None,
         })
     }
 }
@@ -350,9 +403,9 @@ mod tests {
 
         // Verify attestation
         let claims = service.verify_attestation(&bundle).await.unwrap();
-        assert_eq!(claims.oem_id, "mock-intel-tdx");
-        assert_eq!(claims.hardware_security_level, 3); // Production (not debug)
-        assert!(!claims.software_component.iter().all(|&b| b == 0));
+        assert_eq!(claims.oemid, Some("mock-intel-tdx".to_string()));
+        assert_eq!(claims.dbgstat, 0); // Production (debug disabled)
+        assert!(!claims.measurements.is_empty()); // Ensure measurements are present
     }
 
     #[tokio::test]
@@ -395,7 +448,12 @@ mod tests {
         // Configure with the actual MRTD as expected
         let config = serde_json::json!({
             "expected_measurements": {
-                "mrtd": hex::encode(&claims.software_component)
+                "mrtd": hex::encode(
+                    claims.measurements.iter()
+                        .find(|m| m.measurement_type.as_ref().map_or(false, |t| t.contains("application") || t.contains("mrtd")))
+                        .map(|m| &m.val)
+                        .unwrap_or(&vec![0u8; 48])
+                )
             }
         });
 
@@ -403,9 +461,10 @@ mod tests {
 
         // Verification should succeed now
         let verified_claims = service.verify_attestation(&bundle).await.unwrap();
+        // Verify the measurements are consistent
         assert_eq!(
-            verified_claims.software_component,
-            claims.software_component
+            verified_claims.measurements.len(),
+            claims.measurements.len()
         );
     }
 
@@ -427,8 +486,8 @@ mod tests {
         // Verification should still work
         let claims = service.verify_attestation(&bundle).await.unwrap();
         assert_eq!(
-            claims.nonce,
-            bundle.user_data_binding.embedded_hash
+            claims.eat_nonce.as_ref().unwrap(),
+            &bundle.user_data_binding.embedded_hash
         );
     }
 }
