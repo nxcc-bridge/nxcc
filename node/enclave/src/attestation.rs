@@ -4,7 +4,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use nxcc_attestation::{
     AttestationBundle, AttestationService, GatewayProvider, StandardizedClaims,
-    providers::{TdxGcsRemoteProvider, TdxLocalProvider},
+    providers::TdxQvlProvider,
 };
 use nxcc_interface::gateway::{BlockInfo, GatewayConfig};
 
@@ -22,9 +22,8 @@ impl PlatformAttestationManager {
     ) -> Result<Self> {
         let mut service = AttestationService::new(gateway_provider);
 
-        // Register TDX providers in priority order (local first, then remote)
-        service.register_provider("tdx".to_string(), Box::new(TdxLocalProvider::new()));
-        service.register_provider("tdx".to_string(), Box::new(TdxGcsRemoteProvider::new()));
+        // Register TDX QVL provider
+        service.register_provider("tdx".to_string(), Box::new(TdxQvlProvider::new()));
 
         Ok(Self {
             service,
@@ -34,9 +33,9 @@ impl PlatformAttestationManager {
 
     /// Configure attestation providers from runtime config
     pub async fn configure_providers(&mut self, config: HashMap<String, String>) -> Result<()> {
-        if let Some(gcs_config) = config.get("gcs") {
+        if let Some(qvl_config) = config.get("qvl") {
             self.service
-                .update_provider_config("tdx", gcs_config)
+                .update_provider_config("tdx", qvl_config)
                 .await?;
         }
         Ok(())
@@ -143,8 +142,8 @@ mod tests {
 
         let mut config = HashMap::new();
         config.insert(
-            "gcs".to_string(),
-            r#"{"project_id": "test", "auth_token": "token", "prefer_local_verification": false}"#
+            "qvl".to_string(),
+            r#"{"pccs_url": "https://api.trustedservices.intel.com/tdx/certification/v4"}"#
                 .to_string(),
         );
 

@@ -3,6 +3,7 @@ use std::{
     io::Write,
     os::unix::io::AsRawFd,
     path::Path,
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 use anyhow::{anyhow, Result};
@@ -13,6 +14,9 @@ const TDX_DEVICE_PATHS: &[&str] = &["/dev/tdx_guest", "/dev/tdx-guest"];
 // Sizes from TDX UAPI
 const TDREPORT_SIZE: usize = 1024;
 const TDX_REPORT_DATA_SIZE: usize = 64;
+
+// Thread-safe counter for unique TSM directory names
+static TSM_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 // ===== Kernel UAPI structs / ioctls =====
 
@@ -102,7 +106,8 @@ impl TdxHardware {
                 .map_err(|e| anyhow!("create {} failed: {e}", base.display()))?;
         }
 
-        let dir = base.join(format!("report{}", std::process::id()));
+        let unique_id = TSM_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let dir = base.join(format!("report{}_{}", std::process::id(), unique_id));
         // Best-effort cleanup guard
         let cleanup = |d: &std::path::Path| {
             let _ = fs::remove_file(d.join("inblob"));

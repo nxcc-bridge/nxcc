@@ -21,7 +21,7 @@ pub enum AttestationError {
     ConfigurationError(String),
 
     #[error("Network error: {0}")]
-    NetworkError(#[from] reqwest::Error),
+    NetworkError(String),
 
     #[error("Serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),

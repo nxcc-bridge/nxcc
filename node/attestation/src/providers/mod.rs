@@ -1,3 +1,3 @@
-pub mod tdx_gcs;
+pub mod tdx_qvl;
 
-pub use tdx_gcs::{GcsConfig, TdxGcsRemoteProvider, TdxLocalProvider};
+pub use tdx_qvl::TdxQvlProvider;
