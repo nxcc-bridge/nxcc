@@ -96,27 +96,17 @@ setup_node() {
 
 	# Start Daemon
 	echo "Starting $NODE_NAME Daemon..."
-	# Use an array for robustness instead of a simple string with eval
-	# shellcheck disable=SC3030  # Arrays are not POSIX but widely supported
-	DAEMON_ARGS=(
-		"--uds-path" "$NODE_DAEMON_SOCK"
-		"--enclave-uds-path" "$NODE_ENCLAVE_SOCK"
-		"--default-vm-uds-path" "$NODE_VM_SOCK"
-		"--identity-path" "$NODE_IDENTITY"
-		"--policy-cache-dir" "$NODE_POLICY_CACHE"
-		"--listen-addresses" "/ip4/127.0.0.1/tcp/$NODE_PORT"
-		"--http-listen-addr" "$HTTP_LISTEN_ADDR"
-		"--verbose" # Ensure daemon is verbose
-	)
+	# Build daemon arguments using POSIX-compliant approach
+	DAEMON_ARGS="--uds-path '$NODE_DAEMON_SOCK' --enclave-uds-path '$NODE_ENCLAVE_SOCK' --default-vm-uds-path '$NODE_VM_SOCK' --identity-path '$NODE_IDENTITY' --policy-cache-dir '$NODE_POLICY_CACHE' --listen-addresses '/ip4/127.0.0.1/tcp/$NODE_PORT' --http-listen-addr '$HTTP_LISTEN_ADDR' --verbose"
 
 	# Add bootstrap peers if provided
 	if [ -n "$BOOTSTRAP_PEERS" ]; then
-		# shellcheck disable=SC3024,SC3030  # Arrays and += are not POSIX but widely supported
-		DAEMON_ARGS+=("--bootstrap-peers" "$BOOTSTRAP_PEERS")
+		DAEMON_ARGS="$DAEMON_ARGS --bootstrap-peers '$BOOTSTRAP_PEERS'"
 	fi
 
-	# shellcheck disable=SC3054  # Array expansion is not POSIX but widely supported
-	RUST_LOG=info,nxcc_daemon=debug,nxcc_lib=debug "$DAEMON_BIN" "${DAEMON_ARGS[@]}" 2>&1 | tee "$NODE_DAEMON_LOG" &
+	# Use eval to properly handle quoted arguments
+	# shellcheck disable=SC2086  # We want word splitting here for the eval
+	eval "RUST_LOG=info,nxcc_daemon=debug,nxcc_lib=debug '$DAEMON_BIN' $DAEMON_ARGS" 2>&1 | tee "$NODE_DAEMON_LOG" &
 	NODE_DAEMON_PID=$!
 	sleep 1
 

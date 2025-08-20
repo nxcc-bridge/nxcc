@@ -430,8 +430,8 @@ jq -n \
 	--argjson chain_id_2 "$ANVIL_CHAIN_ID_2" \
 	--arg contract_address_2 "$CONTRACT_ADDRESS_2" \
 	--arg other_event_sig "$OTHER_EVENT_SIGNATURE" \
- 	--arg anvil_ws_url_1 "$ANVIL_WS_URL_1" \
- 	--arg anvil_ws_url_2 "$ANVIL_WS_URL_2" \
+	--arg anvil_ws_url_1 "$ANVIL_WS_URL_1" \
+	--arg anvil_ws_url_2 "$ANVIL_WS_URL_2" \
 	'{
  id: $id,
  worker: $worker_manifest[0],
@@ -732,7 +732,7 @@ LOGS_STREAM_PID=""
 LOGS_OUTPUT_FILE="$TEST_DIR/worker_logs_stream.txt"
 
 # Start streaming in background and capture a few lines
-timeout 5s curl -s -H "Accept: text/event-stream" "$HTTP_LOGS_URL?follow=true&tail=5" > "$LOGS_OUTPUT_FILE" &
+timeout 5s curl -s -H "Accept: text/event-stream" "$HTTP_LOGS_URL?follow=true&tail=5" >"$LOGS_OUTPUT_FILE" &
 LOGS_STREAM_PID=$!
 
 # Wait a moment for the stream to start
@@ -743,7 +743,7 @@ echo "Generating additional logs by invoking worker..."
 for i in 1 2 3; do
 	curl -s -X POST "http://127.0.0.1:${NODE1_HTTP_PORT}/w/${HTTP_ECHO_WORK_ORDER_ID}/echo-test" \
 		-H "Content-Type: application/json" \
-		-d "{\"test\": \"log-stream-test-$i\"}" > /dev/null
+		-d "{\"test\": \"log-stream-test-$i\"}" >/dev/null
 	sleep 0.5
 done
 
@@ -753,15 +753,15 @@ wait $LOGS_STREAM_PID 2>/dev/null || true
 # Check if we received SSE-formatted logs
 if [ -f "$LOGS_OUTPUT_FILE" ] && [ -s "$LOGS_OUTPUT_FILE" ]; then
 	echo "SUCCESS (Log Streaming Test 2): Received log stream data."
-	
+
 	# Verify SSE format (should contain "data: " lines)
 	if grep -q "data: " "$LOGS_OUTPUT_FILE"; then
 		echo "SUCCESS (Log Streaming Test 3): Log stream contains properly formatted SSE data."
-		
+
 		# Count the number of log entries (each "data: " line is a log entry)
 		LOG_ENTRY_COUNT=$(grep -c "data: " "$LOGS_OUTPUT_FILE")
 		echo "SUCCESS (Log Streaming Test 4): Received $LOG_ENTRY_COUNT log entries from stream."
-		
+
 		if [ "$LOG_ENTRY_COUNT" -ge 1 ]; then
 			echo "SUCCESS (Log Streaming Test 5): Adequate number of log entries received."
 		else
@@ -783,7 +783,7 @@ fi
 echo "Testing streaming logs with tail parameter..."
 LOGS_TAIL_OUTPUT_FILE="$TEST_DIR/worker_logs_tail.txt"
 
-timeout 3s curl -s -H "Accept: text/event-stream" "$HTTP_LOGS_URL?follow=true&tail=2" > "$LOGS_TAIL_OUTPUT_FILE" &
+timeout 3s curl -s -H "Accept: text/event-stream" "$HTTP_LOGS_URL?follow=true&tail=2" >"$LOGS_TAIL_OUTPUT_FILE" &
 LOGS_TAIL_PID=$!
 
 # Wait for stream to complete or timeout
@@ -904,7 +904,7 @@ echo "Checking for scheduled event execution in Alice's daemon logs..."
 if grep -q "Firing scheduled event" "$alice_DAEMON_LOG"; then
 	SCHEDULED_EVENT_COUNT=$(grep -c "Firing scheduled event" "$alice_DAEMON_LOG")
 	echo "SUCCESS (Scheduled Events Test): Found $SCHEDULED_EVENT_COUNT scheduled event(s) in daemon logs."
-	
+
 	# Verify we got multiple events (should be at least 3 in 8 seconds with 2-second interval)
 	if [ "$SCHEDULED_EVENT_COUNT" -ge 3 ]; then
 		echo "SUCCESS (Scheduled Events Test): Multiple scheduled events detected ($SCHEDULED_EVENT_COUNT events)."

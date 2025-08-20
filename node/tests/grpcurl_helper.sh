@@ -59,7 +59,7 @@ grpcurl_submit_work_order() {
 		-plaintext -unix \
 		-d "@" \
 		"unix://$_daemon_sock" \
-		daemon.WorkOrder/SubmitWorkOrder < "$_payload_file"
+		daemon.WorkOrder/SubmitWorkOrder <"$_payload_file"
 	_grp_exit_code=$?
 	if [ $_grp_exit_code -ne 0 ]; then
 		echo "ERROR: grpcurl SubmitWorkOrder failed with exit code $_grp_exit_code for $_daemon_sock" >&2
