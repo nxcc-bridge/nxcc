@@ -1,54 +1,109 @@
-# Starlight Starter Kit: Basics
+# nXCC Documentation
 
-[![Built with Starlight](https://astro.badg.es/v2/built-with-starlight/tiny.svg)](https://starlight.astro.build)
+Contributing to the nXCC documentation site built with [Astro Starlight](https://starlight.astro.build/).
 
-```
-pnpm create astro@latest -- --template starlight
-```
+## Getting Started
 
-[![Open in StackBlitz](https://developer.stackblitz.com/img/open_in_stackblitz.svg)](https://stackblitz.com/github/withastro/starlight/tree/main/examples/basics)
-[![Open with CodeSandbox](https://assets.codesandbox.io/github/button-edit-lime.svg)](https://codesandbox.io/p/sandbox/github/withastro/starlight/tree/main/examples/basics)
-[![Deploy to Netlify](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start/deploy?repository=https://github.com/withastro/starlight&create_from_path=examples/basics)
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fwithastro%2Fstarlight%2Ftree%2Fmain%2Fexamples%2Fbasics&project-name=my-starlight-docs&repository-name=my-starlight-docs)
+### Prerequisites
 
-> 🧑‍🚀 **Seasoned astronaut?** Delete this file. Have fun!
+- Node.js 18+
+- pnpm
 
-## 🚀 Project Structure
+### Setup
 
-Inside of your Astro + Starlight project, you'll see the following folders and files:
+```bash
+# Install dependencies
+pnpm install
 
-```
-.
-├── public/
-├── src/
-│   ├── assets/
-│   ├── content/
-│   │   ├── docs/
-│   └── content.config.ts
-├── astro.config.mjs
-├── package.json
-└── tsconfig.json
+# Start development server
+pnpm dev
+
+# Build static site
+pnpm build
+
+# Preview production build
+pnpm preview
 ```
 
-Starlight looks for `.md` or `.mdx` files in the `src/content/docs/` directory. Each file is exposed as a route based on its file name.
+## Documentation Structure
 
-Images can be added to `src/assets/` and embedded in Markdown with a relative link.
+The documentation lives in `src/content/docs/docs/`:
 
-Static assets, like favicons, can be placed in the `public/` directory.
+```
+src/content/docs/docs/
+├── guides/              # Getting started guides
+└── reference/           # API and reference documentation
+    ├── cli.md
+    ├── core-concepts.md
+    ├── event-triggers.md
+    ├── identities-and-policies.md
+    ├── performance.md
+    ├── running-a-node.md
+    ├── worker-manifest.md
+    └── worker-runtime.md
+```
 
-## 🧞 Commands
+## Writing Documentation
 
-All commands are run from the root of the project, from a terminal:
+### Markdown Basics
 
-| Command                | Action                                           |
-| :--------------------- | :----------------------------------------------- |
-| `pnpm install`         | Installs dependencies                            |
-| `pnpm dev`             | Starts local dev server at `localhost:4321`      |
-| `pnpm build`           | Build your production site to `./dist/`          |
-| `pnpm preview`         | Preview your build locally, before deploying     |
-| `pnpm astro ...`       | Run CLI commands like `astro add`, `astro check` |
-| `pnpm astro -- --help` | Get help using the Astro CLI                     |
+- Use Markdown (`.md`) for most content
+- Use MDX (`.mdx`) only when you need Vue components
+- Place images in `src/assets/` and reference with relative paths
 
-## 👀 Want to learn more?
+### Starlight Features
 
-Check out [Starlight’s docs](https://starlight.astro.build/), read [the Astro documentation](https://docs.astro.build), or jump into the [Astro Discord server](https://astro.build/chat).
+- **Frontmatter**: Add title, description, and sidebar configuration
+- **Code blocks**: Syntax highlighting with language tags
+- **Callouts**: Use `:::note`, `:::tip`, `:::warning`, `:::danger`
+- **Tabs**: Group related content with tab components
+
+Example frontmatter:
+
+```yaml
+---
+title: Page Title
+description: Brief description for SEO
+sidebar:
+  order: 3
+---
+```
+
+### Content Guidelines
+
+- **Target audience**: Developers integrating with nXCC
+- **Technical depth**: Assume familiarity with blockchain/Web3 concepts
+- **Code examples**: Always include working, testable code
+- **Links**: Use relative links for internal pages
+
+## Site Configuration
+
+Key files for site-wide changes:
+
+- `astro.config.mjs`: Starlight and build configuration
+- `src/content.config.ts`: Content validation schemas
+- `package.json`: Build scripts and dependencies
+
+## Local Development
+
+```bash
+# Start dev server (hot reload enabled)
+pnpm dev
+
+# Check for broken links
+pnpm build 2>&1 | grep -i "warning\|error"
+
+# Format all files
+pnpm format
+```
+
+The site will be available at `http://localhost:4321` with hot reload for immediate feedback.
+
+## Contributing Process
+
+1. Create or edit content in `src/content/docs/docs/`
+2. Test locally with `pnpm dev`
+3. Build and verify with `pnpm build && pnpm preview`
+4. Submit pull request
+
+For Starlight-specific features and syntax, see the [Starlight documentation](https://starlight.astro.build/guides/authoring-content/).

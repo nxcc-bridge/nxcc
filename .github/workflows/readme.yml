@@ -1,0 +1,47 @@
+name: README Quality Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths:
+      - '**/*.md'
+      - '**/*.mdx'
+
+jobs:
+  quality-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install tools
+        run: |
+          npm install -g markdown-link-check prettier
+
+      - name: Check Markdown formatting
+        run: |
+          prettier --check "**/*.md" "**/*.mdx" \
+            --config .github/workflows/.prettierrc.json \
+            --ignore-pattern "node_modules/**" \
+            --ignore-pattern "target/**" \
+            --ignore-pattern "dist/**" \
+            --ignore-pattern "contracts/evm/dependencies/**" \
+            --ignore-pattern "contracts/evm/out/**" \
+            --ignore-pattern "contracts/evm/cache/**"
+
+      - name: Check links in all Markdown files
+        run: |
+          find . -name "*.md" -not -path "./node_modules/*" -not -path "./.git/*" | \
+          xargs -I {} markdown-link-check {} --config .github/workflows/.markdown-link-check.json
+
+      - name: Check links in MDX files
+        run: |
+          find . -name "*.mdx" -not -path "./node_modules/*" -not -path "./.git/*" | \
+          xargs -I {} markdown-link-check {} --config .github/workflows/.markdown-link-check.json

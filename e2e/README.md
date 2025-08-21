@@ -33,6 +33,7 @@ e2e/
 ### Quick Start
 
 From the project root, run the complete local test:
+
 ```bash
 # From project root
 ./e2e/e2e_test.sh
@@ -65,7 +66,7 @@ Options:
 # Run complete local test with verbose output
 cd e2e && ./e2e_test.sh --verbose
 
-# Test existing local cluster without setup/cleanup  
+# Test existing local cluster without setup/cleanup
 cd e2e && ./e2e_test.sh --skip-cluster-setup --skip-cleanup
 
 # Test local then staging environments
@@ -92,11 +93,11 @@ export BUILD_SINGLE_ARCH="true"        # Single arch builds for faster testing
 
 # Timeout configuration (in seconds)
 export E2E_DOCKER_BUILD_TIMEOUT="900"  # Docker build timeout (15 minutes)
-export E2E_WORKER_DEPLOY_TIMEOUT="300" # Worker deployment timeout (5 minutes) 
+export E2E_WORKER_DEPLOY_TIMEOUT="300" # Worker deployment timeout (5 minutes)
 export E2E_HTTP_TEST_TIMEOUT="180"     # HTTP test timeout (3 minutes)
 export HELM_TIMEOUT="10m"              # Helm operation timeout
 
-# Testing configuration  
+# Testing configuration
 export E2E_VERBOSE="true"              # Enable verbose logging
 export E2E_TEST_TEXT="Custom message"  # Override test echo message
 ```
@@ -109,7 +110,7 @@ The e2e tests simulate a real-world developer workflow by:
 
 1. **🔍 Validating Prerequisites**: Ensuring all required tools are available (docker, kind, kubectl, etc.)
 
-2. **🚀 Setting Up Infrastructure**: 
+2. **🚀 Setting Up Infrastructure**:
    - **Local**: Creates a kind cluster and deploys NXCC in debug mode
    - **Staging/Prod**: Connects to GKE cluster and deploys NXCC with ingress
 
@@ -118,7 +119,7 @@ The e2e tests simulate a real-world developer workflow by:
    - Echo functionality that responds with test messages
    - Proper build configuration and bundling
 
-4. **⚙️ Building and Deploying**: 
+4. **⚙️ Building and Deploying**:
    - Compiles TypeScript to JavaScript
    - Creates worker bundles using the NXCC CLI
    - Deploys workers to the target environment
@@ -151,19 +152,22 @@ A successful e2e test run should:
 ### Environment-Specific Behavior
 
 #### Local Environment (`--env local`)
+
 - Uses **localhost port-forwarding** for all connections
 - Deploys to **debug namespace** in kind cluster
 - Uses **debug builds** for faster iteration
 - **Expected outcome**: Worker accessible at `localhost:6922/w/*`
 
-#### Staging Environment (`--env staging`)  
+#### Staging Environment (`--env staging`)
+
 - Uses **public ingress IP** for HTTP testing (no localhost)
 - Deploys to **staging namespace** in GKE cluster
 - Uses **debug builds** with caching for faster e2e testing
 - **Expected outcome**: Worker accessible at `http://<INGRESS-IP>/w/*`
 
 #### Production Environment (`--env prod`)
-- Uses **public ingress IP** for HTTP testing (no localhost)  
+
+- Uses **public ingress IP** for HTTP testing (no localhost)
 - Deploys to **prod namespace** in GKE cluster
 - Uses **release builds** by default for optimized performance
 - **Expected outcome**: Worker accessible at `http://<INGRESS-IP>/w/*`
@@ -171,20 +175,24 @@ A successful e2e test run should:
 ## Test Workflow
 
 ### 1. Dependency Check
+
 - Verifies Docker, kind, kubectl, curl, jq, node, npm
 - Builds NXCC CLI from source if not available
 
 ### 2. Cluster Setup
+
 - **Local**: Creates kind cluster, builds Docker image, deploys to debug namespace
 - **Staging/Prod**: Creates GKE cluster, builds and pushes to registry, deploys
 
 ### 3. Project Creation
+
 - Creates temporary directory
 - Initializes NXCC project using CLI
 - Creates echo worker with HTTP handlers
 - Builds TypeScript and bundles worker
 
 ### 4. Worker Testing
+
 - Deploys worker to target environment
 - Sets up port forwarding for remote environments
 - Tests multiple HTTP endpoints:
@@ -194,11 +202,13 @@ A successful e2e test run should:
   - `GET /w/` - Default handler
 
 ### 5. Verification
+
 - Retrieves worker logs
 - Tests HTTP request/response cycles
 - Verifies expected data in responses
 
 ### 6. Cleanup
+
 - Removes temporary project directory
 - Kills port-forward processes
 - Optionally cleans up cluster resources
@@ -235,13 +245,15 @@ The test creates an echo worker with the following handlers:
 ## Environment Configuration
 
 ### Local Environment (`--env local`)
+
 - Uses kind cluster with `nxcc-debug` name in `debug` namespace
 - Port-forwarding for both deployment and HTTP testing: `localhost:6922`
 - Debug builds for faster development
 - Automatic Docker image loading into cluster
 - Single architecture (amd64) builds for Intel TDX TEE
 
-### Staging Environment (`--env staging`)  
+### Staging Environment (`--env staging`)
+
 - Uses GKE cluster in `staging` namespace
 - Requires GCP authentication and project setup
 - Port-forwarding for worker deployment (`nxcc worker deploy`)
@@ -250,7 +262,8 @@ The test creates an echo worker with the following handlers:
 - Automatic ingress IP detection with fallback to port-forwarding
 
 ### Production Environment (`--env prod`)
-- Uses GKE cluster in `prod` namespace  
+
+- Uses GKE cluster in `prod` namespace
 - Requires GCP authentication and project setup
 - Port-forwarding for worker deployment (`nxcc worker deploy`)
 - **Public ingress IP** for HTTP testing (no localhost)
@@ -260,6 +273,7 @@ The test creates an echo worker with the following handlers:
 ## Dependencies
 
 ### Required Tools
+
 - Docker
 - kind (for local testing)
 - kubectl
@@ -269,6 +283,7 @@ The test creates an echo worker with the following handlers:
 - npm
 
 ### Optional Tools
+
 - gcloud (for GKE environments)
 - helm (installed by infra scripts)
 
@@ -294,6 +309,7 @@ The test framework is designed to support:
 ### Debug Mode
 
 Enable verbose logging to see detailed output:
+
 ```bash
 export E2E_VERBOSE=true
 cd e2e && ./e2e_test.sh --verbose
@@ -302,6 +318,7 @@ cd e2e && ./e2e_test.sh --verbose
 ### Manual Cleanup
 
 If the test fails and leaves resources:
+
 ```bash
 # Clean up port forwards
 pkill -f "kubectl port-forward"
