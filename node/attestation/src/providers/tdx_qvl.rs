@@ -3,9 +3,11 @@ use std::collections::HashMap;
 use anyhow::Result;
 use async_trait::async_trait;
 
+#[cfg(not(feature = "tdx-hardware-required"))]
+use crate::tdx::hardware::TdxSimulator;
 use crate::{
     tdx::{
-        hardware::{TdxHardware, TdxInterface, TdxSimulator},
+        hardware::{TdxHardware, TdxInterface},
         TdxQuoteData,
     },
     types::Measurement,

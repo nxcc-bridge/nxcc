@@ -6,13 +6,13 @@ on:
       - main
     paths:
       - "sdk/**"
-      - ".github/workflows/sdk-checks.yaml"
+      - ".github/workflows/sdk.yaml"
   pull_request:
     branches:
       - main
     paths:
       - "sdk/**"
-      - ".github/workflows/sdk-checks.yaml"
+      - ".github/workflows/sdk.yaml"
   workflow_dispatch:
 
 concurrency:
