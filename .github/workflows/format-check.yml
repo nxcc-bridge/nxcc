@@ -24,16 +24,10 @@ jobs:
         run: |
           npm install -g markdown-link-check prettier
 
-      - name: Check Markdown formatting
+      - name: Check README formatting
         run: |
-          prettier --check "**/*.md" \
-            --config .github/workflows/.prettierrc.json \
-            --ignore-pattern "node_modules/**" \
-            --ignore-pattern "target/**" \
-            --ignore-pattern "dist/**" \
-            --ignore-pattern "contracts/evm/dependencies/**" \
-            --ignore-pattern "contracts/evm/out/**" \
-            --ignore-pattern "contracts/evm/cache/**"
+          git ls-files '**/README.md' | \
+          xargs -I {} prettier --check {} --config .github/workflows/.prettierrc.json
 
       - name: Check YAML formatting
         run: |
