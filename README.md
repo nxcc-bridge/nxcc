@@ -6,7 +6,7 @@
 
 _Secure, off-chain orchestration engine connecting any blockchain, API, or system_
 
-[🚀 Quick Start](#-quick-start) • [💡 Use Cases](#-use-cases) • [📖 Documentation](docs/)
+[🚀 Quick Start](#-quick-start) • [💡 Use Cases](#-use-cases) • [📖 Documentation](https://nxcc.org/docs/guides/getting-started/)
 
 </div>
 

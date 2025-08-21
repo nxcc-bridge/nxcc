@@ -81,7 +81,9 @@ The `web3_event` trigger is the core of nXCC's cross-chain capabilities. It inst
   "kind": "web3_event",
   "chain": 31337,
   "address": ["0x5fbdb2315678afecb367f032d93f642f64180aa3"],
-  "topics": [["0x35c2b3b04a37f2752491485a4b51c863265557ac8152345842775344ba3a017b"]]
+  "topics": [
+    ["0x35c2b3b04a37f2752491485a4b51c863265557ac8152345842775344ba3a017b"]
+  ]
 }
 ```
 

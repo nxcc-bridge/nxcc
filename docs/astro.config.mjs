@@ -22,8 +22,15 @@ export default defineConfig({
         {
           label: "Guides",
           items: [
-            // Each item here is one entry in the navigation menu.
             { label: "Getting Started", slug: "docs/guides/getting-started" },
+            {
+              label: "Blockchain Events",
+              slug: "docs/guides/blockchain-events",
+            },
+            {
+              label: "Identities & Policies",
+              slug: "docs/guides/identities-policies",
+            },
           ],
         },
         {
