@@ -2,11 +2,6 @@
 
 <div align="center">
 
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
-[![Rust Version](https://img.shields.io/badge/rust-1.89.0+-orange.svg)](https://www.rust-lang.org)
-[![Docker](https://img.shields.io/badge/docker-available-brightgreen.svg)](./node/Dockerfile)
-[![NGI TrustChain](https://img.shields.io/badge/NGI-TrustChain-blue.svg)](https://www.ngi.eu/ngi-projects/ngi-trustchain/)
-
 **The Programmable Glue for the Multi-Chain World**
 
 _Secure, off-chain orchestration engine connecting any blockchain, API, or system_
