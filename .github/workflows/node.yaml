@@ -4,15 +4,9 @@ on:
   push:
     branches:
       - main
-    paths:
-      - "node/**"
-      - ".github/workflows/node.yaml"
   pull_request:
     branches:
       - main
-    paths:
-      - "node/**"
-      - ".github/workflows/node.yaml"
   workflow_dispatch:
 
 concurrency:
@@ -71,12 +65,13 @@ jobs:
         run: |
           # Fix permissions for the dev user in container
           sudo chown -R 1000:1000 .
-          
+
           # Run the lint and test commands in the exact container built above
+          # TODO: remove the rustup component add...
           docker run --rm -v $PWD:/workspace -w /workspace nxcc-dev:${{ github.sha }} /bin/bash -c "
             cd node
             rustup component add --toolchain nightly-x86_64-unknown-linux-gnu rustfmt
             cargo +nightly fmt --check
-            cargo clippy --locked --all-features --profile test -- -D warnings -D clippy::dbg_macro  
+            cargo clippy --locked --all-features --profile test -- -D warnings -D clippy::dbg_macro
             cargo test --all-features
           "

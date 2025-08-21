@@ -324,10 +324,7 @@ export default worker({
     const { rpcUrl, contractAddress, signerPrivateKey } = userdata;
 
     if (!rpcUrl || !contractAddress || !signerPrivateKey) {
-      return new Response(
-        "Missing required configuration in manifest's userdata",
-        { status: 500 },
-      );
+      return new Response("Missing required configuration in manifest's userdata", { status: 500 });
     }
 
     // Decode the event log.
@@ -339,9 +336,7 @@ export default worker({
     });
 
     const { newValue, data } = decodedLog.args;
-    console.log(
-      `Worker received ValueChanged event: newValue=${newValue}, data=${data}`,
-    );
+    console.log(`Worker received ValueChanged event: newValue=${newValue}, data=${data}`);
 
     // Set up viem clients to send a transaction.
     const account = privateKeyToAccount(signerPrivateKey as Hex);
@@ -356,9 +351,7 @@ export default worker({
     });
 
     try {
-      console.log(
-        `Calling updateState(${newValue}, "${data}") on ${contractAddress}`,
-      );
+      console.log(`Calling updateState(${newValue}, "${data}") on ${contractAddress}`);
       const { request: txRequest } = await publicClient.simulateContract({
         address: contractAddress as Hex,
         abi: contractAbi,
@@ -375,10 +368,7 @@ export default worker({
       return new Response(JSON.stringify({ success: true, txHash: hash }));
     } catch (e: any) {
       console.error(`Transaction failed: ${e.message}`);
-      return new Response(
-        JSON.stringify({ success: false, error: e.message }),
-        { status: 500 },
-      );
+      return new Response(JSON.stringify({ success: false, error: e.message }), { status: 500 });
     }
   },
 });
@@ -411,9 +401,7 @@ Create a manifest file for this worker at `workers/worker.manifest.json`. This m
       "kind": "web3_event",
       "chain": 31337,
       "address": ["YOUR_EVENT_CONTRACT_ADDRESS"],
-      "topics": [
-        ["0x35c2b3b04a37f2752491485a4b51c863265557ac8152345842775344ba3a017b"]
-      ]
+      "topics": [["0x35c2b3b04a37f2752491485a4b51c863265557ac8152345842775344ba3a017b"]]
     }
   ]
 }
@@ -435,11 +423,7 @@ Finally, build the new worker. You'll need to edit your `tsconfig.json` to inclu
 // tsconfig.json
 {
   // ...
-  "include": [
-    "policies/default-policy.ts",
-    "workers/my-worker.ts",
-    "workers/cross-chain-worker.ts"
-  ]
+  "include": ["policies/default-policy.ts", "workers/my-worker.ts", "workers/cross-chain-worker.ts"]
 }
 ```
 

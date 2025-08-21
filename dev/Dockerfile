@@ -79,6 +79,7 @@ WORKDIR /home/$USERNAME
 
 # Install Rust components
 RUN rustup component add clippy rustfmt
+RUN rustup component add --toolchain nightly-x86_64-unknown-linux-gnu rustfmt
 
 # Install Foundry for the development user
 RUN curl -L https://foundry.paradigm.xyz | bash && \

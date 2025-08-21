@@ -36,10 +36,10 @@ TDX_TESTS_REQUIRE_HARDWARE=false cargo test
 
 ## Usage
 
-| Environment | Test Command | Behavior |
-|-------------|---------------|----------|
-| TDX Production/CI | `TDX_TESTS_REQUIRE_HARDWARE=true cargo test` | Hardware only, panic if unavailable |
-| Development | `cargo test` | Simulation only |
-| Development (explicit) | `TDX_TESTS_REQUIRE_HARDWARE=false cargo test` | Simulation only |
+| Environment            | Test Command                                  | Behavior                            |
+| ---------------------- | --------------------------------------------- | ----------------------------------- |
+| TDX Production/CI      | `TDX_TESTS_REQUIRE_HARDWARE=true cargo test`  | Hardware only, panic if unavailable |
+| Development            | `cargo test`                                  | Simulation only                     |
+| Development (explicit) | `TDX_TESTS_REQUIRE_HARDWARE=false cargo test` | Simulation only                     |
 
 **Important**: Simulation is NEVER used when `TDX_TESTS_REQUIRE_HARDWARE=true`. Tests will fail fast with clear error messages if TDX hardware is requested but unavailable.

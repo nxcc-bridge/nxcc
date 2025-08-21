@@ -35,7 +35,9 @@ The TDX development environment provides:
 ## Commands
 
 ### `./infra.sh dev create [--dedicated]`
+
 Creates a complete TDX development environment:
+
 - Provisions TDX-enabled GCP VM (c3-standard-4 with confidential computing)
 - Uses **preemptible instances by default** for cost savings
 - Installs Docker, Python, build tools, and development dependencies
@@ -46,10 +48,13 @@ Creates a complete TDX development environment:
 - Returns ready-to-use development environment
 
 **Options:**
+
 - `--dedicated`: Use dedicated (non-preemptible) instances for guaranteed availability
 
 ### `./infra.sh dev ssh [-- command]`
+
 Connect to the TDX development VM:
+
 ```bash
 # Interactive shell
 ./infra.sh dev ssh
@@ -62,7 +67,9 @@ Connect to the TDX development VM:
 ```
 
 ### `./infra.sh dev push [source_dir]`
+
 Sync local code to the development VM:
+
 ```bash
 # Sync current directory
 ./infra.sh dev push
@@ -72,13 +79,17 @@ Sync local code to the development VM:
 ```
 
 ### `./infra.sh dev status`
+
 Show VM status, IP address, and connection information.
 
 ### `./infra.sh dev destroy`
+
 Delete the TDX development VM and clean up resources.
 
 ### `./infra.sh dev container [--detached]`
+
 Start or restart the development container:
+
 ```bash
 # Interactive container
 ./infra.sh dev container
@@ -118,16 +129,20 @@ GCP_ACCOUNT=myaccount@example.com GCP_PROJECT=my-project ./infra.sh dev create
 ## TDX Requirements
 
 ### Hardware Requirements
+
 - Intel 4th Gen Xeon Scalable processors (Sapphire Rapids) with TDX support
 - GCP C3 machine family with confidential computing enabled
 
 ### GCP Setup Requirements
+
 - GCP account with Compute Engine API enabled
 - Authenticated gcloud CLI (535.0.0+ recommended)
 - Sufficient compute quotas for confidential computing VMs
 
 ### Automatic Verification
+
 The setup automatically verifies:
+
 - TDX guest environment detection
 - TDREPORT generation via `/dev/tdx_guest` ioctl
 - TSM (Trusted Security Module) configfs interface
@@ -135,7 +150,9 @@ The setup automatically verifies:
 - Memory encryption activation
 
 ### Manual Verification
+
 You can re-run TDX verification anytime on the VM:
+
 ```bash
 # Connect to VM and run verification
 ./infra.sh dev ssh -- 'sudo python3 tdx_verification.py'
@@ -148,27 +165,30 @@ sudo python3 tdx_verification.py
 ## Development Workflow
 
 1. **Initial Setup**:
+
    ```bash
    ./infra.sh dev create
    ```
 
 2. **Development Cycle**:
+
    ```bash
    # Make code changes locally
    vim src/main.rs
-   
+
    # Sync changes to VM
    ./infra.sh dev push
-   
+
    # Build and test in TDX environment
    ./infra.sh dev ssh -- 'docker exec -it nxcc-dev-container bash'
    ```
 
 3. **Container Management**:
+
    ```bash
    # Restart development container if needed
    ./infra.sh dev ssh -- './dev-container.sh --detached'
-   
+
    # Check container status
    ./infra.sh dev ssh -- 'docker ps'
    ```
@@ -181,6 +201,7 @@ sudo python3 tdx_verification.py
 ## Container Environment
 
 The development container includes:
+
 - Rust toolchain with TDX attestation support
 - Development and production compilation modes
 - Complete NXCC build environment
@@ -190,12 +211,14 @@ The development container includes:
 ### Development vs Production Modes
 
 **Development Mode** (default in container):
+
 ```bash
 cargo build                    # Allows simulation fallback
 cargo test                     # Tests pass on non-TDX systems
 ```
 
 **Production Mode** (TDX hardware required):
+
 ```bash
 cargo build --features tdx-hardware-required    # Hardware-only, no simulation
 cargo test --features tdx-hardware-required     # Requires real TDX
@@ -204,6 +227,7 @@ cargo test --features tdx-hardware-required     # Requires real TDX
 ## Troubleshooting
 
 ### VM Creation Issues
+
 ```bash
 # Check gcloud authentication
 gcloud auth list
@@ -216,6 +240,7 @@ gcloud compute machine-types list --zones=us-central1-a --filter="name~c3"
 ```
 
 ### TDX Verification Issues
+
 ```bash
 # Check TDX status on VM
 ./infra.sh dev ssh -- 'sudo dmesg | grep -i tdx'
@@ -226,6 +251,7 @@ gcloud compute machine-types list --zones=us-central1-a --filter="name~c3"
 ```
 
 ### Container Issues
+
 ```bash
 # Check container status
 ./infra.sh dev ssh -- 'docker ps -a'
@@ -238,6 +264,7 @@ gcloud compute machine-types list --zones=us-central1-a --filter="name~c3"
 ```
 
 ### Networking Issues
+
 ```bash
 # Check VM external IP
 ./infra.sh dev status

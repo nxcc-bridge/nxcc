@@ -5,11 +5,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build and Development Commands
 
 ### Building the Project
+
 ```bash
 # Build all workspace members in debug mode
 cargo build
 
-# Build all workspace members in release mode  
+# Build all workspace members in release mode
 cargo build --release
 
 # Build specific packages
@@ -24,6 +25,7 @@ cargo clippy --all-features --profile test
 ```
 
 ### Running the System
+
 ```bash
 # Start a single NXCC node locally
 ./run.sh
@@ -33,6 +35,7 @@ cargo clippy --all-features --profile test
 ```
 
 ### Testing
+
 ```bash
 # Build and run full integration tests
 cargo build && sh tests/integration_test.sh
@@ -45,6 +48,7 @@ cargo test -p nxcc-daemon
 ```
 
 ### Development Tools
+
 - Use `grpcurl` for interacting with gRPC services during development
 - Integration tests use `foundry` (forge/cast/anvil) for smart contract testing
 - JavaScript workers are built with `pnpm run build` in the `tests/js_workers` directory
@@ -56,6 +60,7 @@ This is a Rust workspace implementing the NXCC (Network eXecutable Cross-Chain) 
 ### Core Components
 
 **daemon** (`nxcc-daemon`): The main orchestrator that:
+
 - Manages P2P networking via libp2p (Kademlia DHT, GossipSub, mDNS)
 - Handles work order submission and orchestration
 - Manages Web3 event subscriptions and gateway connections
@@ -63,12 +68,14 @@ This is a Rust workspace implementing the NXCC (Network eXecutable Cross-Chain) 
 - Coordinates with enclave for secure execution
 
 **enclave** (`nxcc-platform-enclave`): Trusted execution environment that:
+
 - Executes workers in isolated environments
 - Manages secrets and cryptographic operations
 - Handles secure inter-node secret sharing
 - Implements policy enforcement for worker execution
 
 **vm** (base and workerd): Virtual machine implementations:
+
 - `vm/base`: Core VM abstraction and client/server interfaces
 - `vm/workerd`: Cloudflare Workerd-based JavaScript runtime for workers
 

@@ -81,9 +81,7 @@ The `web3_event` trigger is the core of nXCC's cross-chain capabilities. It inst
   "kind": "web3_event",
   "chain": 31337,
   "address": ["0x5fbdb2315678afecb367f032d93f642f64180aa3"],
-  "topics": [
-    ["0x35c2b3b04a37f2752491485a4b51c863265557ac8152345842775344ba3a017b"]
-  ]
+  "topics": [["0x35c2b3b04a37f2752491485a4b51c863265557ac8152345842775344ba3a017b"]]
 }
 ```
 
@@ -155,7 +153,7 @@ For more control over scheduling behavior, you can specify additional parameters
 
 // Daily report at midnight UTC
 {
-  "handler": "fetch", 
+  "handler": "fetch",
   "kind": "scheduled",
   "period_ms": 86400000,
   "start_at": "2024-01-01T00:00:00Z"
@@ -164,7 +162,7 @@ For more control over scheduling behavior, you can specify additional parameters
 // Limited-time campaign with 100 executions max
 {
   "handler": "fetch",
-  "kind": "scheduled", 
+  "kind": "scheduled",
   "period_ms": 3600000,
   "max_occurrences": 100
 }
