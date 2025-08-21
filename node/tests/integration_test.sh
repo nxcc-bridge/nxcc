@@ -27,7 +27,7 @@ MODE="debug"
 
 # Generate an Ed25519 private key file for operator signing
 generate_operator_key() {
-	local key_path="$1"
+	key_path="$1"
 	# Generate a 32-byte random key file for Ed25519 private key
 	# The NXCC daemon will interpret this as raw key bytes
 	head -c 32 /dev/urandom >"$key_path"
@@ -427,10 +427,12 @@ for i in $( # Poll for up to 15 seconds
 	seq 1 15
 ); do
 	# Check for secret derivation (should not happen) in both VM and Daemon logs
+	# shellcheck disable=SC2154  # charlie_VM_LOG is set by setup_node function
 	if [ -f "$charlie_VM_LOG" ] && grep -q "DERIVED_BASE64:" "$charlie_VM_LOG"; then
 		CHARLIE_DERIVED_BITS=$(grep "DERIVED_BASE64:" "$charlie_VM_LOG" | tail -n 1 | sed -E 's/.*DERIVED_BASE64: ([A-Za-z0-9+/=]*).*/\1/')
 		break
 	fi
+	# shellcheck disable=SC2154  # charlie_DAEMON_LOG is set by setup_node function
 	if [ -z "$CHARLIE_DERIVED_BITS" ] && [ -f "$charlie_DAEMON_LOG" ] && grep -q "stdout:.*DERIVED_BASE64:" "$charlie_DAEMON_LOG"; then
 		CHARLIE_DERIVED_BITS=$(grep "stdout:.*DERIVED_BASE64:" "$charlie_DAEMON_LOG" | tail -n 1 | sed -E 's/.*DERIVED_BASE64: ([A-Za-z0-9+/=]*).*/\1/')
 		break

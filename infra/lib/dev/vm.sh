@@ -577,7 +577,9 @@ dev_push_code() {
 	# Use the exact SSH configuration that gcloud uses
 	local ssh_key_path="$HOME/.ssh/google_compute_engine"
 	local known_hosts_path="$HOME/.ssh/google_compute_known_hosts"
-	local host_key_alias="compute.$(gcloud compute instances describe "${TDX_VM_NAME}" --zone="${TDX_VM_ZONE}" --project="${RESOLVED_PROJECT_ID}" --account="${RESOLVED_GCP_ACCOUNT}" --format="value(id)")"
+	local instance_id
+	instance_id="$(gcloud compute instances describe "${TDX_VM_NAME}" --zone="${TDX_VM_ZONE}" --project="${RESOLVED_PROJECT_ID}" --account="${RESOLVED_GCP_ACCOUNT}" --format="value(id)")"
+	local host_key_alias="compute.${instance_id}"
 
 	# Build SSH command exactly like gcloud does
 	local ssh_cmd="ssh -i $ssh_key_path -o CheckHostIP=no -o HashKnownHosts=no -o HostKeyAlias=$host_key_alias -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts_path"
@@ -585,7 +587,7 @@ dev_push_code() {
 	info "Using rsync with gcloud SSH configuration to $external_ip..."
 
 	# Run rsync with the exact SSH configuration gcloud uses
-	if rsync -avz --delete $rsync_excludes -e "$ssh_cmd" "$source_dir/" ubuntu@"$external_ip":/home/ubuntu/nxcc/; then
+	if rsync -avz --delete "$rsync_excludes" -e "$ssh_cmd" "$source_dir/" ubuntu@"$external_ip":/home/ubuntu/nxcc/; then
 		success "Code synced successfully to VM!"
 		info "Remote path: /home/ubuntu/nxcc/"
 	else

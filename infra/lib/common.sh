@@ -51,7 +51,6 @@ export TDX_VM_PREEMPTIBLE
 readonly GCP_AR_LOCATION="${GCP_AR_LOCATION:-europe}"
 readonly GCP_GKE_REGION="${GCP_GKE_REGION:-europe-west1}"
 
-
 # --- Color Codes for Output ---
 readonly C_GREEN='\033[0;32m'
 readonly C_YELLOW='\033[0;33m'
