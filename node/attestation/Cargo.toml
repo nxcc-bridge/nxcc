@@ -3,12 +3,6 @@ name = "nxcc-attestation"
 version = "0.1.0"
 edition = "2021"
 
-[features]
-# Production feature: Require actual TDX hardware, never allow simulation fallback
-# Use with: cargo build --features tdx-hardware-required
-# Use for: Production deployments, CI/CD on TDX infrastructure
-tdx-hardware-required = []
-
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1"

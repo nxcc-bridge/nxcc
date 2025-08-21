@@ -3,11 +3,9 @@ use std::collections::HashMap;
 use anyhow::Result;
 use async_trait::async_trait;
 
-#[cfg(not(feature = "tdx-hardware-required"))]
-use crate::tdx::hardware::TdxSimulator;
 use crate::{
     tdx::{
-        hardware::{TdxHardware, TdxInterface},
+        hardware::{TdxHardware, TdxInterface, TdxSimulator},
         TdxQuoteData,
     },
     types::Measurement,
@@ -28,25 +26,26 @@ impl Default for TdxQvlProvider {
 
 impl TdxQvlProvider {
     pub fn new() -> Self {
-        #[cfg(feature = "tdx-hardware-required")]
-        {
-            // PRODUCTION MODE: Hardware required, no simulation
-            let hardware = TdxHardware::new();
+        // Runtime mode selection based on environment variable
+        let require_hardware = std::env::var("TDX_TESTS_REQUIRE_HARDWARE")
+            .map(|v| v == "true" || v == "1")
+            .unwrap_or(false);
+
+        let hardware = TdxHardware::new();
+
+        if require_hardware {
+            // PRODUCTION MODE: Hardware required, no simulation fallback
             if !hardware.is_hardware_available() {
                 panic!(
-                    "FATAL: TDX hardware required (compiled with --features \
-                     tdx-hardware-required) but TDX device not available in TdxQvlProvider"
+                    "FATAL: TDX hardware required (TDX_TESTS_REQUIRE_HARDWARE=true) but TDX \
+                     device not available in TdxQvlProvider"
                 );
             }
             Self {
                 tdx_interface: Box::new(hardware),
             }
-        }
-
-        #[cfg(not(feature = "tdx-hardware-required"))]
-        {
+        } else {
             // DEVELOPMENT MODE: Allow simulation fallback
-            let hardware = TdxHardware::new();
             if hardware.is_hardware_available() {
                 Self {
                     tdx_interface: Box::new(hardware),
