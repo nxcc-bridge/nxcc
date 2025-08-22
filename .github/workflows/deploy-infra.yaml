@@ -26,35 +26,28 @@ env:
   # Helm Configuration
   HELM_CHART_PATH: ./charts/nxcc-node
 
-  # Registry for KinD (using GHCR as it's often easier for local/CI clusters)
-  GHCR_REGISTRY: ghcr.io
 
 jobs:
-  # --- Deploy to Dev (KinD) and Staging (GKE) ---
+  # --- Deploy to Staging (GKE) ---
   # Runs only when the triggering workflow was for the 'main' branch and succeeded
-  deploy-dev-and-staging:
-    name: Deploy to KinD (Dev) and GKE (Staging)
+  deploy-staging:
+    name: Deploy to GKE (Staging)
     runs-on: ubuntu-latest
     # Only run if the build was successful AND it was on the main branch
     if: >
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.head_branch == 'main'
 
-    # Permissions needed for GCP authentication and GHCR access
+    # Permissions needed for GCP authentication
     permissions:
       contents: read
       id-token: write
-      packages: read
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
-
-      - name: Get Short SHA
-        id: vars
-        run: echo "SHORT_SHA=$(echo ${{ github.event.workflow_run.head_sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
 
       - name: Make script executable
         run: chmod +x ./infra/infra.sh
@@ -63,42 +56,6 @@ jobs:
         uses: azure/setup-helm@v4
         with:
           version: 'latest'
-
-      # --- Authenticate to GHCR ---
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # --- KinD (Dev) Deployment ---
-      - name: Pull Docker image for KinD
-        run: |
-          IMAGE_NAME="${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/${{ env.AR_IMAGE_NAME }}:${{ steps.vars.outputs.SHORT_SHA }}"
-          echo "Pulling image: ${IMAGE_NAME}"
-          docker pull "${IMAGE_NAME}"
-
-      - name: Set up KinD cluster
-        uses: helm/kind-action@v1.10.0
-        with:
-          cluster_name: nxcc-debug # The infra.sh script expects this name
-
-      - name: Deploy to KinD (Dev)
-        env:
-          # Override script defaults for the CI 'debug' environment
-          IMAGE_REPO_OVERRIDE: ${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/${{ env.AR_IMAGE_NAME }}
-          IMAGE_TAG_OVERRIDE: ${{ steps.vars.outputs.SHORT_SHA }}
-          CI: true # Enable non-interactive mode in the script
-          HELM_TIMEOUT: 1m # Short timeout for quick feedback in CI
-        run: ./infra/infra.sh k8s deploy debug
-
-      - name: Dump KinD debug info on failure
-        # This step runs only if a previous step in the job has failed.
-        if: failure()
-        run: |
-          echo "::error::Deployment to KinD failed. Dumping debug information."
-          ./infra/infra.sh k8s dump-debug debug
 
       # --- GKE (Staging) Deployment ---
 
@@ -135,11 +92,10 @@ jobs:
       github.event.workflow_run.conclusion == 'success' &&
       startsWith(github.event.workflow_run.head_branch, 'v')
 
-    # Permissions needed for GCP authentication and GHCR access
+    # Permissions needed for GCP authentication
     permissions:
       contents: read
       id-token: write
-      packages: read
 
     steps:
       - name: Checkout repository
@@ -154,14 +110,6 @@ jobs:
         uses: azure/setup-helm@v4
         with:
           version: 'latest'
-
-      # --- Authenticate to GHCR ---
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Authenticate with Google Cloud
         id: auth
