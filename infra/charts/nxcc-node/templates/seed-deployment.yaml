@@ -27,6 +27,9 @@ spec:
             - name: p2p
               containerPort: {{ .Values.seed.p2pPort }}
               protocol: TCP
+            - name: http
+              containerPort: {{ .Values.seed.httpPort }}
+              protocol: TCP
           env:
             # All pods (seeds and workers) use this internal service DNS name to find a bootstrap peer.
             # Kubernetes will round-robin requests to this service, connecting the pod to one of the available seeds.
@@ -36,6 +39,9 @@ spec:
             # Set the P2P listen address based on the Dockerfile default.
             - name: NXCC_NETWORK_LISTEN_ADDRESSES
               value: "/ip4/0.0.0.0/tcp/{{ .Values.seed.p2pPort }}"
+            # Set the HTTP listen address for API and worker requests
+            - name: NXCC_HTTP_LISTEN_ADDR
+              value: "0.0.0.0:{{ .Values.seed.httpPort }}"
             {{- include "nxcc.operatorKeyEnvVars" . | nindent 12 }}
           resources:
             {{- toYaml .Values.seed.resources | nindent 12 }}

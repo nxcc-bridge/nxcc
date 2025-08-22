@@ -40,3 +40,27 @@ spec:
     {{- include "nxcc.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: seed
 {{- end }}
+---
+{{- if or .Values.nodeVariant (gt (int .Values.seed.replicaCount) 0) }}
+# HTTP service for seed nodes (main and variants, for e2e testing)
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nxcc.fullname" . }}-seed-http
+  labels:
+    {{- include "nxcc.labels" . | nindent 4 }}
+    app.kubernetes.io/component: seed
+    {{- if .Values.nodeVariant }}
+    app.kubernetes.io/variant: {{ .Values.nodeVariant }}
+    {{- end }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "nxcc.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: seed
+{{- end }}

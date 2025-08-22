@@ -35,5 +35,14 @@ spec:
                 port:
                   name: http
           {{- end }}
+          {{- if gt (int $.Values.seed.replicaCount) 0 }}
+          - path: /seed
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "nxcc.fullname" $ }}-seed-http
+                port:
+                  name: http
+          {{- end }}
     {{- end }}
 {{- end }}

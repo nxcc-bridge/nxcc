@@ -34,6 +34,36 @@ operatorKey:
   # Only used when createSecret is true
   privateKeyData: ""
 
+# -- Node variations for e2e testing
+# These settings allow deploying nodes with different trust characteristics
+# to test policies that reject nodes based on trustworthiness
+nodeVariations:
+  # -- Override operator key settings for specific node types
+  # Each key can override the global operatorKey settings
+  operatorKeys: {}
+    # example-untrusted:
+    #   enabled: true
+    #   secretName: "untrusted-operator-key"
+    #   createSecret: true
+    #   privateKeyData: "base64-encoded-key-data"
+
+  # -- Override confidential computing settings for specific node types
+  # Each key can override the global confidential.enabled setting
+  confidentialOverrides: {}
+    # example-non-confidential:
+    #   enabled: false
+
+# -- Configuration for node variant (used internally by templates)
+# This value is set automatically when deploying variants
+nodeVariant: ""
+
+# -- Configuration for variant-specific routing
+# Enables addressing individual node variants for e2e testing
+variantRouting:
+  # -- Enable variant-specific routing (automatically enabled for variants)
+  enabled: false
+  # -- Path prefix for variant routing (e.g., /variant-name)
+  pathPrefix: ""
 
 # -- Configuration for the small, highly-available seed nodes.
 # These nodes ensure the long-term secrets are not lost.
@@ -50,6 +80,8 @@ seed:
       memory: 1Gi
   # -- P2P port for libp2p communication.
   p2pPort: 9000
+  # -- HTTP port for API and worker requests (enabled for e2e testing).
+  httpPort: 6923
 
   # -- Configuration for exposing a public seed node.
   public:

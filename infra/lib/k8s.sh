@@ -155,7 +155,243 @@ k8s_deploy() {
 		warn "Some pods in namespace '${namespace}' may not be ready. Check status manually."
 	fi
 
+	# Display access information for the main deployment
+	info "Main deployment access information:"
+	# Wait a moment for ingress to be created
+	sleep 2
+	local ingress_hosts
+	ingress_hosts=$(kubectl get ingress "${helm_release_name}" -n "${namespace}" -o jsonpath='{.spec.rules[*].host}' 2>/dev/null || echo "")
+
+	if [[ -n "$ingress_hosts" ]]; then
+		for host in $ingress_hosts; do
+			local protocol="https"
+			if [[ "$env" == "debug" ]]; then protocol="http"; fi
+			info "Main worker URL: ${protocol}://${host}/"
+			info "Main seed URL: ${protocol}://${host}/seed"
+		done
+	else
+		info "Ingress not yet available. Use 'kubectl get ingress -n ${namespace}' to check status."
+	fi
+
 	info "Use 'kubectl get all -n ${namespace}' to check status."
+}
+
+################################################################################
+# Deploys multiple NXCC nodes with different variations for e2e testing.
+# Arguments:
+#   $1: The environment to deploy to ('debug', 'staging', 'prod').
+#   $2+: Node variation configurations in format "variant-name:key1=value1,key2=value2"
+# Examples:
+#   k8s_deploy_variations debug "untrusted:operatorKeys.untrusted.enabled=true"
+#   k8s_deploy_variations debug "non-confidential:confidentialOverrides.test.enabled=false"
+################################################################################
+k8s_deploy_variations() {
+	local env="$1"
+	shift
+	local variations=("$@")
+
+	info "Deploying NXCC nodes with variations for e2e testing in '${env}' environment..."
+
+	# First deploy the base node
+	k8s_deploy "$env"
+
+	# Then deploy each variation as a separate release
+	for variation_spec in "${variations[@]}"; do
+		local variant_name
+		variant_name=$(echo "$variation_spec" | cut -d':' -f1)
+		local variant_overrides
+		variant_overrides=$(echo "$variation_spec" | cut -d':' -f2-)
+
+		if [[ -z "$variant_name" ]]; then
+			warn "Skipping invalid variation spec: $variation_spec"
+			continue
+		fi
+
+		info "Deploying node variant: $variant_name"
+		k8s_deploy_variant "$env" "$variant_name" "$variant_overrides"
+	done
+}
+
+################################################################################
+# Deploys a single NXCC node variant for e2e testing.
+# Arguments:
+#   $1: The environment to deploy to ('debug', 'staging', 'prod').
+#   $2: The variant name (used for release naming).
+#   $3: Comma-separated helm overrides (optional).
+################################################################################
+k8s_deploy_variant() {
+	local env="$1"
+	local variant_name="$2"
+	local variant_overrides="${3:-}"
+	local helm_release_name="nxcc-node-${env}-${variant_name}"
+	local namespace="${env}"
+	local helm_set_args=()
+	local helm_timeout="${HELM_TIMEOUT:-5m}"
+
+	info "Deploying NXCC node variant '${variant_name}' to '${env}' environment..."
+	check_deps helm kubectl
+
+	if [ ! -d "${HELM_CHART_PATH}" ]; then
+		error "Helm chart not found at '${HELM_CHART_PATH}'. Please create it first."
+	fi
+
+	# Set the node variant for template processing
+	helm_set_args+=(--set nodeVariant="${variant_name}")
+
+	# Enable variant routing for addressability
+	helm_set_args+=(--set variantRouting.enabled=true)
+
+	# Parse and apply variant-specific overrides
+	if [[ -n "$variant_overrides" ]]; then
+		IFS=',' read -ra overrides <<<"$variant_overrides"
+		for override in "${overrides[@]}"; do
+			if [[ "$override" == *"="* ]]; then
+				helm_set_args+=(--set "$override")
+			else
+				warn "Skipping invalid override: $override"
+			fi
+		done
+	fi
+
+	# Set path-based routing for the variant
+	helm_set_args+=(--set variantRouting.pathPrefix="/variant/${variant_name}")
+	helm_set_args+=(--set ingress.enabled=true)
+
+	# Copy base environment configuration
+	case "$env" in
+	debug)
+		local image_repo="${IMAGE_REPO_OVERRIDE:-ghcr.io/nxcc-bridge/nxcc/node}"
+		local image_tag="${IMAGE_TAG_OVERRIDE:-latest}"
+
+		helm_set_args+=(--set seed.replicaCount=1)
+		helm_set_args+=(--set worker.replicaCount=1)
+		helm_set_args+=(--set image.repository="${image_repo}")
+		helm_set_args+=(--set image.tag="${image_tag}")
+		helm_set_args+=(--set image.pullPolicy=IfNotPresent)
+		helm_set_args+=(--set seed.topologySpread.enabled=false)
+		helm_set_args+=(--set ingress.className="nginx") # Use nginx for debug
+
+		if [[ "${E2E_MINIMAL_RESOURCES:-false}" == "true" ]]; then
+			helm_set_args+=(--set seed.resources.requests.cpu=25m)
+			helm_set_args+=(--set seed.resources.requests.memory=64Mi)
+			helm_set_args+=(--set seed.resources.limits.cpu=50m)
+			helm_set_args+=(--set seed.resources.limits.memory=128Mi)
+			helm_set_args+=(--set worker.resources.requests.cpu=50m)
+			helm_set_args+=(--set worker.resources.requests.memory=128Mi)
+			helm_set_args+=(--set worker.resources.limits.cpu=100m)
+			helm_set_args+=(--set worker.resources.limits.memory=256Mi)
+		fi
+		;;
+	staging | prod)
+		# Use default values for staging/prod
+		;;
+	esac
+
+	# Create namespace if it doesn't exist
+	kubectl create namespace "${namespace}" --dry-run=client -o yaml | kubectl apply -f -
+
+	# Deploy the variant
+	info "Deploying Helm chart with variant '${variant_name}'..."
+	if helm upgrade --install "${helm_release_name}" "${HELM_CHART_PATH}" \
+		--namespace="${namespace}" \
+		--timeout="${helm_timeout}" \
+		--wait \
+		"${helm_set_args[@]}"; then
+		success "Helm chart '${helm_release_name}' deployed successfully to '${env}' environment."
+	else
+		error "Failed to deploy Helm chart '${helm_release_name}' to '${env}' environment."
+	fi
+
+	# Wait for pods to be ready
+	info "Waiting for variant '${variant_name}' pods to be ready in namespace '${namespace}'..."
+	if kubectl wait --for=condition=ready pod -l "app.kubernetes.io/instance=${helm_release_name}" -n "${namespace}" --timeout=300s; then
+		success "Variant '${variant_name}' pods in namespace '${namespace}' are ready."
+	else
+		warn "Some variant '${variant_name}' pods in namespace '${namespace}' may not be ready. Check status manually."
+	fi
+
+	# Display access information for the variant
+	info "Variant '${variant_name}' deployed successfully."
+
+	# Wait a moment for ingress to be created, then show access URLs
+	sleep 2
+	local ingress_hosts
+	ingress_hosts=$(kubectl get ingress "${helm_release_name}-${variant_name}-worker" -n "${namespace}" -o jsonpath='{.spec.rules[*].host}' 2>/dev/null || echo "")
+
+	if [[ -n "$ingress_hosts" ]]; then
+		for host in $ingress_hosts; do
+			local protocol="https"
+			if [[ "$env" == "debug" ]]; then protocol="http"; fi
+
+			info "Worker access URL: ${protocol}://${host}/variant/${variant_name}"
+			info "  - Use this URL to send requests directly to the '${variant_name}' worker variant"
+			info "Seed access URL: ${protocol}://${host}/variant/${variant_name}/seed"
+			info "  - Use this URL to send requests directly to the '${variant_name}' seed variant"
+		done
+	else
+		info "Ingress not yet available. Use 'kubectl get ingress -n ${namespace}' to check status."
+	fi
+
+	info "Use 'kubectl get all -l app.kubernetes.io/instance=${helm_release_name} -n ${namespace}' to check status."
+}
+
+################################################################################
+# Lists all deployed node variants and their access URLs.
+# Arguments:
+#   $1: The environment to list variants for ('debug', 'staging', 'prod').
+################################################################################
+k8s_list_variants() {
+	local env="$1"
+	local namespace="${env}"
+
+	info "Listing all deployed NXCC nodes in '${env}' environment..."
+
+	# First show the main deployment
+	local base_release="nxcc-node-${env}"
+	if helm status "${base_release}" -n "${namespace}" &>/dev/null; then
+		echo "Main deployment:"
+		local ingress_hosts
+		ingress_hosts=$(kubectl get ingress "${base_release}" -n "${namespace}" -o jsonpath='{.spec.rules[*].host}' 2>/dev/null || echo "")
+		if [[ -n "$ingress_hosts" ]]; then
+			for host in $ingress_hosts; do
+				local protocol="https"
+				if [[ "$env" == "debug" ]]; then protocol="http"; fi
+				echo "  Worker URL: ${protocol}://${host}/"
+				echo "  Seed URL: ${protocol}://${host}/seed"
+			done
+		else
+			echo "  No ingress configured - check service configuration"
+		fi
+		echo ""
+	fi
+
+	# Find all helm releases that match the variant pattern
+	local variant_releases
+	variant_releases=$(helm list -n "${namespace}" -o json 2>/dev/null | jq -r ".[] | select(.name | startswith(\"${base_release}-\")) | .name" 2>/dev/null || echo "")
+
+	if [[ -z "$variant_releases" ]]; then
+		info "No node variants found in '${env}' environment."
+		return 0
+	fi
+
+	echo "Deployed variants:"
+	for release in $variant_releases; do
+		local variant_name="${release#"${base_release}"-}"
+		echo "  - Variant: ${variant_name}"
+
+		local worker_ingress_hosts
+		worker_ingress_hosts=$(kubectl get ingress "${release}-worker" -n "${namespace}" -o jsonpath='{.spec.rules[*].host}' 2>/dev/null || echo "")
+		if [[ -n "$worker_ingress_hosts" ]]; then
+			for host in $worker_ingress_hosts; do
+				local protocol="https"
+				if [[ "$env" == "debug" ]]; then protocol="http"; fi
+				echo "    Worker URL: ${protocol}://${host}/variant/${variant_name}"
+				echo "    Seed URL: ${protocol}://${host}/variant/${variant_name}/seed"
+			done
+		else
+			echo "    No ingress configured - check deployment status"
+		fi
+	done
 }
 
 ################################################################################

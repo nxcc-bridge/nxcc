@@ -52,7 +52,8 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 GKE Confidential Computing annotations
 */}}
 {{- define "nxcc.confidentialAnnotations" -}}
-{{- if .Values.confidential.enabled }}
+{{- $confidentialConfig := include "nxcc.effectiveConfidential" . | fromYaml }}
+{{- if $confidentialConfig.enabled }}
 # This annotation tells GKE Autopilot to use a Confidential Computing VM.
 # It ensures the pod runs on a machine with TDX.
 cloud.google.com/compute-class: "Confidential"
@@ -66,7 +67,8 @@ cloud.google.com/compute-class: "Confidential"
 Operator key volume mounts
 */}}
 {{- define "nxcc.operatorKeyVolumeMounts" -}}
-{{- if .Values.operatorKey.enabled }}
+{{- $operatorConfig := include "nxcc.effectiveOperatorKey" . | fromYaml }}
+{{- if $operatorConfig.enabled }}
 - name: operator-key
   mountPath: /etc/nxcc/operator-keys
   readOnly: true
@@ -77,10 +79,11 @@ Operator key volume mounts
 Operator key volumes
 */}}
 {{- define "nxcc.operatorKeyVolumes" -}}
-{{- if .Values.operatorKey.enabled }}
+{{- $operatorConfig := include "nxcc.effectiveOperatorKey" . | fromYaml }}
+{{- if $operatorConfig.enabled }}
 - name: operator-key
   secret:
-    secretName: {{ .Values.operatorKey.secretName }}
+    secretName: {{ $operatorConfig.secretName }}
     defaultMode: 0400
 {{- end }}
 {{- end }}
@@ -89,8 +92,42 @@ Operator key volumes
 Operator key environment variables
 */}}
 {{- define "nxcc.operatorKeyEnvVars" -}}
-{{- if .Values.operatorKey.enabled }}
+{{- $operatorConfig := include "nxcc.effectiveOperatorKey" . | fromYaml }}
+{{- if $operatorConfig.enabled }}
 - name: NXCC_OPERATOR_PRIVATE_KEY_PATH
   value: "/etc/nxcc/operator-keys/private-key"
 {{- end }}
+{{- end }}
+
+{{/*
+Get effective operator key configuration for a component
+Usage: {{ include "nxcc.effectiveOperatorKey" . }}
+*/}}
+{{- define "nxcc.effectiveOperatorKey" -}}
+{{- $variant := .Values.nodeVariant | default "" }}
+{{- $baseConfig := .Values.operatorKey }}
+{{- $override := dict }}
+{{- if and $variant (hasKey .Values.nodeVariations.operatorKeys $variant) }}
+{{- $override = index .Values.nodeVariations.operatorKeys $variant }}
+{{- end }}
+{{- $result := mergeOverwrite $baseConfig $override }}
+enabled: {{ $result.enabled }}
+secretName: {{ $result.secretName | quote }}
+createSecret: {{ $result.createSecret }}
+privateKeyData: {{ $result.privateKeyData | quote }}
+{{- end }}
+
+{{/*
+Get effective confidential configuration for a component
+Usage: {{ include "nxcc.effectiveConfidential" . }}
+*/}}
+{{- define "nxcc.effectiveConfidential" -}}
+{{- $variant := .Values.nodeVariant | default "" }}
+{{- $baseConfig := .Values.confidential }}
+{{- $override := dict }}
+{{- if and $variant (hasKey .Values.nodeVariations.confidentialOverrides $variant) }}
+{{- $override = index .Values.nodeVariations.confidentialOverrides $variant }}
+{{- end }}
+{{- $result := mergeOverwrite $baseConfig $override }}
+enabled: {{ $result.enabled }}
 {{- end }}

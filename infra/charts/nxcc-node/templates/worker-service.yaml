@@ -5,6 +5,9 @@ metadata:
   labels:
     {{- include "nxcc.labels" . | nindent 4 }}
     app.kubernetes.io/component: worker
+    {{- if .Values.nodeVariant }}
+    app.kubernetes.io/variant: {{ .Values.nodeVariant }}
+    {{- end }}
 spec:
   type: {{ .Values.worker.service.type | default "ClusterIP" }}
   ports:

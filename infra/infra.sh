@@ -53,12 +53,16 @@ usage() {
 	echo "      create:   Creates the specified cluster."
 	echo "      destroy:  Deletes the specified cluster."
 	echo
-	echo "  k8s <deploy|destroy|dump-debug> <env> [options]"
+	echo "  k8s <deploy|deploy-variations|list-variants|destroy|dump-debug> <env> [options]"
 	echo "    Manages the application deployment via Helm chart."
 	echo "      <env>: debug | staging | prod"
 	echo "      deploy:      Deploys or upgrades the application to the specified environment."
 	echo "                   Options:"
 	echo "                     --with-operator-key [key-file]   Enable operator signing key"
+	echo "      deploy-variations: Deploys multiple node variants for e2e testing."
+	echo "                   Usage: k8s deploy-variations <env> <variant1:overrides> [variant2:overrides]..."
+	echo "                   Example: k8s deploy-variations debug untrusted:operatorKeys.test.enabled=true"
+	echo "      list-variants: Lists all deployed node variants and their access URLs."
 	echo "      destroy:     Uninstalls the application from the specified environment."
 	echo "      dump-debug:  Dumps diagnostic information for a failed deployment."
 	echo
@@ -205,6 +209,16 @@ main() {
 
 			k8s_deploy "$env"
 			;;
+		deploy-variations)
+			if [[ -z "$env" ]]; then error "Missing environment for 'k8s deploy-variations'. Use 'debug', 'staging', or 'prod'."; fi
+			shift 3 # Remove command, subcommand, and env
+			if [[ $# -eq 0 ]]; then error "Missing node variations for 'k8s deploy-variations'. Provide at least one variant:overrides pair."; fi
+			k8s_deploy_variations "$env" "$@"
+			;;
+		list-variants)
+			if [[ -z "$env" ]]; then error "Missing environment for 'k8s list-variants'. Use 'debug', 'staging', or 'prod'."; fi
+			k8s_list_variants "$env"
+			;;
 		destroy)
 			if [[ -z "$env" ]]; then error "Missing environment for 'k8s destroy'. Use 'debug', 'staging', or 'prod'."; fi
 			if [[ "$auto_yes" == true ]]; then
@@ -219,7 +233,7 @@ main() {
 			if [[ -z "$env" ]]; then error "Missing environment for 'k8s dump-debug'. Use 'debug', 'staging', or 'prod'."; fi
 			k8s_dump_debug_info "$env"
 			;;
-		*) error "Invalid subcommand for 'k8s'. Use 'deploy', 'destroy', or 'dump-debug'." ;;
+		*) error "Invalid subcommand for 'k8s'. Use 'deploy', 'deploy-variations', 'list-variants', 'destroy', or 'dump-debug'." ;;
 		esac
 		;;
 
