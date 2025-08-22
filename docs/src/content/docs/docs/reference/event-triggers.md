@@ -3,19 +3,20 @@ title: Event Triggers
 description: Learn how to trigger nXCC workers with on-chain events, HTTP requests, and more.
 ---
 
-nXCC workers are event-driven. You define what triggers your worker in the `events` array of your `worker.manifest.json` file. When a configured event occurs, the nXCC node invokes your worker by sending a `POST` request to its `fetch` handler.
+nXCC workers are event-driven. You define what triggers your worker in the `events` array of your **work order** when deploying with `nxcc worker deploy`. When a configured event occurs, the nXCC node invokes your worker by calling the specified handler function.
 
 ## The `events` Array
 
-The `events` array in your manifest contains a list of event trigger objects. Each object specifies the event `kind`, the `handler` function in your worker to call (which is typically just `"fetch"`), and any parameters specific to that event kind.
+The `events` array in your work order contains a list of event trigger objects. Each object specifies the event `kind`, the `handler` function in your worker to call, and any parameters specific to that event kind.
 
 ```json
-// worker.manifest.json
+// Work order structure (created by nxcc worker deploy)
 {
-  // ...
+  "id": "worker-id",
+  "worker": { ... }, // Your manifest
   "events": [
     {
-      "handler": "fetch",
+      "handler": "launch",
       "kind": "launch"
     },
     {
@@ -23,13 +24,15 @@ The `events` array in your manifest contains a list of event trigger objects. Ea
       "kind": "http_request"
     },
     {
-      "handler": "fetch",
+      "handler": "tick",
       "kind": "scheduled",
       "period_ms": 60000
     }
   ]
 }
 ```
+
+Note: Currently, the CLI automatically adds a `launch` event when deploying. Other events need to be specified when creating the work order.
 
 ### `launch`
 

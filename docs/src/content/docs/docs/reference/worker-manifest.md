@@ -3,11 +3,11 @@ title: Worker Manifest Reference
 description: A detailed specification for the worker.manifest.json file.
 ---
 
-The `worker.manifest.json` file is the blueprint for your worker. It tells the nXCC node what code to run, what triggers to listen for, what secrets it needs, and how to configure it.
+The `worker.manifest.json` file is the blueprint for your worker. It tells the nXCC node what code to run, what secrets it needs, and how to configure it.
 
 ## Structure
 
-A manifest is a JSON object with four top-level properties: `bundle`, `identities`, `userdata`, and `events`.
+A manifest is a JSON object with three top-level properties: `bundle`, `identities`, and `userdata`.
 
 ```json
 {
@@ -17,15 +17,11 @@ A manifest is a JSON object with four top-level properties: `bundle`, `identitie
   "identities": [],
   "userdata": {
     "name": "my-first-worker"
-  },
-  "events": [
-    {
-      "handler": "fetch",
-      "kind": "launch"
-    }
-  ]
+  }
 }
 ```
+
+Note: Event triggers are specified separately in the work order when deploying the worker, not in the manifest itself.
 
 ### `bundle` (Object, Required)
 
@@ -77,7 +73,7 @@ The `userdata` object is a place to put arbitrary, non-sensitive JSON configurat
 }
 ```
 
-**Worker Code:**
+**Worker Code (Manual Implementation):**
 
 ```typescript
 export default {
@@ -88,8 +84,108 @@ export default {
 };
 ```
 
-The entire `userdata` object is made available to the worker inside the `env` object at `env.USER_CONFIG`.
+**Worker Code (Using @nxcc/sdk):**
 
-### `events` (Array, Optional)
+```typescript
+import { worker } from "@nxcc/sdk";
 
-The `events` array defines what triggers your worker. See the [Event Triggers](./event-triggers) reference for a detailed guide on all available event kinds (`launch`, `http_request`, `web3_event`).
+export default worker({
+  async fetch(request, { userdata }) {
+    const { rpcUrl, retryCount } = userdata;
+    // userdata is the same as env.USER_CONFIG
+    // ...
+  },
+});
+```
+
+The entire `userdata` object is made available to the worker inside the `env` object at `env.USER_CONFIG`, and also as `context.userdata` when using the `@nxcc/sdk`.
+
+## Work Order vs Manifest
+
+When deploying a worker, the `nxcc worker deploy` command creates a **work order** that contains both your manifest and the event triggers. The work order structure includes:
+
+```json
+{
+  "id": "worker-unique-id",
+  "worker": {
+    "bundle": { "source": "..." },
+    "identities": [],
+    "userdata": { ... }
+  },
+  "events": [
+    {
+      "handler": "fetch",
+      "kind": "launch"
+    }
+  ]
+}
+```
+
+See the [Event Triggers](./event-triggers) reference for a detailed guide on all available event kinds (`launch`, `http_request`, `web3_event`).
+
+## Policy Manifests
+
+Policy workers use the same manifest structure as regular workers, but with some important differences:
+
+### Policy-Specific Considerations
+
+1. **No identities**: Policy workers cannot request access to identities (they evaluate access for others)
+2. **Special bundle**: Policy bundles are typically deployed to IPFS or served via HTTP
+3. **SDK usage**: Policies can use the `@nxcc/sdk` policy helper for simplified development
+
+### Policy Manifest Example
+
+```json
+{
+  "bundle": {
+    "source": "./dist/policy.js"
+  },
+  "identities": [],
+  "userdata": {
+    "policyName": "measurement-based-policy",
+    "trustedMeasurements": ["0x1234567890abcdef...", "0xfedcba0987654321..."],
+    "debugMode": false
+  }
+}
+```
+
+### Policy Implementation Options
+
+**Using the SDK (Recommended):**
+
+```typescript
+import { policy } from "@nxcc/sdk";
+
+export default policy((requests) => {
+  return requests.map((request) => {
+    // Your authorization logic using userdata
+    const trustedHashes = userdata.trustedMeasurements;
+    const measurement = request.env_report?.attestation?.measurement;
+    return trustedHashes.includes(measurement);
+  });
+});
+```
+
+**Manual Implementation:**
+
+```typescript
+export default {
+  async fetch(request, env) {
+    if (new URL(request.url).pathname.substring(1) !== "_policy") {
+      return new Response("Invalid endpoint", { status: 400 });
+    }
+
+    const requests = await request.json();
+    const { trustedMeasurements } = env.USER_CONFIG;
+
+    const decisions = requests.map((req) => {
+      const measurement = req.env_report?.attestation?.measurement;
+      return trustedMeasurements.includes(measurement);
+    });
+
+    return new Response(JSON.stringify(decisions), {
+      headers: { "Content-Type": "application/json" },
+    });
+  },
+};
+```

@@ -1,9 +1,9 @@
 ---
 title: CLI Reference
-description: A comprehensive reference for all @nxcc/cli commands.
+description: A comprehensive reference for all @nxcc/cli commands for developer workflows.
 ---
 
-The nXCC Command Line Interface (`@nxcc/cli`) is the primary tool for developing and managing your nXCC projects, workers, and on-chain identities.
+The nXCC Command Line Interface (`@nxcc/cli`) is the primary tool for developing and managing your nXCC projects, workers, and on-chain identities. This tool is designed for developers building applications on nXCC.
 
 ## Installation
 
@@ -64,20 +64,36 @@ nxcc worker deploy <manifest-path>
 
 **Options:**
 
-- `--rpc-url <url>` (required): The HTTP RPC URL of the target nXCC node. Defaults to `http://localhost:6922`.
+- `--rpc-url <url>`: The HTTP RPC URL of the target nXCC node. Defaults to `http://localhost:6922` (first node started by `./node/run.sh`).
 - `--bundle`: If specified, the CLI will bundle the worker's code (referenced in `manifest.bundle.source`) into a `data:` URL within the manifest before deploying. This is useful for deploying workers with local code files.
 - `--signer <private-key>`: An Ethereum-style private key to sign the work order's DSSE envelope.
 
+#### `nxcc worker logs`
+
+Stream logs from a deployed worker for debugging and monitoring.
+
+```bash
+nxcc worker logs <worker-id>
+```
+
+- **`<worker-id>`**: The ID of the worker to stream logs from.
+
+**Options:**
+
+- `--rpc-url <url>`: The HTTP RPC URL of the target nXCC node. Defaults to `http://localhost:6922`.
+- `-f, --follow`: Follow log output (stream new logs). Defaults to `false`.
+- `-t, --tail <lines>`: Number of lines to tail. Defaults to `10`.
+
 ### `nxcc identity`
 
-Commands for managing on-chain identities.
+Commands for managing on-chain identities. All identity commands require the `--gateway-url` option which defaults to `http://localhost:8545`.
 
 #### `nxcc identity create`
 
 Creates a new identity by minting an ERC-721 NFT to your account.
 
 ```bash
-nxcc identity create <chain> <address>
+nxcc identity create <chain> <address> --signer <private-key>
 ```
 
 - **`<chain>`**: The chain ID where the Identity contract is deployed (e.g., `31337` for local Anvil).
@@ -85,7 +101,7 @@ nxcc identity create <chain> <address>
 
 **Options:**
 
-- `--gateway-url <url>` (required): The RPC URL of the Web3 gateway for the target chain. Defaults to `http://localhost:8545`.
+- `--gateway-url <url>`: The RPC URL of the Web3 gateway for the target chain. Defaults to `http://localhost:8545` (local Anvil instance).
 - `--signer <private-key>` (required): The private key of the account that will own the new identity.
 
 #### `nxcc identity set-policy`
@@ -93,7 +109,7 @@ nxcc identity create <chain> <address>
 Sets or updates the policy for an existing identity. This updates the `tokenURI` of the identity NFT.
 
 ```bash
-nxcc identity set-policy <chain> <address> <id> <url-or-path-to-bundle>
+nxcc identity set-policy <chain> <address> <id> <url-or-path-to-bundle> --signer <private-key>
 ```
 
 - **`<chain>`**: The chain ID.
@@ -103,7 +119,7 @@ nxcc identity set-policy <chain> <address> <id> <url-or-path-to-bundle>
 
 **Options:**
 
-- `--gateway-url <url>` (required): The RPC URL of the Web3 gateway.
+- `--gateway-url <url>`: The RPC URL of the Web3 gateway. Defaults to `http://localhost:8545`.
 - `--signer <private-key>` (required): The private key of the identity's owner or an approved operator.
 
 #### `nxcc identity get-policy`
@@ -120,4 +136,4 @@ nxcc identity get-policy <chain> <address> <id>
 
 **Options:**
 
-- `--gateway-url <url>` (required): The RPC URL of the Web3 gateway.
+- `--gateway-url <url>`: The RPC URL of the Web3 gateway. Defaults to `http://localhost:8545`.

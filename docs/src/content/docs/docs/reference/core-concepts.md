@@ -7,11 +7,11 @@ The nXCC platform is built on a few core concepts that work together to provide 
 
 ## The nXCC Architecture
 
-At a high level, an nXCC node is composed of three main parts that run within a secure boundary:
+At a high level, an nXCC node is composed of three main components:
 
 1.  **Daemon**: The public-facing component that handles networking (P2P communication with other nodes), API requests, and orchestrates work.
-2.  **Platform Services Enclave**: A secure environment (TEE) that runs the core logic for managing secrets and running workers. It ensures that sensitive operations are isolated and verifiable.
-3.  **Execution Enclave**: A secure environment (TEE) that runs the actual worker code in a sandboxed Virtual Machine (VM), providing a final layer of isolation.
+2.  **Enclave**: A secure environment (TEE) that runs the core logic for managing secrets and coordinating worker execution. It ensures that sensitive operations are isolated and verifiable.
+3.  **VM**: A virtual machine runtime that executes worker code in a sandboxed environment. Workers run in isolated JavaScript environments powered by Cloudflare's Workerd runtime.
 
 These components interact based on the following core concepts.
 

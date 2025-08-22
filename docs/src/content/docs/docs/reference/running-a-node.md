@@ -1,58 +1,142 @@
 ---
 title: Running a Node
-description: How to run a local nXCC node for development and debugging.
+description: How to run nXCC nodes for development, testing, and production.
 ---
 
-Running a local nXCC node is the best way to develop and debug your workers. It gives you direct access to logs and allows you to iterate quickly without deploying to a public network.
+This guide covers running nXCC nodes for different purposes, from local development to production deployments.
 
-## Using Docker (Recommended)
+## Local Development (Recommended)
 
-The easiest way to run a node is with Docker. We provide a pre-built, multi-platform image on GitHub Container Registry.
+For developing and testing workers locally, the easiest approach is using the provided `run.sh` script.
 
-### 1. Pull the Image
+### Prerequisites
 
-```bash
-docker pull ghcr.io/nxcc-bridge/nxcc/node:latest
-```
+- [Rust toolchain](https://rustup.rs/) (1.89.0+)
+- [grpcurl](https://github.com/fullstorydev/grpcurl) for gRPC interaction
 
-### 2. Run the Container
+### Quick Start
 
-To run a node for local development, you'll typically want to connect it to a local blockchain like Anvil. First, create a Docker network, then run both containers on it.
-
-```bash
-# Create a network if you haven't already
-docker network create nxcc-dev-net
-
-# Run Anvil (in a separate terminal)
-docker run --rm -it --name anvil -p 8545:8545 --network nxcc-dev-net --network-alias anvil \
-  ghcr.io/foundry-rs/foundry:latest anvil --host 0.0.0.0
-
-# Run the nXCC node
-docker run -d --rm \
-  --name nxcc-node \
-  -p 6922:6922 \
-  --network nxcc-dev-net \
-  -e RUST_LOG=info,nxcc_daemon=debug \
-  -e NXCC_HTTP_API_ENABLED=true \
-  -e NXCC_HTTP_API_CORS_ALLOWED_ORIGINS='*' \
-  ghcr.io/nxcc-bridge/nxcc/node:latest
-```
-
-### Key Configuration
-
-- `-p 6922:6922`: Exposes the node's HTTP API, which the `@nxcc/cli` uses for `worker deploy`.
-- `--network nxcc-dev-net`: Connects the node to the same network as your Anvil container.
-- `-e RUST_LOG=...`: Controls the log level. `nxcc_daemon=debug` is useful for development.
-- `-e NXCC_HTTP_API_ENABLED=true`: **Required** to enable the `/api/work-orders` endpoint for deployments.
-
-### Viewing Logs
-
-You can view the real-time output from your node and any running workers using the `docker logs` command. This is essential for debugging.
+From the `node/` directory of the nXCC repository:
 
 ```bash
-docker logs -f nxcc-node
+# Start a single local node
+./run.sh
+
+# Start multiple nodes for P2P testing
+./run.sh 3
 ```
 
-## Building from Source (Advanced)
+The script automatically:
 
-For advanced development, you can build and run the node directly from the source code in the `node/` directory of the [nXCC repository](https://github.com/nxcc-bridge/nxcc). The `node/entrypoint.sh` script provides a clear example of how the different services (daemon, enclave, vm) are started and configured to work together.
+- Builds all required binaries (`nxcc-daemon`, `nxcc-platform-enclave`, `nxcc-workerd-vm`)
+- Sets up temporary directories with proper configurations
+- Starts all components with appropriate inter-process connections
+- Exposes HTTP API on ports 6922+ (6922 for first node, 6923 for second, etc.)
+
+### Development Workflow
+
+Once your node is running, you can deploy workers using the CLI:
+
+```bash
+# Install the CLI
+npm install -g @nxcc/cli
+
+# Deploy a worker to your local node
+nxcc worker deploy path/to/worker.manifest.json --rpc-url http://localhost:6922
+```
+
+The `run.sh` script provides full logging output, making it easy to debug your workers and see the system behavior.
+
+### Cleanup
+
+Press `Ctrl+C` to stop all nodes. The script automatically cleans up temporary files and processes.
+
+## Production Infrastructure
+
+For production deployments and cloud infrastructure, use the comprehensive `infra.sh` script from the repository root.
+
+### Infrastructure Management Overview
+
+The `infra.sh` script is a full-featured infrastructure management tool that handles:
+
+- **Local Development**: KinD clusters and container builds
+- **Cloud Deployment**: GCP GKE clusters with TDX support
+- **CI/CD Setup**: GitHub Actions integration with Workload Identity
+- **TDX Development**: Special VMs for testing on real TDX hardware
+
+### Quick Start with Local Infrastructure
+
+```bash
+# Complete local setup
+./infra/infra.sh build local          # Build container images
+./infra/infra.sh cluster create kind  # Create local Kubernetes cluster
+./infra/infra.sh k8s deploy debug     # Deploy nXCC to cluster
+./infra/infra.sh test debug           # Test the deployment
+```
+
+### Production GCP Deployment
+
+```bash
+# One-time CI/CD setup
+./infra/infra.sh ci setup
+
+# Production deployment
+./infra/infra.sh build gcp             # Build & push to Artifact Registry
+./infra/infra.sh cluster create gke    # Create GKE cluster with TDX nodes
+./infra/infra.sh k8s deploy prod       # Deploy to production
+./infra/infra.sh test prod             # Verify deployment
+```
+
+### TDX Hardware Development
+
+For testing on real Intel TDX hardware:
+
+```bash
+# Create TDX-enabled development VM
+./infra/infra.sh dev create
+
+# SSH into the VM
+./infra/infra.sh dev ssh
+
+# Push local code changes
+./infra/infra.sh dev push
+
+# Check VM status
+./infra/infra.sh dev status
+
+# Clean up when done
+./infra/infra.sh dev destroy
+```
+
+The TDX development environment includes:
+
+- Intel TDX-enabled Google Cloud VM
+- Pre-installed development tools and dependencies
+- nXCC codebase ready for compilation and testing
+- Docker and container tools for building images
+
+### Key Features
+
+- **Idempotent operations**: Safe to run multiple times without side effects
+- **Multi-environment support**: Local (KinD), staging, and production deployments
+- **TDX integration**: Proper handling of Intel Trust Domain Extensions for confidential computing
+- **Comprehensive testing**: Built-in connectivity and functionality tests
+- **Developer-friendly**: Automated setup and teardown for rapid iteration
+
+For complete details on all commands and options, see the [Infrastructure Management Reference](./infra-management.md).
+
+## Manual Setup (Advanced)
+
+For custom deployments or debugging, you can run components individually:
+
+```bash
+# Build the workspace
+cargo build
+
+# Run components manually (see run.sh for configuration examples)
+./target/debug/nxcc-daemon --config-path config.toml
+./target/debug/nxcc-platform-enclave --identity-path identity.key
+./target/debug/nxcc-workerd-vm --vm-id vm1
+```
+
+Refer to `node/run.sh` and `node/tests/utils.sh` for detailed configuration examples and inter-component communication setup.

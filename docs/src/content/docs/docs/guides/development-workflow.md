@@ -1,0 +1,335 @@
+---
+title: Local Development Workflow
+description: Master the development cycle with local testing, debugging, and iteration.
+---
+
+This guide covers the complete local development workflow for nXCC workers, from setup through debugging and testing.
+
+## Development Environment Setup
+
+### Prerequisites
+
+- [Node.js](https://nodejs.org/) 22+ (for CLI and TypeScript compilation)
+- [Rust toolchain](https://rustup.rs/) 1.89.0+ (for building nXCC node)
+- [grpcurl](https://github.com/fullstorydev/grpcurl) (for gRPC debugging)
+
+### Clone and Build
+
+```bash
+# Clone the nXCC repository
+git clone https://github.com/nxcc-bridge/nxcc.git
+cd nxcc
+
+# Build the node components
+cd node
+cargo build
+
+# Start a local development node
+./run.sh
+```
+
+This starts all three components:
+
+- **Daemon** on `http://localhost:6922` (HTTP API)
+- **Enclave** (secure execution environment)
+- **VM** (worker runtime)
+
+The script automatically builds binaries, sets up temporary directories, and handles inter-process communication.
+
+### Multiple Node Testing
+
+For P2P networking tests, start multiple nodes:
+
+```bash
+# Start 3 nodes for P2P testing
+./run.sh 3
+```
+
+This creates nodes on ports:
+
+- Node 1: `http://localhost:6922`
+- Node 2: `http://localhost:6923`
+- Node 3: `http://localhost:6924`
+
+## Worker Development Cycle
+
+### 1. Create a New Project
+
+```bash
+# Install the CLI
+npm install -g @nxcc/cli
+
+# Create a new project
+nxcc init my-worker
+cd my-worker
+npm install
+```
+
+### 2. Develop Your Worker
+
+Edit `workers/my-worker.ts`:
+
+```typescript
+import { worker } from "@nxcc/sdk";
+
+export default worker({
+  async launch(eventPayload, { userdata }) {
+    console.log("🚀 Worker starting up!");
+    console.log("User config:", userdata);
+  },
+
+  async fetch(request, { userdata }) {
+    const url = new URL(request.url);
+    console.log(`📡 HTTP ${request.method} ${url.pathname}`);
+
+    return {
+      message: "Hello from worker!",
+      timestamp: new Date().toISOString(),
+      path: url.pathname,
+      config: userdata,
+    };
+  },
+
+  async handleEvent(eventPayload, { userdata }) {
+    console.log("📥 Custom event received:", eventPayload);
+
+    // Your event processing logic
+    return {
+      status: "processed",
+      timestamp: new Date().toISOString(),
+    };
+  },
+});
+```
+
+Update `workers/manifest.template.json` to configure userdata:
+
+```json
+{
+  "bundle": {
+    "source": "./dist/my-worker.js"
+  },
+  "identities": [],
+  "userdata": {
+    "environment": "development",
+    "debug": true,
+    "apiKey": "dev-key-123"
+  }
+}
+```
+
+### 3. Build and Deploy
+
+```bash
+# Compile TypeScript
+npm run build
+
+# Deploy to local node
+nxcc worker deploy workers/manifest.template.json --rpc-url http://localhost:6922
+```
+
+The CLI will output a worker ID for tracking and debugging.
+
+## Debugging and Monitoring
+
+### Real-Time Log Streaming
+
+Use the CLI to stream worker logs in real-time:
+
+```bash
+# Stream logs from your worker (replace with actual worker ID)
+nxcc worker logs <worker-id> --rpc-url http://localhost:6922 --follow
+```
+
+Advanced logging options:
+
+```bash
+# Tail last 50 lines and follow
+nxcc worker logs <worker-id> -t 50 -f
+
+# Stream logs from specific node
+nxcc worker logs <worker-id> --rpc-url http://localhost:6923 -f
+```
+
+### Node Logs
+
+Monitor the entire node for debugging:
+
+```bash
+# The run.sh script shows all component logs in real-time
+# Look for your worker's console.log() output
+```
+
+### Testing HTTP Workers
+
+If your worker has a `fetch` handler, test it directly:
+
+```bash
+# Test HTTP endpoint (adapt URL as needed)
+curl http://localhost:6922/api/workers/<worker-id>/invoke \
+  -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"test": "data"}'
+```
+
+## Advanced Development Patterns
+
+### Environment-Specific Configuration
+
+Use userdata for environment-specific settings:
+
+```json
+{
+  "userdata": {
+    "environment": "development",
+    "rpcUrls": {
+      "ethereum": "http://localhost:8545",
+      "polygon": "https://polygon-rpc.com"
+    },
+    "debug": true
+  }
+}
+```
+
+Access in your worker:
+
+```typescript
+export default worker({
+  async fetch(request, { userdata }) {
+    if (userdata.debug) {
+      console.log("Debug mode active");
+    }
+
+    const ethRpc = userdata.rpcUrls.ethereum;
+    // Use environment-specific RPC URLs
+  },
+});
+```
+
+### Error Handling and Debugging
+
+Add comprehensive error handling:
+
+```typescript
+export default worker({
+  async fetch(request, { userdata }) {
+    try {
+      const data = await request.json();
+      console.log("Received data:", JSON.stringify(data, null, 2));
+
+      // Your business logic
+      const result = await processData(data);
+
+      return { success: true, result };
+    } catch (error) {
+      console.error("Worker error:", error);
+
+      // Return error details for debugging
+      return new Response(
+        JSON.stringify({
+          error: error.message,
+          stack: error.stack,
+          timestamp: new Date().toISOString(),
+        }),
+        {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    }
+  },
+});
+```
+
+### Rapid Iteration
+
+For fast development cycles:
+
+1. **Keep node running**: `./run.sh` in one terminal
+2. **Watch and rebuild**: `npm run build --watch` in another terminal
+3. **Redeploy on changes**: Re-run `nxcc worker deploy` after each build
+4. **Monitor logs**: Keep `nxcc worker logs` running for immediate feedback
+
+## Testing with Local Blockchain
+
+### Start Anvil
+
+```bash
+# In a separate terminal
+npx anvil
+```
+
+This starts a local Ethereum node on `http://localhost:8545`.
+
+### Deploy Test Contracts
+
+```bash
+# Deploy a simple contract for testing
+cd contracts/evm
+forge create src/Identity.sol:Identity --rpc-url http://localhost:8545 --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+```
+
+### Create Test Identities
+
+```bash
+# Create an identity for testing
+nxcc identity create 31337 <contract-address> --signer 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+```
+
+## Troubleshooting
+
+### Common Issues
+
+**Worker deployment fails**:
+
+- Check that `./run.sh` is running
+- Verify the manifest file path
+- Ensure TypeScript compiled successfully (`npm run build`)
+
+**No logs appearing**:
+
+- Verify the worker ID is correct
+- Check that the worker actually started (deployment should show success)
+- Ensure your worker has `console.log()` statements
+
+**Worker not responding**:
+
+- Check the fetch handler implementation
+- Verify error handling isn't swallowing exceptions
+- Monitor node logs for runtime errors
+
+### Debug Tools
+
+**gRPC inspection** (advanced):
+
+```bash
+# List gRPC services
+grpcurl -plaintext localhost:9001 list
+
+# Call specific gRPC methods
+grpcurl -plaintext -d '{"vm_id": "test"}' localhost:9001 daemon.Debug/ListVms
+```
+
+**Direct API testing**:
+
+```bash
+# Check node health
+curl http://localhost:6922/health
+
+# List work orders
+curl http://localhost:6922/api/work-orders
+```
+
+## Next Steps
+
+- **[Policy Development](./policy-development.md)** - Learn to write authorization policies
+- **[Blockchain Events](./blockchain-events.md)** - React to on-chain events
+- **[Infrastructure Management](../reference/infra-management.md)** - Deploy to production
+
+## Development Tips
+
+1. **Use descriptive console.log messages** - They're your primary debugging tool
+2. **Test with multiple node setup** - Catch P2P networking issues early
+3. **Iterate quickly** - Keep terminals open for build/deploy/log workflow
+4. **Validate JSON** - Malformed manifests cause deployment failures
+5. **Monitor resource usage** - Workers run in resource-constrained environments
