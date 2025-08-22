@@ -5,6 +5,7 @@ import { initCommand } from "./commands/init";
 import { bundleCommand } from "./commands/bundle";
 import { workerSubcommand } from "./commands/worker";
 import { identitySubcommand } from "./commands/identity";
+import { nodeSubcommand } from "./commands/node";
 import pkg from "../package.json";
 
 const program = new Command();
@@ -25,5 +26,6 @@ program
 
 workerSubcommand(program);
 identitySubcommand(program);
+nodeSubcommand(program);
 
 program.parse(process.argv);

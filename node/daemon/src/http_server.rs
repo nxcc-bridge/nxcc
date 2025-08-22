@@ -21,7 +21,7 @@ use tracing::{debug, error, info, instrument, warn};
 
 use crate::{
     config::HttpConfig, error::AppError, grpc::enclave_client::EnclaveClient,
-    services::work_order_orchestrator::WorkOrderOrchestrator,
+    services::{work_order_orchestrator::WorkOrderOrchestrator, secrets::SecretsService},
 };
 
 /// Registry for tracking attached VMs
@@ -68,6 +68,8 @@ struct AppState {
     local_key: libp2p::identity::Keypair,
     /// Registry of attached VMs
     vm_registry: VmRegistry,
+    /// Secrets service for env report generation
+    secrets_service: Arc<SecretsService>,
 }
 
 #[derive(serde::Serialize)]
@@ -302,6 +304,38 @@ async fn status_handler(State(state): State<Arc<AppState>>) -> Result<impl IntoR
     }))
 }
 
+#[derive(serde::Serialize)]
+struct EnvReportResponse {
+    attestation: serde_json::Value,
+    operator_signature: Option<serde_json::Value>,
+}
+
+/// Handles env report requests, returning the node's environment report including attestation and operator signature.
+async fn env_report_handler(State(state): State<Arc<AppState>>) -> Result<impl IntoResponse, ApiError> {
+    info!("Received env report request");
+
+    // Get the env report from the secrets service
+    let env_report = state
+        .secrets_service
+        .get_own_env_report(Vec::new()) // Empty user data
+        .await
+        .map_err(|e| ApiError::from(format!("Failed to get env report: {}", e)))?;
+
+    // Convert to JSON for response
+    let attestation_json = serde_json::to_value(&env_report.attestation)
+        .map_err(|e| ApiError::from(format!("Failed to serialize attestation: {}", e)))?;
+    
+    let operator_signature_json = env_report.operator_signature
+        .map(|sig| serde_json::to_value(&sig))
+        .transpose()
+        .map_err(|e| ApiError::from(format!("Failed to serialize operator signature: {}", e)))?;
+
+    Ok(Json(EnvReportResponse {
+        attestation: attestation_json,
+        operator_signature: operator_signature_json,
+    }))
+}
+
 /// Query parameters for worker logs API
 #[derive(Deserialize, serde::Serialize)]
 struct WorkerLogsQuery {
@@ -377,6 +411,7 @@ pub async fn start_http_server(
     work_order_orchestrator: Arc<WorkOrderOrchestrator>,
     local_key: libp2p::identity::Keypair,
     vm_registry: VmRegistry,
+    secrets_service: Arc<SecretsService>,
     shutdown_signal: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), anyhow::Error> {
     let worker_base_path = config.base_mount_path.trim_end_matches('/');
@@ -390,6 +425,7 @@ pub async fn start_http_server(
         work_order_orchestrator,
         local_key,
         vm_registry,
+        secrets_service,
     });
 
     // --- Router Configuration ---
@@ -402,6 +438,7 @@ pub async fn start_http_server(
         let mut api_router = Router::new()
             .route("/work-orders", post(submit_work_order_handler))
             .route("/status", get(status_handler))
+            .route("/env-report", get(env_report_handler))
             .route("/workers/{worker_id}/logs", get(worker_logs_handler));
 
         // Conditionally add CORS layer to the API router

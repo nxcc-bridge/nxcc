@@ -168,6 +168,7 @@ async fn main() -> anyhow::Result<()> {
     let work_order_orchestrator_for_http = work_order_orchestrator.clone();
     let local_key_for_http = local_key.clone();
     let vm_registry_for_http = vm_registry.clone();
+    let secrets_service_for_http = secrets_service.clone();
 
     tokio::spawn(async move {
         if let Err(e) = start_http_server(
@@ -177,6 +178,7 @@ async fn main() -> anyhow::Result<()> {
             work_order_orchestrator_for_http,
             local_key_for_http,
             vm_registry_for_http,
+            secrets_service_for_http,
             async move {
                 shutdown_rx_for_http.recv().await.ok();
             },

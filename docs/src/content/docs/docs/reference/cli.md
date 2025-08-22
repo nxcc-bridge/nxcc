@@ -84,6 +84,38 @@ nxcc worker logs <worker-id>
 - `-f, --follow`: Follow log output (stream new logs). Defaults to `false`.
 - `-t, --tail <lines>`: Number of lines to tail. Defaults to `10`.
 
+### `nxcc node`
+
+Commands for interacting with nXCC nodes directly.
+
+#### `nxcc node get-report`
+
+Retrieves the node's environment report, which includes the platform enclave attestation plus other details like the operator signature.
+
+```bash
+nxcc node get-report
+```
+
+**Options:**
+
+- `--rpc-url <url>`: The HTTP RPC URL of the target nXCC node. Defaults to `http://localhost:6922`.
+- `-o, --output <path>`: Output file to save the env report JSON. If not specified, the report is printed to the console.
+
+**Examples:**
+
+```bash
+# Print env report to console
+nxcc node get-report --rpc-url http://localhost:6922
+
+# Save env report to file
+nxcc node get-report --rpc-url http://localhost:6922 -o env-report.json
+```
+
+The environment report contains:
+
+- **attestation**: Platform enclave attestation including ephemeral public key, measurements, and block hashes
+- **operator_signature**: Optional operator signature over the attestation evidence (if configured)
+
 ### `nxcc identity`
 
 Commands for managing on-chain identities. All identity commands require the `--gateway-url` option which defaults to `http://localhost:8545`.
