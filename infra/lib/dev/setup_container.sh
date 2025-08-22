@@ -8,7 +8,7 @@ set -e
 echo '=== Setting up NXCC Development Container ==='
 
 # Configuration
-CONTAINER_IMAGE="${NXCC_DEV_IMAGE:-ghcr.io/nxcc-bridge/dev:latest}"
+CONTAINER_IMAGE="${NXCC_DEV_IMAGE:-ghcr.io/nxcc-bridge/nxcc/dev:latest}"
 CONTAINER_NAME="nxcc-dev-container"
 
 echo "📋 Container Configuration:"

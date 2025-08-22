@@ -356,7 +356,7 @@ dev_start_container() {
 
 	info "Executing container setup script..."
 	# Set environment variable and execute the setup script
-	local env_vars="NXCC_DEV_IMAGE=${NXCC_DEV_IMAGE:-ghcr.io/nxcc-bridge/dev:latest}"
+	local env_vars="NXCC_DEV_IMAGE=${NXCC_DEV_IMAGE:-ghcr.io/nxcc-bridge/nxcc/dev:latest}"
 	if gcloud compute ssh ubuntu@"${TDX_VM_NAME}" --zone="${TDX_VM_ZONE}" --project="${RESOLVED_PROJECT_ID}" --account="${RESOLVED_GCP_ACCOUNT}" --command="$env_vars bash $temp_script && rm -f $temp_script"; then
 		success "Development container started successfully!"
 		return 0

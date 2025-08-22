@@ -144,7 +144,7 @@ export TDX_VM_NAME="nxcc-tdx-dev"          # VM instance name
 export TDX_VM_ZONE="us-central1-a"         # GCP zone
 export TDX_VM_MACHINE_TYPE="c3-standard-4" # Machine type
 export TDX_VM_PREEMPTIBLE="true"           # Use preemptible instances
-export NXCC_DEV_IMAGE="ghcr.io/nxcc-bridge/dev:latest"  # Dev container image
+export NXCC_DEV_IMAGE="ghcr.io/nxcc-bridge/nxcc/dev:latest"  # Dev container image
 ```
 
 ### Customization

@@ -106,7 +106,7 @@ Start or restart the development container:
 - `TDX_VM_ZONE`: GCP zone (default: `us-central1-a`)
 - `TDX_VM_MACHINE_TYPE`: Machine type (default: `c3-standard-4`)
 - `TDX_VM_PREEMPTIBLE`: Use preemptible instances (default: `true`)
-- `NXCC_DEV_IMAGE`: Development container image (default: `ghcr.io/nxcc-bridge/dev:latest`)
+- `NXCC_DEV_IMAGE`: Development container image (default: `ghcr.io/nxcc-bridge/nxcc/dev:latest`)
 - `GCP_ACCOUNT`: Specific GCP account to use
 - `GCP_PROJECT`: Specific GCP project to use
 

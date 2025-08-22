@@ -2,7 +2,7 @@
 
 # Default container name and image
 CONTAINER_NAME="nxcc-dev-container"
-IMAGE_TAG="ghcr.io/nxcc-bridge/dev:latest"
+IMAGE_TAG="ghcr.io/nxcc-bridge/nxcc/dev:latest"
 CODE_PATH="/home/ubuntu/nxcc"
 
 # Parse arguments

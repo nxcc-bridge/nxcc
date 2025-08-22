@@ -65,7 +65,7 @@ jobs:
         with:
           images: |
             ${{ env.GCP_LOCATION }}-docker.pkg.dev/${{ steps.auth.outputs.project_id }}/${{ env.AR_REPO_NAME }}/${{ env.IMAGE_NAME }}
-            ${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+            ${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/nxcc/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=semver,pattern={{version}}
