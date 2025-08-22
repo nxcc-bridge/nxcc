@@ -73,7 +73,7 @@ jobs:
       - name: Run E2E tests
         env:
           # Pass pre-built image info for CI optimization (use short SHA to match build workflow)
-          E2E_PREBUILT_IMAGE: ghcr.io/${{ github.repository_owner }}/node:${{ steps.sha.outputs.short }}
+          E2E_PREBUILT_IMAGE: ghcr.io/${{ github.repository_owner }}/nxcc/node:${{ steps.sha.outputs.short }}
           E2E_CI_MODE: "true"
         run: |
           cd e2e
