@@ -16,6 +16,25 @@
   body {
     @apply bg-white text-gray-700 font-sans antialiased;
   }
+  
+  /* Fix list styling - Tailwind CSS resets list-style-type to none by default */
+  .sl-markdown-content ul {
+    list-style-type: disc;
+    padding-left: 1.5rem;
+  }
+  
+  .sl-markdown-content ol {
+    list-style-type: decimal;
+    padding-left: 1.5rem;
+  }
+  
+  .sl-markdown-content ul ul {
+    list-style-type: circle;
+  }
+  
+  .sl-markdown-content ul ul ul {
+    list-style-type: square;
+  }
 }
 
 @layer utilities {
