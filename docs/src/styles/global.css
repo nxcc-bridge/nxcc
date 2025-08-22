@@ -43,30 +43,54 @@
   --sl-color-accent: #eeaa00; /* Exact #eeaa00 */
 }
 
-/* Dark theme customization only */
+/* Dark theme customization only - Golden Dusk Theme */
 :root:not([data-theme="light"]) {
-  /* Dark mode accent colors */
-  --sl-color-accent-low: #2d1f00; /* Dark background for #eeaa00 */
-  --sl-color-accent-high: #eeaa00; /* Use the main color for text in dark mode */
-  
-  /* Dark theme background colors - Option 2: Everforest-Harmonized */
-  --sl-color-black: #232A2E; /* bg_dim from Everforest medium variant */
-  --sl-color-gray-6: #2D353B; /* bg0 - Navigation and sidebar background */
-  --sl-color-gray-5: #3D484D; /* bg2 - Inline code background */
-  
-  /* Gray scale adjustments using Everforest palette */
-  --sl-color-gray-1: #d3c6aa; /* Everforest main text color - brightest text */
-  --sl-color-gray-2: #d3c6aa; /* Everforest main text color */
-  --sl-color-gray-3: #a7c080; /* Everforest green accent - for mid-tone text */
-  --sl-color-gray-4: #9da9a0; /* Everforest gray - for secondary text */
+  /* Accent colors */
+  --sl-color-accent-low: #3d2b00; /* Dark amber for accent backgrounds */
+  --sl-color-accent-high: #ffcb47; /* Light amber for accent text on dark */
+
+  /* Background colors (darkest to medium) */
+  --sl-color-black: #0f0d0a; /* Very dark warm brown - main background */
+  --sl-color-gray-6: #1a1612; /* Dark warm brown - navigation/sidebar */
+  --sl-color-gray-5: #252017; /* Medium brown - inline code, borders */
+
+  /* Text colors (muted to brightest for proper hierarchy) */
+  --sl-color-gray-4: #8b7a5c; /* Muted warm text - less important elements */
+  --sl-color-gray-3: #b5a082; /* Medium warm text - secondary content */
+  --sl-color-gray-2: #d4c5a3; /* Light warm text - main body text */
+  --sl-color-gray-1: #e8dcbb; /* Lightest warm text - headings, emphasis */
+  --sl-color-white: #f5f0e4; /* Near-white warm - highest contrast elements */
+
+  /* Navigation specific overrides */
+  --sl-color-bg-nav: var(--sl-color-gray-6); /* Use our navigation background */
+  --sl-color-text: var(--sl-color-gray-2); /* Use our main text color */
 }
 
+/* Light theme customization only - Golden Dawn Theme */
 :root[data-theme="light"],
 [data-theme="light"] {
-  /* Light mode accent colors */
-  --sl-color-accent-high: #996600; /* Dark text version */
-  --sl-color-accent: #eeaa00; /* Exact #eeaa00 */
-  --sl-color-accent-low: #fef9e6; /* Light background */
+  /* Accent colors - darker amber for better contrast on light backgrounds */
+  --sl-color-accent-low: #fef7e6; /* Very light amber background */
+  --sl-color-accent-high: #7a5500; /* Very dark amber for accent text */
+
+  /* Background colors - light warm creams (lightest to darker) */
+  --sl-color-black: #fefcf7; /* Very light warm cream - main background */
+  --sl-color-gray-6: #f6f1e7; /* Light cream - navigation/sidebar background */
+  --sl-color-gray-7: #f6f1e7; /* Light cream - for navigation (same as gray-6) */
+  --sl-color-gray-5: #ede5d2; /* Cream - inline code background */
+
+  /* Text colors - dark browns (darkest to lighter for hierarchy) */
+  --sl-color-white: #3e3224; /* Very dark brown - main text */
+  --sl-color-gray-1: #4a3d28; /* Dark brown - headings, emphasis */
+  --sl-color-gray-2: #5a4c35; /* Medium-dark brown - body text */
+  --sl-color-gray-3: #6b5a3f; /* Medium brown - secondary text */
+  --sl-color-gray-4: #7a6549; /* Lighter brown - muted text */
+
+  /* Navigation specific overrides */
+  --sl-color-bg-nav: var(
+    --sl-color-gray-7
+  ); /* Use light navigation background */
+  --sl-color-text: var(--sl-color-white); /* Use our darkest text color */
 }
 
 /* Override social icons to use neutral colors instead of accent colors */
@@ -77,6 +101,43 @@
 /* Also target by the rel attribute for extra specificity */
 a[rel="me"] {
   color: var(--sl-color-text) !important;
+}
+
+/* Starlight logo sizing and positioning */
+.site-title {
+  gap: 0.25rem !important;
+  align-items: baseline !important;
+}
+
+.site-title img {
+  height: 2rem !important;
+  width: 2rem !important;
+  margin-right: 0 !important;
+  margin-left: 0 !important;
+  max-width: 2rem !important;
+  max-height: 2rem !important;
+  transform: translateY(-0.0625rem) !important;
+}
+
+/* More specific targeting for Starlight logo */
+a.site-title img[width="512"][height="512"] {
+  height: 2rem !important;
+  width: 2rem !important;
+  margin-right: 0 !important;
+  margin-left: 0 !important;
+  transform: translateY(-0.0625rem) !important;
+}
+
+/* Target the flex container to control spacing */
+a.site-title.sl-flex {
+  gap: 0.25rem !important;
+  align-items: baseline !important;
+  color: var(--sl-color-text) !important;
+}
+
+/* Logo text uses highest contrast color */
+.site-title span {
+  color: var(--sl-color-white) !important; /* Use highest contrast text color */
 }
 
 @layer base {
