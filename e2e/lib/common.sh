@@ -394,7 +394,7 @@ quick_http_test() {
 	local endpoint="$2"
 	local expected_pattern="${3:-}"
 	local method="${4:-GET}"
-	local data="$5"
+	local data="${5:-}"
 
 	case "$env" in
 	local | debug)

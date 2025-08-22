@@ -226,11 +226,13 @@ create_operator_key_secret() {
 
 	local kubectl_args=(
 		create secret generic "$secret_name"
-		--from-literal=private-key="$(echo "$key_data" | base64 -d | base64 -w 0)"
+		--from-literal=private-key="$key_data"
 	)
 
 	if [[ -n "$namespace" ]]; then
 		kubectl_args+=(--namespace="$namespace")
+		# Ensure namespace exists
+		kubectl create namespace "$namespace" --dry-run=client -o yaml | kubectl apply -f -
 	fi
 
 	info "Creating Kubernetes secret '$secret_name' with operator key..."

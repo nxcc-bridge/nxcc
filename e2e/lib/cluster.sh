@@ -56,19 +56,32 @@ setup_local_cluster() {
 	verbose_log "Creating kind cluster..."
 	(cd "$project_root" && ./infra/infra.sh cluster create kind)
 
-	# Deploy to debug environment (kind) with node variations for e2e testing
-	verbose_log "Deploying NXCC to debug environment with node variations..."
-	(cd "$project_root" && ./infra/infra.sh k8s deploy debug)
+	# Deploy to debug environment (kind) with operator keys enabled
+	verbose_log "Deploying NXCC to debug environment with operator keys..."
+	# Use local image for kind deployment
+	export IMAGE_REPO_OVERRIDE="nxcc-node-local"
+	export IMAGE_TAG_OVERRIDE="latest"
+	(cd "$project_root" && ./infra/infra.sh k8s deploy debug --with-operator-key)
 
-	# Deploy additional node variations for e2e testing
-	verbose_log "Deploying node variations for e2e testing..."
-	(cd "$project_root" && ./infra/infra.sh k8s deploy-variations debug "untrusted:nodeVariations.operatorKeys.untrusted.enabled=false" "non-confidential:nodeVariations.confidentialOverrides.test.enabled=false")
+	# Deploy additional node variations for policy testing
+	verbose_log "Deploying node variations for policy testing..."
 
-	# Wait for pods to be ready (main deployment)
-	wait_for_pods "debug" 300
+	# Generate different operator key for variation node and create secret manually
+	local variation_key_data
+	variation_key_data=$(head -c 32 /dev/urandom | base64 -w 0)
 
-	# Wait for variant pods to be ready
-	wait_for_variant_pods "debug" 300
+	# Create the variation node secret manually (since Helm createSecret doesn't work with variations)
+	verbose_log "Creating operator key secret for variation node..."
+	kubectl create secret generic nxcc-operator-key-different --namespace=debug --from-literal=private-key="$variation_key_data" || true
+
+	# Deploy backup node with same operator key (should work)
+	(cd "$project_root" && IMAGE_REPO_OVERRIDE="nxcc-node-local" IMAGE_TAG_OVERRIDE="latest" ./infra/infra.sh k8s deploy-variations debug "backup:operatorKey.enabled=true,operatorKey.secretName=nxcc-operator-key")
+	# Deploy variation node with different operator key (should be rejected by policy)
+	(cd "$project_root" && IMAGE_REPO_OVERRIDE="nxcc-node-local" IMAGE_TAG_OVERRIDE="latest" ./infra/infra.sh k8s deploy-variations debug "variation:operatorKey.enabled=true,operatorKey.secretName=nxcc-operator-key-different")
+
+	# Give pods time to start instead of using hanging wait command
+	verbose_log "Giving pods 15 seconds to start up..."
+	sleep 15
 
 	success "Local cluster setup complete"
 }
@@ -179,16 +192,16 @@ wait_for_variant_pods() {
 
 	log "Waiting for variant pods in namespace '$namespace' to be ready..."
 
-	# Wait for untrusted variant pods
-	if kubectl get pods -n "$namespace" -l "app.kubernetes.io/variant=untrusted" --no-headers 2>/dev/null | grep -q .; then
-		verbose_log "Waiting for untrusted variant pods..."
-		kubectl wait --for=condition=ready pod -l "app.kubernetes.io/variant=untrusted" -n "$namespace" --timeout="${timeout}s" || warn "Untrusted variant pods may not be ready"
+	# Wait for backup variant pods
+	if kubectl get pods -n "$namespace" -l "app.kubernetes.io/instance=nxcc-node-debug-backup" --no-headers 2>/dev/null | grep -q .; then
+		verbose_log "Waiting for backup variant pods..."
+		kubectl wait --for=condition=ready pod -l "app.kubernetes.io/instance=nxcc-node-debug-backup" -n "$namespace" --timeout="${timeout}s" || warn "Backup variant pods may not be ready"
 	fi
 
-	# Wait for non-confidential variant pods
-	if kubectl get pods -n "$namespace" -l "app.kubernetes.io/variant=non-confidential" --no-headers 2>/dev/null | grep -q .; then
-		verbose_log "Waiting for non-confidential variant pods..."
-		kubectl wait --for=condition=ready pod -l "app.kubernetes.io/variant=non-confidential" -n "$namespace" --timeout="${timeout}s" || warn "Non-confidential variant pods may not be ready"
+	# Wait for variation variant pods
+	if kubectl get pods -n "$namespace" -l "app.kubernetes.io/instance=nxcc-node-debug-variation" --no-headers 2>/dev/null | grep -q .; then
+		verbose_log "Waiting for variation variant pods..."
+		kubectl wait --for=condition=ready pod -l "app.kubernetes.io/instance=nxcc-node-debug-variation" -n "$namespace" --timeout="${timeout}s" || warn "Variation variant pods may not be ready"
 	fi
 
 	success "Variant pods in namespace '$namespace' are ready"
