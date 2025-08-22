@@ -36,8 +36,13 @@ spec:
             # Set the P2P listen address based on the Dockerfile default.
             - name: NXCC_NETWORK_LISTEN_ADDRESSES
               value: "/ip4/0.0.0.0/tcp/{{ .Values.seed.p2pPort }}"
+            {{- include "nxcc.operatorKeyEnvVars" . | nindent 12 }}
           resources:
             {{- toYaml .Values.seed.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "nxcc.operatorKeyVolumeMounts" . | nindent 12 }}
+      volumes:
+        {{- include "nxcc.operatorKeyVolumes" . | nindent 8 }}
       # This is the key to high availability. It tells Kubernetes to spread the seed pods
       # across different physical locations (availability zones).
       {{- if .Values.seed.topologySpread.enabled }}

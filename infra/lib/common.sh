@@ -164,3 +164,127 @@ Please set it by one of the following methods:
 	fi
 	success "Using project: ${C_YELLOW}${RESOLVED_PROJECT_ID}${C_RESET}"
 }
+
+################################################################################
+# Generates a new Ed25519 private key for operator signing
+# Arguments:
+#   $1: Output file path for the private key (optional, for backward compatibility)
+# Returns: Base64-encoded key data to stdout
+################################################################################
+# shellcheck disable=SC2120 # Function intentionally supports optional arguments
+generate_operator_key() {
+	local output_file="${1:-}"
+
+	info "Generating new Ed25519 operator signing key..."
+
+	# Generate 32 bytes of random data for Ed25519 private key
+	local key_data
+	if command -v openssl >/dev/null 2>&1; then
+		key_data=$(openssl rand 32 | base64 -w 0)
+	elif command -v dd >/dev/null 2>&1; then
+		key_data=$(dd if=/dev/urandom bs=32 count=1 2>/dev/null | base64 -w 0)
+	else
+		error "Cannot generate random key: neither openssl nor dd is available"
+	fi
+
+	# For backward compatibility, write to file if specified
+	if [[ -n "$output_file" ]]; then
+		echo "$key_data" | base64 -d >"$output_file"
+		chmod 600 "$output_file"
+		success "Operator key generated at: $output_file"
+	fi
+
+	# Return base64-encoded key data
+	echo "$key_data"
+}
+
+################################################################################
+# Creates a Kubernetes secret with operator signing key from raw key data
+# Arguments:
+#   $1: Base64-encoded private key data OR path to key file (for backward compatibility)
+#   $2: Secret name (optional, defaults to 'nxcc-operator-key')
+#   $3: Namespace (optional, defaults to current namespace)
+################################################################################
+create_operator_key_secret() {
+	local key_input="$1"
+	local secret_name="${2:-nxcc-operator-key}"
+	local namespace="${3:-}"
+
+	if [[ -z "$key_input" ]]; then
+		error "Operator key data or file path is required"
+	fi
+
+	local key_data
+	# Check if input is a file path (backward compatibility)
+	if [[ -f "$key_input" ]]; then
+		info "Reading key from file: $key_input"
+		key_data=$(base64 -w 0 <"$key_input")
+	else
+		# Assume it's already base64-encoded key data
+		key_data="$key_input"
+	fi
+
+	local kubectl_args=(
+		create secret generic "$secret_name"
+		--from-literal=private-key="$(echo "$key_data" | base64 -d | base64 -w 0)"
+	)
+
+	if [[ -n "$namespace" ]]; then
+		kubectl_args+=(--namespace="$namespace")
+	fi
+
+	info "Creating Kubernetes secret '$secret_name' with operator key..."
+
+	if kubectl "${kubectl_args[@]}"; then
+		success "Operator key secret '$secret_name' created successfully"
+	else
+		# Check if secret already exists (which is fine for persistent keys)
+		if kubectl get secret "$secret_name" ${namespace:+--namespace="$namespace"} >/dev/null 2>&1; then
+			info "Operator key secret '$secret_name' already exists - using existing persistent key"
+			success "Using existing operator key secret '$secret_name'"
+		else
+			error "Failed to create operator key secret '$secret_name' and it doesn't exist"
+		fi
+	fi
+}
+
+################################################################################
+# Sets up operator key for the current deployment environment
+# Arguments:
+#   $1: Environment (debug, staging, prod)
+#   $2: Path to operator key file (optional, for backward compatibility)
+################################################################################
+setup_operator_keys() {
+	local env="$1"
+	local key_file="$2"
+
+	if [[ -z "$env" ]]; then
+		error "Environment is required for setup_operator_keys"
+	fi
+
+	# Check if secret already exists first
+	local secret_name="nxcc-operator-key"
+	if kubectl get secret "$secret_name" --namespace="$env" >/dev/null 2>&1; then
+		info "Using existing persistent operator key secret '$secret_name'"
+	else
+		# Generate key data directly without materializing to disk
+		local key_data
+		if [[ -n "$key_file" ]] && [[ -f "$key_file" ]]; then
+			info "Using provided key file: $key_file"
+			key_data=$(base64 -w 0 <"$key_file")
+		else
+			info "Generating new operator key directly in memory"
+			# shellcheck disable=SC2119 # Intentionally called without arguments
+			key_data=$(generate_operator_key)
+		fi
+
+		# Create the Kubernetes secret directly from key data
+		create_operator_key_secret "$key_data" "$secret_name" "$env"
+	fi
+
+	# Set environment variables for deployment
+	export NXCC_OPERATOR_KEY_ENABLED=true
+	export NXCC_OPERATOR_KEY_SECRET_NAME="nxcc-operator-key"
+
+	success "Operator key configured for environment: $env"
+}

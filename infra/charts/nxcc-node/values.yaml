@@ -8,8 +8,8 @@ nameOverride: ""
 fullnameOverride: ""
 
 image:
-  # -- The Docker image repository. This will be set by your CI/CD script.
-  repository: your-repo/nxcc
+  # -- The Docker image repository. Defaults to GHCR, can be overridden.
+  repository: ghcr.io/nxcc-bridge/nxcc/node
   # -- The Docker image tag.
   tag: "latest"
   # -- The image pull policy.
@@ -19,6 +19,21 @@ image:
 # This adds the necessary annotations to schedule pods on TDX-enabled nodes.
 confidential:
   enabled: false
+
+# -- Configuration for operator signing key used for attestation policies
+# This key is used to sign operator attestations and establish trust relationships
+operatorKey:
+  # -- Whether operator signing key is enabled
+  enabled: false
+  # -- Name of the Kubernetes secret containing the operator signing key
+  # The secret should contain a 'private-key' field with the Ed25519 private key bytes
+  secretName: "nxcc-operator-key"
+  # -- Whether to automatically create the secret from provided key data
+  createSecret: false
+  # -- Base64-encoded Ed25519 private key data (32 bytes) for auto-creation
+  # Only used when createSecret is true
+  privateKeyData: ""
+
 
 # -- Configuration for the small, highly-available seed nodes.
 # These nodes ensure the long-term secrets are not lost.

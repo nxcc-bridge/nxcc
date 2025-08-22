@@ -60,3 +60,37 @@ cloud.google.com/compute-class: "Confidential"
 # cloud.google.com/gke-confidential-nodes: "true"
 {{- end }}
 {{- end }}
+
+
+{{/*
+Operator key volume mounts
+*/}}
+{{- define "nxcc.operatorKeyVolumeMounts" -}}
+{{- if .Values.operatorKey.enabled }}
+- name: operator-key
+  mountPath: /etc/nxcc/operator-keys
+  readOnly: true
+{{- end }}
+{{- end }}
+
+{{/*
+Operator key volumes
+*/}}
+{{- define "nxcc.operatorKeyVolumes" -}}
+{{- if .Values.operatorKey.enabled }}
+- name: operator-key
+  secret:
+    secretName: {{ .Values.operatorKey.secretName }}
+    defaultMode: 0400
+{{- end }}
+{{- end }}
+
+{{/*
+Operator key environment variables
+*/}}
+{{- define "nxcc.operatorKeyEnvVars" -}}
+{{- if .Values.operatorKey.enabled }}
+- name: NXCC_OPERATOR_PRIVATE_KEY_PATH
+  value: "/etc/nxcc/operator-keys/private-key"
+{{- end }}
+{{- end }}

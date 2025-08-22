@@ -42,17 +42,33 @@ k8s_deploy() {
 
 	# --- Environment-specific configurations ---
 	info "Configuring for '${env}'..."
+
+	# Handle global operator key configuration
+	if [[ "${NXCC_OPERATOR_KEY_ENABLED:-false}" == "true" ]]; then
+		helm_set_args+=(--set operatorKey.enabled=true)
+		helm_set_args+=(--set operatorKey.secretName="${NXCC_OPERATOR_KEY_SECRET_NAME:-nxcc-operator-key}")
+
+		if [[ "${NXCC_OPERATOR_KEY_CREATE_SECRET:-false}" == "true" ]] && [[ -n "${NXCC_OPERATOR_KEY_DATA:-}" ]]; then
+			helm_set_args+=(--set operatorKey.createSecret=true)
+			helm_set_args+=(--set operatorKey.privateKeyData="${NXCC_OPERATOR_KEY_DATA}")
+		fi
+	fi
+
 	case "$env" in
 	debug)
-		# For local KinD cluster. Overridable for CI.
-		local image_repo="${IMAGE_REPO_OVERRIDE:-${LOCAL_IMAGE_NAME}}"
-		local image_tag="${IMAGE_TAG_OVERRIDE:-${LOCAL_IMAGE_TAG}}"
+		# For local KinD cluster. Use GHCR by default, allow local override.
+		local image_repo="${IMAGE_REPO_OVERRIDE:-ghcr.io/nxcc-bridge/nxcc/node}"
+		local image_tag="${IMAGE_TAG_OVERRIDE:-latest}"
 		local full_image="${image_repo}:${image_tag}"
 
-		# For KinD, load the local Docker image directly into the cluster to avoid pull credential issues.
-		info "Loading Docker image '${full_image}' into KinD cluster..."
-		check_deps kind
-		kind load docker-image --name "nxcc-debug" "${full_image}"
+		# Only try to load into KinD if using a local image
+		if [[ "$image_repo" == *"local"* ]] || [[ "$image_repo" != *"ghcr.io"* && "$image_repo" != *"docker.pkg.dev"* ]]; then
+			info "Loading local Docker image '${full_image}' into KinD cluster..."
+			check_deps kind
+			kind load docker-image --name "nxcc-debug" "${full_image}"
+		else
+			info "Using remote image: ${full_image}"
+		fi
 
 		helm_set_args+=(--set confidential.enabled=false)
 		helm_set_args+=(--set seed.replicaCount=1)

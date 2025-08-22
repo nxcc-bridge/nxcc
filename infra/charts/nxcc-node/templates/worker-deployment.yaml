@@ -39,5 +39,10 @@ spec:
               value: "/ip4/0.0.0.0/tcp/{{ .Values.worker.p2pPort }}"
             - name: NXCC_HTTP_LISTEN_ADDR
               value: "0.0.0.0:{{ .Values.worker.httpPort }}"
+            {{- include "nxcc.operatorKeyEnvVars" . | nindent 12 }}
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "nxcc.operatorKeyVolumeMounts" . | nindent 12 }}
+      volumes:
+        {{- include "nxcc.operatorKeyVolumes" . | nindent 8 }}

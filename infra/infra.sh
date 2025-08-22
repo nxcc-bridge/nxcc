@@ -53,16 +53,24 @@ usage() {
 	echo "      create:   Creates the specified cluster."
 	echo "      destroy:  Deletes the specified cluster."
 	echo
-	echo "  k8s <deploy|destroy|dump-debug> <env>"
+	echo "  k8s <deploy|destroy|dump-debug> <env> [options]"
 	echo "    Manages the application deployment via Helm chart."
 	echo "      <env>: debug | staging | prod"
 	echo "      deploy:      Deploys or upgrades the application to the specified environment."
+	echo "                   Options:"
+	echo "                     --with-operator-key [key-file]   Enable operator signing key"
 	echo "      destroy:     Uninstalls the application from the specified environment."
 	echo "      dump-debug:  Dumps diagnostic information for a failed deployment."
 	echo
 	echo "  test <env>"
 	echo "    Tests HTTP connectivity to the deployed NXCC node."
 	echo "      <env>: debug | staging | prod"
+	echo
+	echo "  keys <generate|create-secret> <args>"
+	echo "    Manages operator signing keys for attestation policies."
+	echo "      generate <output-file>       Generates a new Ed25519 operator signing key"
+	echo "      create-secret <key-file> [secret-name] [namespace]"
+	echo "                                   Creates Kubernetes secret from key file"
 	echo
 	echo "  dev <create|ssh|push|destroy|status|cleanup|container|local>"
 	echo "    Manages TDX development VM for real hardware testing and local development containers."
@@ -172,6 +180,29 @@ main() {
 		case "$subcommand" in
 		deploy)
 			if [[ -z "$env" ]]; then error "Missing environment for 'k8s deploy'. Use 'debug', 'staging', or 'prod'."; fi
+
+			# Parse additional options for k8s deploy
+			shift 3 # Remove command, subcommand, and env
+			while [[ $# -gt 0 ]]; do
+				case $1 in
+				--with-operator-key)
+					local key_file="${2:-}"
+					if [[ -n "$key_file" ]] && [[ -f "$key_file" ]]; then
+						info "Using operator key file: $key_file"
+						shift 2
+					else
+						info "Generating new operator key for environment: $env"
+						shift 1
+					fi
+					setup_operator_keys "$env" "$key_file"
+					;;
+				*)
+					warn "Unknown option for k8s deploy: $1"
+					shift
+					;;
+				esac
+			done
+
 			k8s_deploy "$env"
 			;;
 		destroy)
@@ -195,6 +226,22 @@ main() {
 	test)
 		if [[ -z "$subcommand" ]]; then error "Missing environment for 'test'. Use 'debug', 'staging', or 'prod'."; fi
 		test_connectivity "$subcommand"
+		;;
+
+	keys)
+		case "$subcommand" in
+		generate)
+			if [[ -z "$env" ]]; then error "Missing output file for 'keys generate'. Provide a file path."; fi
+			generate_operator_key "$env"
+			;;
+		create-secret)
+			if [[ -z "$env" ]]; then error "Missing key file for 'keys create-secret'. Provide a key file path."; fi
+			local secret_name="${4:-}"
+			local namespace="${5:-}"
+			create_operator_key_secret "$env" "$secret_name" "$namespace"
+			;;
+		*) error "Invalid subcommand for 'keys'. Use 'generate' or 'create-secret'." ;;
+		esac
 		;;
 
 	dev)
