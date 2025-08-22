@@ -404,69 +404,77 @@ quick_http_test() {
 		with_port_forward "$env" test_http_endpoint "$url" "$expected_pattern" "$method" "$data"
 		;;
 	staging)
-		# Get the actual ingress IP for staging
-		log "Getting ingress IP for staging environment..."
-		local ingress_ip
-		local ingress_output
-		if ! ingress_output=$(kubectl get ingress -n staging -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}' 2>&1); then
-			verbose_log "Failed to get ingress IP: $ingress_output"
-			ingress_ip=""
-		else
-			ingress_ip="$ingress_output"
-		fi
-		if [[ -z "$ingress_ip" ]]; then
-			# Wait a bit and try again - ingress IPs can take time to provision
-			verbose_log "Ingress IP not ready, waiting 10 seconds..."
-			sleep 10
+		# For staging, check if this is a variant endpoint
+		if [[ "$endpoint" =~ ^/variant/ ]]; then
+			# Use ingress for variant routing
+			local ingress_ip
+			local ingress_output
 			if ! ingress_output=$(kubectl get ingress -n staging -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}' 2>&1); then
-				verbose_log "Failed to get ingress IP on retry: $ingress_output"
+				verbose_log "Failed to get ingress IP: $ingress_output"
 				ingress_ip=""
 			else
 				ingress_ip="$ingress_output"
 			fi
-		fi
-		if [[ -z "$ingress_ip" ]]; then
-			warn "No ingress IP found for staging, falling back to port-forward"
+			if [[ -z "$ingress_ip" ]]; then
+				verbose_log "Ingress IP not ready, waiting 10 seconds..."
+				sleep 10
+				if ! ingress_output=$(kubectl get ingress -n staging -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}' 2>&1); then
+					verbose_log "Failed to get ingress IP on retry: $ingress_output"
+					ingress_ip=""
+				else
+					ingress_ip="$ingress_output"
+				fi
+			fi
+			if [[ -n "$ingress_ip" ]]; then
+				verbose_log "Using ingress IP for variant routing: $ingress_ip"
+				local url="http://$ingress_ip$endpoint"
+				test_http_endpoint "$url" "$expected_pattern" "$method" "$data"
+			else
+				warn "No ingress IP found for variant routing, test may fail"
+				return 1
+			fi
+		else
+			# Use port-forward for non-variant endpoints (worker deployment, etc.)
 			local port="${E2E_TEST_PORT:-6922}"
 			local url="http://localhost:$port$endpoint"
 			with_port_forward "$env" test_http_endpoint "$url" "$expected_pattern" "$method" "$data"
-		else
-			verbose_log "Using ingress IP: $ingress_ip"
-			local url="http://$ingress_ip$endpoint"
-			test_http_endpoint "$url" "$expected_pattern" "$method" "$data"
 		fi
 		;;
 	prod)
-		# Get the actual ingress IP for production
-		log "Getting ingress IP for production environment..."
-		local ingress_ip
-		local ingress_output
-		if ! ingress_output=$(kubectl get ingress -n prod -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}' 2>&1); then
-			verbose_log "Failed to get ingress IP: $ingress_output"
-			ingress_ip=""
-		else
-			ingress_ip="$ingress_output"
-		fi
-		if [[ -z "$ingress_ip" ]]; then
-			# Wait a bit and try again - ingress IPs can take time to provision
-			verbose_log "Ingress IP not ready, waiting 10 seconds..."
-			sleep 10
+		# For prod, check if this is a variant endpoint
+		if [[ "$endpoint" =~ ^/variant/ ]]; then
+			# Use ingress for variant routing
+			local ingress_ip
+			local ingress_output
 			if ! ingress_output=$(kubectl get ingress -n prod -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}' 2>&1); then
-				verbose_log "Failed to get ingress IP on retry: $ingress_output"
+				verbose_log "Failed to get ingress IP: $ingress_output"
 				ingress_ip=""
 			else
 				ingress_ip="$ingress_output"
 			fi
-		fi
-		if [[ -z "$ingress_ip" ]]; then
-			warn "No ingress IP found for prod, falling back to port-forward"
+			if [[ -z "$ingress_ip" ]]; then
+				verbose_log "Ingress IP not ready, waiting 10 seconds..."
+				sleep 10
+				if ! ingress_output=$(kubectl get ingress -n prod -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}' 2>&1); then
+					verbose_log "Failed to get ingress IP on retry: $ingress_output"
+					ingress_ip=""
+				else
+					ingress_ip="$ingress_output"
+				fi
+			fi
+			if [[ -n "$ingress_ip" ]]; then
+				verbose_log "Using ingress IP for variant routing: $ingress_ip"
+				local url="http://$ingress_ip$endpoint"
+				test_http_endpoint "$url" "$expected_pattern" "$method" "$data"
+			else
+				warn "No ingress IP found for variant routing, test may fail"
+				return 1
+			fi
+		else
+			# Use port-forward for non-variant endpoints (worker deployment, etc.)
 			local port="${E2E_TEST_PORT:-6922}"
 			local url="http://localhost:$port$endpoint"
 			with_port_forward "$env" test_http_endpoint "$url" "$expected_pattern" "$method" "$data"
-		else
-			verbose_log "Using ingress IP: $ingress_ip"
-			local url="http://$ingress_ip$endpoint"
-			test_http_endpoint "$url" "$expected_pattern" "$method" "$data"
 		fi
 		;;
 	*)

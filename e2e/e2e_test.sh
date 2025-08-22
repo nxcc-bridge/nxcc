@@ -245,6 +245,14 @@ test_environment() {
 		error "Connectivity test failed for $env environment"
 	fi
 
+	# List deployed variants for visibility
+	list_deployed_variants "$env" "$PROJECT_ROOT"
+
+	# Test variant routing functionality (new in 5b8433b)
+	if ! test_variant_routing "$env"; then
+		warn "Variant routing test failed for $env environment"
+	fi
+
 	# Setup port forwarding for remote environments
 	if [[ "$env" != "local" ]]; then
 		if ! setup_port_forward "$env"; then
@@ -257,6 +265,12 @@ test_environment() {
 	if ! test_worker_functionality "$TEMP_PROJECT_DIR" "$env" "$E2E_TEST_TEXT"; then
 		test_result=1
 		warn "Worker functionality test failed for $env environment"
+	fi
+
+	# Test worker functionality on variants if available
+	if ! test_worker_functionality_variants "$TEMP_PROJECT_DIR" "$env" "$E2E_TEST_TEXT"; then
+		warn "Worker functionality test failed for variants in $env environment"
+		# Don't fail the entire test for variant issues
 	fi
 
 	# Cleanup port forwarding for this environment

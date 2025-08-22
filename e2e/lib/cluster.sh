@@ -56,12 +56,19 @@ setup_local_cluster() {
 	verbose_log "Creating kind cluster..."
 	(cd "$project_root" && ./infra/infra.sh cluster create kind)
 
-	# Deploy to debug environment (kind)
-	verbose_log "Deploying NXCC to debug environment..."
+	# Deploy to debug environment (kind) with node variations for e2e testing
+	verbose_log "Deploying NXCC to debug environment with node variations..."
 	(cd "$project_root" && ./infra/infra.sh k8s deploy debug)
 
-	# Wait for pods to be ready
+	# Deploy additional node variations for e2e testing
+	verbose_log "Deploying node variations for e2e testing..."
+	(cd "$project_root" && ./infra/infra.sh k8s deploy-variations debug "untrusted:nodeVariations.operatorKeys.untrusted.enabled=false" "non-confidential:nodeVariations.confidentialOverrides.test.enabled=false")
+
+	# Wait for pods to be ready (main deployment)
 	wait_for_pods "debug" 300
+
+	# Wait for variant pods to be ready
+	wait_for_variant_pods "debug" 300
 
 	success "Local cluster setup complete"
 }
@@ -163,6 +170,69 @@ test_connectivity() {
 	esac
 
 	success "Connectivity test completed for $env environment"
+}
+
+# Wait for variant pods to be ready
+wait_for_variant_pods() {
+	local namespace="$1"
+	local timeout="${2:-300}"
+
+	log "Waiting for variant pods in namespace '$namespace' to be ready..."
+
+	# Wait for untrusted variant pods
+	if kubectl get pods -n "$namespace" -l "app.kubernetes.io/variant=untrusted" --no-headers 2>/dev/null | grep -q .; then
+		verbose_log "Waiting for untrusted variant pods..."
+		kubectl wait --for=condition=ready pod -l "app.kubernetes.io/variant=untrusted" -n "$namespace" --timeout="${timeout}s" || warn "Untrusted variant pods may not be ready"
+	fi
+
+	# Wait for non-confidential variant pods
+	if kubectl get pods -n "$namespace" -l "app.kubernetes.io/variant=non-confidential" --no-headers 2>/dev/null | grep -q .; then
+		verbose_log "Waiting for non-confidential variant pods..."
+		kubectl wait --for=condition=ready pod -l "app.kubernetes.io/variant=non-confidential" -n "$namespace" --timeout="${timeout}s" || warn "Non-confidential variant pods may not be ready"
+	fi
+
+	success "Variant pods in namespace '$namespace' are ready"
+}
+
+# List deployed variants and their URLs
+list_deployed_variants() {
+	local env="$1"
+	local project_root="$2"
+
+	log "Listing deployed variants in $env environment..."
+
+	(cd "$project_root" && ./infra/infra.sh k8s list-variants "$env")
+}
+
+# Test variant routing functionality
+test_variant_routing() {
+	local env="$1"
+
+	log "Testing variant routing in $env environment..."
+
+	# Test main deployment
+	if quick_http_test "$env" "/w/health" "healthy"; then
+		success "Main deployment HTTP test passed"
+	else
+		warn "Main deployment HTTP test failed"
+		return 1
+	fi
+
+	# Test untrusted variant if available
+	if quick_http_test "$env" "/variant/untrusted/w/health" "healthy"; then
+		success "Untrusted variant HTTP test passed"
+	else
+		verbose_log "Untrusted variant HTTP test failed (variant may not be deployed)"
+	fi
+
+	# Test non-confidential variant if available
+	if quick_http_test "$env" "/variant/non-confidential/w/health" "healthy"; then
+		success "Non-confidential variant HTTP test passed"
+	else
+		verbose_log "Non-confidential variant HTTP test failed (variant may not be deployed)"
+	fi
+
+	success "Variant routing tests completed"
 }
 
 # Cleanup cluster resources

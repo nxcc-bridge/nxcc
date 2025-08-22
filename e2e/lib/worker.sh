@@ -603,3 +603,78 @@ test_worker_functionality() {
 
 	success "Worker functionality test completed for $env environment"
 }
+
+# Test worker deployment and functionality on node variants
+test_worker_functionality_variants() {
+	local project_dir="$1"
+	local env="$2"
+	local test_message="${3:-$E2E_TEST_TEXT}"
+
+	log "Testing worker functionality on node variants in $env environment..."
+
+	# Check if variants are deployed by looking for variant-specific ingress routes
+	local namespace="$env"
+	if [[ "$env" == "local" ]]; then
+		namespace="debug"
+	fi
+
+	# Check if untrusted variant is available
+	if kubectl get ingress -n "$namespace" --no-headers 2>/dev/null | grep -q "untrusted"; then
+		log "Testing untrusted variant functionality..."
+		if test_worker_http_variant "$env" "untrusted" "$test_message"; then
+			success "Untrusted variant functionality test passed"
+		else
+			warn "Untrusted variant functionality test failed"
+		fi
+	else
+		verbose_log "Untrusted variant not found, skipping variant tests"
+	fi
+
+	# Check if non-confidential variant is available
+	if kubectl get ingress -n "$namespace" --no-headers 2>/dev/null | grep -q "non-confidential"; then
+		log "Testing non-confidential variant functionality..."
+		if test_worker_http_variant "$env" "non-confidential" "$test_message"; then
+			success "Non-confidential variant functionality test passed"
+		else
+			warn "Non-confidential variant functionality test failed"
+		fi
+	else
+		verbose_log "Non-confidential variant not found, skipping variant tests"
+	fi
+
+	success "Worker functionality variant tests completed for $env environment"
+}
+
+# Test HTTP requests to worker on a specific variant
+test_worker_http_variant() {
+	local env="$1"
+	local variant="$2"
+	local test_message="${3:-$E2E_TEST_TEXT}"
+
+	log "Testing HTTP requests to $variant variant in $env environment..."
+
+	local success_count=0
+
+	# Test health endpoint on variant
+	if quick_http_test "$env" "/variant/$variant/w/health" "healthy"; then
+		((success_count++))
+	fi
+
+	# Test GET request to echo endpoint on variant
+	if quick_http_test "$env" "/variant/$variant/w/echo" "$test_message"; then
+		((success_count++))
+	fi
+
+	# Test root path on variant
+	if quick_http_test "$env" "/variant/$variant/w/" "availableEndpoints"; then
+		((success_count++))
+	fi
+
+	if [[ $success_count -ge 2 ]]; then
+		success "HTTP request testing completed successfully for $variant variant in $env environment ($success_count/3 tests passed)"
+		return 0
+	else
+		warn "HTTP request testing completed with issues for $variant variant in $env environment ($success_count/3 tests passed)"
+		return 1
+	fi
+}

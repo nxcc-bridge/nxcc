@@ -9,12 +9,14 @@ The E2E test suite validates the complete NXCC workflow by testing the entire pi
 ### What the E2E Tests Accomplish
 
 1. **🏗️ Infrastructure Setup**: Creates and configures Kubernetes clusters (local kind or GKE)
-2. **📦 Project Initialization**: Uses the NXCC CLI to create a new worker project from templates
-3. **⚡ Worker Development**: Creates HTTP handlers with echo functionality for comprehensive testing
-4. **🔨 Build & Bundle**: Compiles TypeScript workers and creates deployment bundles
-5. **🚀 Deployment**: Deploys workers to NXCC nodes using the CLI
-6. **✅ Verification**: Tests HTTP endpoints and verifies worker logs to ensure functionality
-7. **🌍 Multi-Environment**: Supports local (kind), staging (GKE), and production (GKE) environments
+2. **🔄 Node Variants**: Deploys multiple node types (trusted/untrusted, confidential/non-confidential) for policy testing
+3. **📦 Project Initialization**: Uses the NXCC CLI to create a new worker project from templates
+4. **⚡ Worker Development**: Creates HTTP handlers with echo functionality for comprehensive testing
+5. **🔨 Build & Bundle**: Compiles TypeScript workers and creates deployment bundles
+6. **🚀 Deployment**: Deploys workers to NXCC nodes using the CLI
+7. **🌐 Variant Routing**: Tests addressing individual node variants via path-based routing
+8. **✅ Verification**: Tests HTTP endpoints and verifies worker logs to ensure functionality
+9. **🌍 Multi-Environment**: Supports local (kind), staging (GKE), and production (GKE) environments
 
 ## Files Structure
 
@@ -111,15 +113,18 @@ The e2e tests simulate a real-world developer workflow by:
 1. **🔍 Validating Prerequisites**: Ensuring all required tools are available (docker, kind, kubectl, etc.)
 
 2. **🚀 Setting Up Infrastructure**:
+
    - **Local**: Creates a kind cluster and deploys NXCC in debug mode
    - **Staging/Prod**: Connects to GKE cluster and deploys NXCC with ingress
 
 3. **📝 Creating a Test Project**: Uses `nxcc init` to create a new worker project with:
+
    - TypeScript worker with HTTP handlers
    - Echo functionality that responds with test messages
    - Proper build configuration and bundling
 
 4. **⚙️ Building and Deploying**:
+
    - Compiles TypeScript to JavaScript
    - Creates worker bundles using the NXCC CLI
    - Deploys workers to the target environment
@@ -131,8 +136,13 @@ The e2e tests simulate a real-world developer workflow by:
    - **POST /w/echo** - Echo endpoint that returns posted data
    - **GET /w/** - Default handler with available endpoints
    - **GET /w/unknown** - Unknown path handler
+6. **🔄 Testing Node Variants**:
 
-6. **✅ Verification and Cleanup**:
+   - **GET /variant/untrusted/w/health** - Health check on untrusted node variant
+   - **GET /variant/non-confidential/w/echo** - Echo test on non-confidential variant
+   - Validates that different node types can be addressed individually
+
+7. **✅ Verification and Cleanup**:
    - Confirms worker is running and responsive
    - Validates expected responses from all endpoints
    - Retrieves and displays worker logs
@@ -156,21 +166,28 @@ A successful e2e test run should:
 - Uses **localhost port-forwarding** for all connections
 - Deploys to **debug namespace** in kind cluster
 - Uses **debug builds** for faster iteration
-- **Expected outcome**: Worker accessible at `localhost:6922/w/*`
+- Deploys **node variants** for policy testing (untrusted, non-confidential)
+- **Expected outcome**:
+  - Main worker: `localhost:6922/w/*`
+  - Node variants: `localhost:6922/variant/{name}/w/*` (via ingress)
 
 #### Staging Environment (`--env staging`)
 
 - Uses **public ingress IP** for HTTP testing (no localhost)
 - Deploys to **staging namespace** in GKE cluster
 - Uses **debug builds** with caching for faster e2e testing
-- **Expected outcome**: Worker accessible at `http://<INGRESS-IP>/w/*`
+- **Expected outcome**:
+  - Main worker: `http://<INGRESS-IP>/w/*`
+  - Node variants: `http://<INGRESS-IP>/variant/{name}/w/*`
 
 #### Production Environment (`--env prod`)
 
 - Uses **public ingress IP** for HTTP testing (no localhost)
 - Deploys to **prod namespace** in GKE cluster
 - Uses **release builds** by default for optimized performance
-- **Expected outcome**: Worker accessible at `http://<INGRESS-IP>/w/*`
+- **Expected outcome**:
+  - Main worker: `http://<INGRESS-IP>/w/*`
+  - Node variants: `http://<INGRESS-IP>/variant/{name}/w/*`
 
 ## Test Workflow
 
@@ -181,8 +198,8 @@ A successful e2e test run should:
 
 ### 2. Cluster Setup
 
-- **Local**: Creates kind cluster, builds Docker image, deploys to debug namespace
-- **Staging/Prod**: Creates GKE cluster, builds and pushes to registry, deploys
+- **Local**: Creates kind cluster, builds Docker image, deploys to debug namespace with node variants
+- **Staging/Prod**: Creates GKE cluster, builds and pushes to registry, deploys with node variants
 
 ### 3. Project Creation
 
