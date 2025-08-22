@@ -4,7 +4,32 @@
 @import "@fontsource/inter/700.css";
 
 @theme {
-  --color-brand: #eeaa00;
+  /* Custom accent color scale for Starlight based on #eeaa00 */
+  --color-accent-50: #fefbf0;
+  --color-accent-100: #fdf6dc;
+  --color-accent-200: #faeab8;
+  --color-accent-300: #f7dc8a;
+  --color-accent-400: #f3c75a;
+  --color-accent-500: #eeaa00;
+  --color-accent-600: #d69500;
+  --color-accent-700: #b37e00;
+  --color-accent-800: #926700;
+  --color-accent-900: #785500;
+  --color-accent-950: #453100;
+
+  /* Custom brand color scale for Tailwind based on #eeaa00 */
+  --color-brand-50: #fefbf0;
+  --color-brand-100: #fdf6dc;
+  --color-brand-200: #faeab8;
+  --color-brand-300: #f7dc8a;
+  --color-brand-400: #f3c75a;
+  --color-brand-500: #eeaa00;
+  --color-brand-600: #d69500;
+  --color-brand-700: #b37e00;
+  --color-brand-800: #926700;
+  --color-brand-900: #785500;
+  --color-brand-950: #453100;
+  --color-brand: #eeaa00; /* Default brand color */
 
   --font-family-sans:
     "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
@@ -12,29 +37,64 @@
     "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
 }
 
+/* Override Starlight's accent colors */
+:root {
+  /* Dark mode accent colors */
+  --sl-color-accent-low: #2d1f00; /* Dark background for #eeaa00 */
+  --sl-color-accent: #eeaa00; /* Exact #eeaa00 */
+  --sl-color-accent-high: #eeaa00; /* Use the main color for text in dark mode */
+}
+
+:root[data-theme="light"],
+[data-theme="light"] {
+  /* Light mode accent colors */
+  --sl-color-accent-high: #996600; /* Dark text version */
+  --sl-color-accent: #eeaa00; /* Exact #eeaa00 */
+  --sl-color-accent-low: #fef9e6; /* Light background */
+}
+
+/* Override social icons to use neutral colors instead of accent colors */
+.social-icons a {
+  color: var(--sl-color-text) !important;
+}
+
+/* Also target by the rel attribute for extra specificity */
+a[rel="me"] {
+  color: var(--sl-color-text) !important;
+}
+
 @layer base {
   body {
     @apply bg-white text-gray-700 font-sans antialiased;
   }
-  
+
   /* Fix list styling - Tailwind CSS resets list-style-type to none by default */
   .sl-markdown-content ul {
     list-style-type: disc;
     padding-left: 1.5rem;
   }
-  
+
   .sl-markdown-content ol {
     list-style-type: decimal;
     padding-left: 1.5rem;
   }
-  
+
   .sl-markdown-content ul ul {
     list-style-type: circle;
   }
-  
+
   .sl-markdown-content ul ul ul {
     list-style-type: square;
   }
+}
+
+/* Add rounded corners to code blocks for a more approachable look */
+.expressive-code {
+  border-radius: 0.375rem !important;
+}
+
+.expressive-code pre {
+  border-radius: 0.375rem !important;
 }
 
 @layer utilities {
