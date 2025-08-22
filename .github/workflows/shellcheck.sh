@@ -2,8 +2,26 @@
 
 # Shellcheck script for NXCC project
 # Checks all shell scripts in the project for issues
+# Usage: ./shellcheck.sh [--fix]
+#   --fix: Automatically fix formatting issues where possible
 
 set -euo pipefail
+
+# Parse command line arguments
+FIX_MODE=false
+while [[ $# -gt 0 ]]; do
+	case $1 in
+	--fix)
+		FIX_MODE=true
+		shift
+		;;
+	*)
+		echo "Unknown option: $1"
+		echo "Usage: $0 [--fix]"
+		exit 1
+		;;
+	esac
+done
 
 # Colors for output
 RED='\033[0;31m'
@@ -15,7 +33,11 @@ NC='\033[0m' # No Color
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
-echo -e "${YELLOW}Running shellcheck on all shell scripts in the project...${NC}"
+if [[ "${FIX_MODE}" == "true" ]]; then
+	echo -e "${YELLOW}Running shellcheck with auto-fix on all shell scripts in the project...${NC}"
+else
+	echo -e "${YELLOW}Running shellcheck on all shell scripts in the project...${NC}"
+fi
 echo "Project root: ${PROJECT_ROOT}"
 
 # Auto-detect shell scripts using git ls-files
@@ -64,6 +86,7 @@ TOTAL_SCRIPTS=0
 PASSED_SCRIPTS=0
 FAILED_SCRIPTS=0
 FORMAT_FAILED_SCRIPTS=0
+FORMAT_FIXED_SCRIPTS=0
 
 echo ""
 echo "Found ${#SHELL_SCRIPTS[@]} shell scripts to check"
@@ -85,11 +108,25 @@ for script in "${SHELL_SCRIPTS[@]}"; do
 
 		# Check formatting first
 		if ! shfmt -d "${script}" >/dev/null 2>&1; then
-			echo -e "${RED}FORMAT FAIL${NC}"
-			echo "  Formatting issues found. Run: shfmt -w ${script}"
-			FAILED_SCRIPTS=$((FAILED_SCRIPTS + 1))
-			FORMAT_FAILED_SCRIPTS=$((FORMAT_FAILED_SCRIPTS + 1))
-			continue
+			if [[ "${FIX_MODE}" == "true" ]]; then
+				echo -n "fixing format... "
+				if shfmt -w "${script}"; then
+					echo -e "${GREEN}FORMAT FIXED${NC}"
+					FORMAT_FIXED_SCRIPTS=$((FORMAT_FIXED_SCRIPTS + 1))
+				else
+					echo -e "${RED}FORMAT FAIL${NC}"
+					echo "  Could not automatically fix formatting issues in ${script}"
+					FAILED_SCRIPTS=$((FAILED_SCRIPTS + 1))
+					FORMAT_FAILED_SCRIPTS=$((FORMAT_FAILED_SCRIPTS + 1))
+					continue
+				fi
+			else
+				echo -e "${RED}FORMAT FAIL${NC}"
+				echo "  Formatting issues found. Run: shfmt -w ${script}"
+				FAILED_SCRIPTS=$((FAILED_SCRIPTS + 1))
+				FORMAT_FAILED_SCRIPTS=$((FORMAT_FAILED_SCRIPTS + 1))
+				continue
+			fi
 		fi
 
 		# Then check with shellcheck
@@ -114,15 +151,22 @@ echo -e "Failed: ${RED}${FAILED_SCRIPTS}${NC}"
 if [[ ${FORMAT_FAILED_SCRIPTS} -gt 0 ]]; then
 	echo -e "Format failures: ${RED}${FORMAT_FAILED_SCRIPTS}${NC}"
 fi
+if [[ ${FORMAT_FIXED_SCRIPTS} -gt 0 ]]; then
+	echo -e "Format fixes applied: ${GREEN}${FORMAT_FIXED_SCRIPTS}${NC}"
+fi
 echo "=================================="
 
 if [[ ${FAILED_SCRIPTS} -gt 0 ]]; then
 	if [[ ${FORMAT_FAILED_SCRIPTS} -gt 0 ]]; then
-		echo -e "${RED}Some scripts failed formatting checks. Run 'shfmt -w <script>' to fix formatting.${NC}"
+		echo -e "${RED}Some scripts failed formatting checks. Run '$0 --fix' to automatically fix formatting.${NC}"
 	fi
 	echo -e "${RED}Some scripts failed checks. Please fix the issues above.${NC}"
 	exit 1
 else
-	echo -e "${GREEN}All scripts passed linting and formatting checks!${NC}"
+	if [[ ${FORMAT_FIXED_SCRIPTS} -gt 0 ]]; then
+		echo -e "${GREEN}All scripts passed linting checks! ${FORMAT_FIXED_SCRIPTS} formatting issues were automatically fixed.${NC}"
+	else
+		echo -e "${GREEN}All scripts passed linting and formatting checks!${NC}"
+	fi
 	exit 0
 fi

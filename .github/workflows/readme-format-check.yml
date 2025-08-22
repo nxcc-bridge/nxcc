@@ -1,4 +1,4 @@
-name: Documentation and YAML Quality Check
+name: README Format Check
 
 on:
   push:
@@ -7,10 +7,9 @@ on:
     branches: [main]
     paths:
       - "**/README.md"
-      - ".github/workflows/*.yml"
 
 jobs:
-  quality-check:
+  readme-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,17 +21,11 @@ jobs:
 
       - name: Install tools
         run: |
-          npm install -g markdown-link-check prettier
+          npm install -g markdown-link-check prettier@3.2.4
 
       - name: Check README formatting
         run: |
-          git ls-files '**/README.md' | \
-          xargs -I {} prettier --check {} --config .github/workflows/.prettierrc.json
-
-      - name: Check YAML formatting
-        run: |
-          prettier --check ".github/workflows/*.yml" \
-            --config .github/workflows/.prettierrc.json
+          .github/workflows/format-readme.sh check
 
       - name: Check links in all Markdown files
         run: |

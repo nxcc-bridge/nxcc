@@ -20,7 +20,7 @@ cargo install --locked --git https://github.com/foundry-rs/foundry --force forge
 
 ### Setup
 
-```bash
+````bash
 # Install dependencies via Soldeer
 forge soldeer install
 
@@ -31,7 +31,7 @@ forge build
 
 # Run tests
 forge test -vvv
-```
+````
 
 ## Architecture
 
@@ -102,6 +102,7 @@ Dependencies install to `dependencies/` with mappings in `remappings.txt`.
 The Identity contract uses CREATE2 for deterministic addresses across all chains.
 
 **Deterministic Address:** `0x843f604F71dDaaaE82a82551d6b19571E6C6E23A`
+
 - **Salt:** `0x0` (zero bytes32)
 - **Compiler:** Solc 0.8.28 with full release optimizations
 - **Deployer:** Arachnid's Deterministic Deployment Proxy (`0x4e59b44847b379578588920cA78FbF26c0B4956C`)
@@ -110,12 +111,14 @@ The Identity contract uses CREATE2 for deterministic addresses across all chains
 ### Quick Start: Deploy to a New Chain
 
 1. **Set environment variables:**
+
 ```bash
 export PRIVATE_KEY=your_private_key_here
 export RPC_URL=https://your-rpc-endpoint.com
 ```
 
 2. **Deploy to the new chain:**
+
 ```bash
 forge script script/DeployIdentity.s.sol --rpc-url $RPC_URL --broadcast --verify
 ```
@@ -172,12 +175,14 @@ The deterministic deployment works on any EVM-compatible chain. The same address
 ### Advanced Usage
 
 **Check if already deployed:**
+
 ```bash
 # The script will detect existing deployments and skip them
 forge script script/DeployIdentity.s.sol --rpc-url $RPC_URL
 ```
 
 **Deploy to testnet first:**
+
 ```bash
 # Test on Sepolia
 export RPC_URL=https://sepolia.infura.io/v3/YOUR_KEY
@@ -185,6 +190,7 @@ forge script script/DeployIdentity.s.sol --rpc-url $RPC_URL --broadcast
 ```
 
 **Use with different wallets:**
+
 ```bash
 # Deploy with Ledger
 forge script script/DeployIdentity.s.sol --rpc-url $RPC_URL --ledger --sender 0xYourAddress --broadcast
