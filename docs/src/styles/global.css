@@ -37,12 +37,28 @@
     "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
 }
 
-/* Override Starlight's accent colors */
+/* Override Starlight's accent colors for both themes */
 :root {
+  /* Accent colors that work for both light and dark modes */
+  --sl-color-accent: #eeaa00; /* Exact #eeaa00 */
+}
+
+/* Dark theme customization only */
+:root:not([data-theme="light"]) {
   /* Dark mode accent colors */
   --sl-color-accent-low: #2d1f00; /* Dark background for #eeaa00 */
-  --sl-color-accent: #eeaa00; /* Exact #eeaa00 */
   --sl-color-accent-high: #eeaa00; /* Use the main color for text in dark mode */
+  
+  /* Dark theme background colors - Option 2: Everforest-Harmonized */
+  --sl-color-black: #232A2E; /* bg_dim from Everforest medium variant */
+  --sl-color-gray-6: #2D353B; /* bg0 - Navigation and sidebar background */
+  --sl-color-gray-5: #3D484D; /* bg2 - Inline code background */
+  
+  /* Gray scale adjustments using Everforest palette */
+  --sl-color-gray-1: #d3c6aa; /* Everforest main text color - brightest text */
+  --sl-color-gray-2: #d3c6aa; /* Everforest main text color */
+  --sl-color-gray-3: #a7c080; /* Everforest green accent - for mid-tone text */
+  --sl-color-gray-4: #9da9a0; /* Everforest gray - for secondary text */
 }
 
 :root[data-theme="light"],

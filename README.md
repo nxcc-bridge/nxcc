@@ -1,6 +1,9 @@
-# nXCC
-
 <div align="center">
+
+<h1>
+  <img src="docs/public/logo.png" alt="nXCC Logo" width="36" style="vertical-align: bottom; margin-right: 8px;">
+  nXCC
+</h1>
 
 **The Programmable Glue for the Multi-Chain World**
 

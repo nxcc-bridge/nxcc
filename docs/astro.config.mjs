@@ -11,6 +11,9 @@ export default defineConfig({
   integrations: [
     starlight({
       title: "nXCC",
+      logo: {
+        src: "./public/logo.png",
+      },
       expressiveCode: {
         themes: ["everforest-light", "everforest-dark"],
         frames: false,
