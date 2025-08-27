@@ -68,8 +68,9 @@ The `infra.sh` script is a full-featured infrastructure management tool that han
 
 ```bash
 # Complete local setup
-./infra/infra.sh build local          # Build container images
+./infra/infra.sh image build --debug  # Build debug container images
 ./infra/infra.sh cluster create kind  # Create local Kubernetes cluster
+./infra/infra.sh image push kind      # Load images into cluster
 ./infra/infra.sh k8s deploy debug     # Deploy nXCC to cluster
 ./infra/infra.sh test debug           # Test the deployment
 ```
@@ -81,7 +82,8 @@ The `infra.sh` script is a full-featured infrastructure management tool that han
 ./infra/infra.sh ci setup
 
 # Production deployment
-./infra/infra.sh build gcp             # Build & push to Artifact Registry
+./infra/infra.sh image build --release # Build optimized container images
+./infra/infra.sh image push gcp        # Push to Artifact Registry
 ./infra/infra.sh cluster create gke    # Create GKE cluster with TDX nodes
 ./infra/infra.sh k8s deploy prod       # Deploy to production
 ./infra/infra.sh test prod             # Verify deployment

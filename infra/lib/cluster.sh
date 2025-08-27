@@ -92,15 +92,7 @@ cluster_create_kind() {
 	info "Setting kubectl context to KinD cluster..."
 	kubectl config use-context "kind-${KIND_CLUSTER_NAME}"
 
-	info "Attempting to load local Docker image '${LOCAL_IMAGE_NAME}:${LOCAL_IMAGE_TAG}' into the cluster..."
-	info "Note: This assumes you have already built the image (e.g., 'docker build -t ${LOCAL_IMAGE_NAME}:${LOCAL_IMAGE_TAG} .')."
-	if ! docker image inspect "${LOCAL_IMAGE_NAME}:${LOCAL_IMAGE_TAG}" &>/dev/null; then
-		warn "Local image '${LOCAL_IMAGE_NAME}:${LOCAL_IMAGE_TAG}' not found. Skipping image load."
-		warn "Deployment may fail if the image is not available in the cluster."
-	else
-		kind load docker-image "${LOCAL_IMAGE_NAME}:${LOCAL_IMAGE_TAG}" --name "${KIND_CLUSTER_NAME}"
-		success "Image loaded into KinD cluster."
-	fi
+	info "KinD cluster created. Use 'image push kind' to load images into the cluster."
 
 	success "KinD cluster setup is complete. Current context is '$(kubectl config current-context)'."
 }

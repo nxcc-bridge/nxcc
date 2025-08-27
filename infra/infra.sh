@@ -18,9 +18,9 @@ LIB_DIR="$(dirname "$0")/lib"
 # common.sh must be first as others depend on it.
 # shellcheck disable=SC1091  # Library files are sourced dynamically
 source "${LIB_DIR}/common.sh"
-source "${LIB_DIR}/build.sh"
 source "${LIB_DIR}/ci.sh"
 source "${LIB_DIR}/cluster.sh"
+source "${LIB_DIR}/image.sh"
 source "${LIB_DIR}/k8s.sh"
 source "${LIB_DIR}/test.sh"
 source "${LIB_DIR}/dev.sh" # Changed to the new single entrypoint
@@ -37,10 +37,11 @@ usage() {
 	echo "  -y  Automatically answer 'yes' to all interactive confirmation prompts."
 	echo
 	echo "Commands:"
-	echo "  build <local|gcp>"
-	echo "    Builds Docker images for Intel TDX TEE (defaults to amd64)."
-	echo "      local:    Builds for local KinD deployment (debug mode default)."
-	echo "      gcp:      Builds and pushes to GCP Artifact Registry (release mode default)."
+	echo "  image <build|push|list>"
+	echo "    Manages Docker images with multi-registry support."
+	echo "      build:    Build source images locally (--debug or --release required)"
+	echo "      push:     Push local images to targets (kind, gcp, aws, azure)"
+	echo "      list:     List images in targets (local, gcp, aws, azure)"
 	echo
 	echo "  ci <setup|teardown>"
 	echo "    Manages GCP resources for CI/CD (Service Account, WIF, Artifact Registry)."
@@ -89,6 +90,26 @@ usage() {
 	echo "      local:      Runs a local development container with all tools pre-installed."
 	echo "                  Options: --platform <linux/amd64|linux/arm64> --build"
 	echo
+	echo "Image Commands (Detailed):"
+	echo "  image build [options]       Build source images locally"
+	echo "    --debug                   Debug build (fast, larger) → nxcc-node:debug"
+	echo "    --release                 Release build (optimized) → nxcc-node:latest"
+	echo "    --tag=TAG                 Custom local tag → nxcc-node:TAG"
+	echo
+	echo "  image push <target> [options]  Push local image to target"
+	echo "    Targets: kind, gcp, aws, azure"
+	echo "    --source=TAG              Local source tag (default: latest)"
+	echo "    --tag=TAG                 Target tag (default: target-specific)"
+	echo
+	echo "  image list [target]         List images"
+	echo "    Targets: local, gcp, aws, azure (default: gcp)"
+	echo
+	echo "  Examples:"
+	echo "    image build --debug                # Build debug image locally"
+	echo "    image push kind                    # Load latest local image into KinD"
+	echo "    image push gcp --source=debug      # Push debug build to GCP"
+	echo "    image push gcp --tag=staging-test  # Push with custom tag"
+	echo
 	echo "GCP Identity:"
 	echo "  For 'ci' and 'gke' commands, the script will resolve your GCP identity automatically."
 	echo "  You can override this by setting GCP_ACCOUNT and GCP_PROJECT_ID environment variables."
@@ -116,11 +137,21 @@ main() {
 	fi
 
 	case "$command" in
-	build)
+	image)
 		case "$subcommand" in
-		local) build_local_image ;;
-		gcp) build_gcp_image ;;
-		*) error "Invalid subcommand for 'build'. Use 'local' or 'gcp'." ;;
+		build)
+			shift 2 # Remove command and subcommand
+			image_build "$@"
+			;;
+		push)
+			shift 2 # Remove command and subcommand
+			image_push "$@"
+			;;
+		list)
+			shift 2 # Remove command and subcommand
+			image_list "$@"
+			;;
+		*) error "Invalid subcommand for 'image'. Use 'build', 'push', or 'list'." ;;
 		esac
 		;;
 

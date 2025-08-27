@@ -61,16 +61,16 @@ SKIP_CLUSTER_SETUP="false"
 SKIP_CLEANUP="false"
 FORCE_CLEANUP="false"
 TEST_STAGING="false"
-# Debug build flag is handled via BUILD_MODE export
+# Debug builds are now handled via explicit --debug flag in image commands
 TEMP_PROJECT_DIR=""
 
 # Export configuration for helper scripts
 export E2E_VERBOSE="false"
 export E2E_TEST_TEXT="Hello from NXCC E2E Test!"
 export E2E_PROJECT_ROOT="$PROJECT_ROOT"
-export BUILD_MODE="debug"            # Always use debug builds for faster e2e testing
-export BUILD_PLATFORMS="linux/amd64" # Use single arch builds for faster e2e testing
-export E2E_MINIMAL_RESOURCES="true"  # Use minimal resources for local development
+export E2E_BUILD_MODE="${E2E_BUILD_MODE:-debug}" # Default to debug builds for faster e2e testing
+export BUILD_PLATFORMS="linux/amd64"             # Use single arch builds for faster e2e testing
+export E2E_MINIMAL_RESOURCES="true"              # Use minimal resources for local development
 
 # Additional timeout configurations (in seconds)
 export E2E_DOCKER_BUILD_TIMEOUT="900" # 15 minutes for docker builds (kept longer for CI)
@@ -153,13 +153,13 @@ parse_args() {
 			shift
 			;;
 		--debug)
-			# Set debug mode via BUILD_MODE
-			export BUILD_MODE=""
+			# Debug mode - cluster setup will use --debug flag
+			E2E_BUILD_MODE="debug"
 			shift
 			;;
 		--release)
-			# Set release mode via BUILD_MODE
-			export BUILD_MODE="release"
+			# Release mode - cluster setup will use --release flag
+			E2E_BUILD_MODE="release"
 			shift
 			;;
 		--cache-from)

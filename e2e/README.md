@@ -90,7 +90,7 @@ The test script supports several environment variables for customization:
 
 ```bash
 # Build configuration
-export BUILD_MODE="debug"              # Use debug builds (default for e2e)
+export E2E_BUILD_MODE="debug"           # Use debug builds (default for e2e)
 export BUILD_SINGLE_ARCH="true"        # Single arch builds for faster testing
 
 # Timeout configuration (in seconds)
@@ -284,7 +284,7 @@ The test creates an echo worker with the following handlers:
 - Requires GCP authentication and project setup
 - Port-forwarding for worker deployment (`nxcc worker deploy`)
 - **Public ingress IP** for HTTP testing (no localhost)
-- Release builds by default (override with `BUILD_MODE=debug`)
+- Release builds by default (override with `E2E_BUILD_MODE=debug`)
 - Automatic ingress IP detection with fallback to port-forwarding
 
 ## Dependencies

@@ -19,10 +19,7 @@ export GKE_CLUSTER_NAME
 # Local KinD Cluster Config
 readonly KIND_CLUSTER_NAME="nxcc-debug"
 export KIND_CLUSTER_NAME
-readonly LOCAL_IMAGE_NAME="nxcc-node-local" # Expected name of the local image for 'debug'
-export LOCAL_IMAGE_NAME
-readonly LOCAL_IMAGE_TAG="latest"
-export LOCAL_IMAGE_TAG
+# LOCAL_IMAGE_NAME and LOCAL_IMAGE_TAG removed - now using nxcc-node:debug/latest scheme
 
 # Helm Chart Config
 # Split declaration and assignment to avoid masking return values

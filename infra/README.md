@@ -24,8 +24,9 @@ This directory provides comprehensive infrastructure automation for:
 
 ```bash
 # Build and deploy locally with KinD
-./infra.sh build local
-./infra.sh cluster create local
+./infra.sh image build --debug
+./infra.sh image push kind
+./infra.sh cluster create kind
 
 # Create TDX development VM
 ./infra.sh dev create
@@ -38,19 +39,24 @@ This directory provides comprehensive infrastructure automation for:
 ./infra.sh ci setup
 
 # Build and push production images
-./infra.sh build gcp
+./infra.sh image build --release
+./infra.sh image push gcp
 
 # Deploy to staging/production
-./infra.sh cluster create staging
+./infra.sh cluster create gke
 ./infra.sh k8s deploy staging
 ```
 
 ## Commands
 
-### Build Management
+### Image Management
 
 ```bash
-./infra.sh build <local|gcp>           # Build Docker images
+./infra.sh image build --debug         # Build debug image locally
+./infra.sh image build --release       # Build release image locally
+./infra.sh image push kind              # Load image into KinD cluster
+./infra.sh image push gcp               # Push to GCP Artifact Registry
+./infra.sh image list                   # List images in registry
 ./infra.sh ci <setup|teardown>         # Manage CI/CD resources
 ```
 
@@ -70,11 +76,12 @@ This directory provides comprehensive infrastructure automation for:
 
 ## Architecture
 
-### Build System (`lib/build.sh`)
+### Image System (`lib/image.sh`)
 
+- Multi-registry Docker image management
 - Multi-architecture Docker builds (amd64/arm64)
 - TDX-optimized release builds
-- GCP Artifact Registry integration
+- Registry-specific tagging and authentication
 - Build caching and optimization
 
 ### Cluster Management (`lib/cluster.sh`, `lib/k8s.sh`)
@@ -150,7 +157,7 @@ export NXCC_DEV_IMAGE="ghcr.io/nxcc-bridge/dev:latest"  # Dev container image
 ### Customization
 
 - **Helm Values**: Edit `charts/nxcc-node/values.yaml`
-- **Build Args**: Modify `lib/build.sh` Docker arguments
+- **Image Config**: Use `image build` options for custom builds
 - **VM Config**: Adjust TDX settings in `lib/dev/vm.sh`
 
 ## Development Workflow
@@ -158,8 +165,9 @@ export NXCC_DEV_IMAGE="ghcr.io/nxcc-bridge/dev:latest"  # Dev container image
 1. **Local Setup**:
 
    ```bash
-   ./infra.sh build local
-   ./infra.sh cluster create local
+   ./infra.sh image build --debug
+   ./infra.sh image push kind
+   ./infra.sh cluster create kind
    ```
 
 2. **TDX Development**:
@@ -172,13 +180,14 @@ export NXCC_DEV_IMAGE="ghcr.io/nxcc-bridge/dev:latest"  # Dev container image
 3. **Testing & Validation**:
 
    ```bash
-   ./infra.sh test integration local
-   ./infra.sh test e2e staging
+   ./infra.sh test debug
+   ./infra.sh test staging
    ```
 
 4. **Production Deployment**:
    ```bash
-   ./infra.sh build gcp
+   ./infra.sh image build --release
+   ./infra.sh image push gcp
    ./infra.sh k8s deploy prod
    ```
 

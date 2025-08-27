@@ -12,12 +12,14 @@ The `infra.sh` script is the comprehensive infrastructure management tool for nX
 ./infra/infra.sh [-y] <command> <subcommand> [args]
 
 # Build and test locally
-./infra/infra.sh build local
+./infra/infra.sh image build --debug
+./infra/infra.sh image push kind
 ./infra/infra.sh cluster create kind
 ./infra/infra.sh k8s deploy debug
 
 # Production GCP deployment
-./infra/infra.sh build gcp
+./infra/infra.sh image build --release
+./infra/infra.sh image push gcp
 ./infra/infra.sh cluster create gke
 ./infra/infra.sh k8s deploy staging
 
@@ -28,36 +30,47 @@ The `infra.sh` script is the comprehensive infrastructure management tool for nX
 
 ## Commands Overview
 
-### Build Commands
+### Image Commands
 
-Build Docker images for different deployment targets.
+Manage Docker images with multi-registry support.
 
-#### `build local`
+#### `image build`
 
-Builds images for local Kubernetes (KinD) deployment:
-
-```bash
-./infra/infra.sh build local
-```
-
-- **Target**: Local development and testing
-- **Mode**: Debug builds (unoptimized, with debug symbols)
-- **Platform**: Defaults to amd64 architecture
-- **Output**: Local Docker images tagged for KinD
-
-#### `build gcp`
-
-Builds and pushes images to GCP Artifact Registry:
+Builds source images locally:
 
 ```bash
-./infra/infra.sh build gcp
+./infra/infra.sh image build --debug    # Fast debug builds
+./infra/infra.sh image build --release  # Optimized release builds
+./infra/infra.sh image build --tag=custom  # Custom local tag
 ```
 
-- **Target**: Production Google Cloud deployment
-- **Mode**: Release builds (optimized)
-- **Platform**: Intel TDX-compatible (amd64)
-- **Output**: Images pushed to GCP Artifact Registry
-- **Requirements**: GCP authentication and project setup
+- **Modes**: Debug (fast iteration) or Release (optimized)
+- **Platform**: Defaults to amd64 for TDX compatibility
+- **Output**: Local images tagged as `nxcc-node:debug` or `nxcc-node:latest`
+
+#### `image push`
+
+Push local images to deployment targets:
+
+```bash
+./infra/infra.sh image push kind         # Load into KinD cluster
+./infra/infra.sh image push gcp          # Push to GCP Artifact Registry
+./infra/infra.sh image push gcp --source=debug --tag=staging  # Custom push
+```
+
+- **Targets**: `kind`, `gcp`, `aws`, `azure`
+- **Options**: `--source=TAG` (local source), `--tag=TAG` (target tag)
+- **Requirements**: Target-specific authentication (e.g., GCP setup)
+
+#### `image list`
+
+List images in registries:
+
+```bash
+./infra/infra.sh image list          # List GCP registry images (default)
+./infra/infra.sh image list local    # List local Docker images
+./infra/infra.sh image list gcp      # List GCP Artifact Registry
+```
 
 ### Cluster Management
 
@@ -327,13 +340,16 @@ Use the `-y` flag to automatically answer 'yes' to all confirmation prompts:
 ### Local Development Setup
 
 ```bash
-# 1. Build local images
-./infra/infra.sh build local
+# 1. Build debug images
+./infra/infra.sh image build --debug
 
 # 2. Create local cluster
 ./infra/infra.sh cluster create kind
 
-# 3. Deploy to local cluster
+# 3. Load images into cluster
+./infra/infra.sh image push kind
+
+# 4. Deploy to local cluster
 ./infra/infra.sh k8s deploy debug
 
 # 4. Test the deployment
@@ -347,7 +363,8 @@ Use the `-y` flag to automatically answer 'yes' to all confirmation prompts:
 ./infra/infra.sh ci setup
 
 # 2. Build and push images
-./infra/infra.sh build gcp
+./infra/infra.sh image build --release
+./infra/infra.sh image push gcp
 
 # 3. Create production cluster
 ./infra/infra.sh cluster create gke

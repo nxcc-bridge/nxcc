@@ -5,7 +5,7 @@
 
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-# Source infra common.sh for LOCAL_IMAGE_NAME and LOCAL_IMAGE_TAG constants
+# Source infra common.sh for KIND_CLUSTER_NAME and other constants
 source "$(dirname "${BASH_SOURCE[0]}")/../../infra/lib/common.sh"
 
 # Setup local kind cluster
@@ -30,8 +30,8 @@ setup_local_cluster() {
 			error "Failed to pull pre-built image: $E2E_PREBUILT_IMAGE"
 		fi
 
-		# Get the local image name from common.sh or infra/lib/common.sh
-		local local_image="${LOCAL_IMAGE_NAME:-nxcc-node-local}:${LOCAL_IMAGE_TAG:-latest}"
+		# Retag to our standard naming scheme
+		local local_image="nxcc-node:${E2E_BUILD_MODE:-debug}"
 		verbose_log "Retagging to local image name: $local_image"
 		if ! docker tag "$E2E_PREBUILT_IMAGE" "$local_image"; then
 			error "Failed to retag image to: $local_image"
@@ -43,7 +43,8 @@ setup_local_cluster() {
 		verbose_log "Building local Docker image..."
 		local build_timeout="${E2E_DOCKER_BUILD_TIMEOUT:-900}"
 
-		if ! (cd "$project_root" && timeout "$build_timeout" ./infra/infra.sh build local); then
+		local build_mode="--${E2E_BUILD_MODE:-debug}"
+		if ! (cd "$project_root" && timeout "$build_timeout" ./infra/infra.sh image build "$build_mode"); then
 			if [[ $? -eq 124 ]]; then
 				error "Docker build timed out after ${build_timeout} seconds"
 			else
@@ -55,6 +56,11 @@ setup_local_cluster() {
 	# Create kind cluster
 	verbose_log "Creating kind cluster..."
 	(cd "$project_root" && ./infra/infra.sh cluster create kind)
+
+	# Push image to KinD cluster
+	verbose_log "Loading Docker image into KinD cluster..."
+	local source_tag="${E2E_BUILD_MODE:-debug}"
+	(cd "$project_root" && ./infra/infra.sh image push kind --source="$source_tag")
 
 	# Deploy to debug environment (kind) with operator keys enabled
 	verbose_log "Deploying NXCC to debug environment with operator keys..."
@@ -99,14 +105,21 @@ setup_staging_cluster() {
 	log "Setting up GKE staging cluster..."
 
 	# Build and push GCP image with timeout
-	verbose_log "Building and pushing GCP image..."
+	local build_mode="--${E2E_BUILD_MODE:-debug}"
+	verbose_log "Building ${E2E_BUILD_MODE:-debug} image..."
 	local build_timeout="${E2E_DOCKER_BUILD_TIMEOUT:-900}"
-	if ! (cd "$project_root" && timeout "$build_timeout" ./infra/infra.sh build gcp); then
+	if ! (cd "$project_root" && timeout "$build_timeout" ./infra/infra.sh image build "$build_mode"); then
 		if [[ $? -eq 124 ]]; then
 			error "Docker build timed out after ${build_timeout} seconds"
 		else
 			error "Docker build failed"
 		fi
+	fi
+
+	verbose_log "Pushing ${E2E_BUILD_MODE:-debug} image to GCP..."
+	local source_tag="${E2E_BUILD_MODE:-debug}"
+	if ! (cd "$project_root" && ./infra/infra.sh image push gcp --source="$source_tag"); then
+		error "Docker push failed"
 	fi
 
 	# Create GKE cluster if needed
@@ -136,14 +149,26 @@ setup_prod_cluster() {
 	log "Setting up GKE production cluster..."
 
 	# Build and push GCP image with timeout
-	verbose_log "Building and pushing GCP image..."
+	local build_mode="--${E2E_BUILD_MODE:-release}" # Production defaults to release
+	verbose_log "Building ${E2E_BUILD_MODE:-release} image..."
 	local build_timeout="${E2E_DOCKER_BUILD_TIMEOUT:-900}"
-	if ! (cd "$project_root" && timeout "$build_timeout" ./infra/infra.sh build gcp); then
+	if ! (cd "$project_root" && timeout "$build_timeout" ./infra/infra.sh image build "$build_mode"); then
 		if [[ $? -eq 124 ]]; then
 			error "Docker build timed out after ${build_timeout} seconds"
 		else
 			error "Docker build failed"
 		fi
+	fi
+
+	verbose_log "Pushing ${E2E_BUILD_MODE:-release} image to GCP..."
+	local source_tag="${E2E_BUILD_MODE:-latest}" # Production uses latest by default
+	if [[ "${E2E_BUILD_MODE:-release}" == "release" ]]; then
+		source_tag="latest"
+	else
+		source_tag="${E2E_BUILD_MODE}"
+	fi
+	if ! (cd "$project_root" && ./infra/infra.sh image push gcp --source="$source_tag"); then
+		error "Docker push failed"
 	fi
 
 	# Create GKE cluster if needed (same as staging for now)
