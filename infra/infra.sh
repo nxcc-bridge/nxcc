@@ -289,7 +289,7 @@ Commands:
 
 Environment Variables:
   TDX_VM_NAME              VM name (default: nxcc-tdx-dev)
-  TDX_VM_ZONE              GCP zone (default: us-central1-a)
+  TDX_VM_ZONE              GCP zone (default: europe-west4-a)
   TDX_VM_MACHINE_TYPE      Machine type (default: c3-standard-4)
   TDX_VM_PREEMPTIBLE       Use preemptible instance (default: true)
   NXCC_DEV_IMAGE           Container image (default: ghcr.io/nxcc-bridge/dev:latest)

@@ -33,7 +33,7 @@ export HELM_CHART_PATH
 # TDX Development VM Config
 readonly TDX_VM_NAME="${TDX_VM_NAME:-nxcc-tdx-dev}"
 export TDX_VM_NAME
-readonly TDX_VM_ZONE="${TDX_VM_ZONE:-us-central1-a}"
+readonly TDX_VM_ZONE="${TDX_VM_ZONE:-europe-west4-a}"
 export TDX_VM_ZONE
 readonly TDX_VM_MACHINE_TYPE="${TDX_VM_MACHINE_TYPE:-c3-standard-4}"
 export TDX_VM_MACHINE_TYPE
@@ -49,7 +49,7 @@ export TDX_VM_PREEMPTIBLE
 # --- GCP Locations ---
 # Override with environment variables if needed.
 readonly GCP_AR_LOCATION="${GCP_AR_LOCATION:-europe}"
-readonly GCP_GKE_REGION="${GCP_GKE_REGION:-europe-west1}"
+readonly GCP_GKE_REGION="${GCP_GKE_REGION:-europe-west4}"
 
 # --- Color Codes for Output ---
 readonly C_GREEN='\033[0;32m'

@@ -18,7 +18,7 @@ env:
 
   # GCP Configuration (matches infra.sh defaults)
   GCP_LOCATION: europe
-  GCP_GKE_REGION: europe-west1
+  GCP_GKE_REGION: europe-west4
   GKE_CLUSTER_NAME: nxcc
   AR_REPO_NAME: nxcc-images
   AR_IMAGE_NAME: node

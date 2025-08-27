@@ -103,7 +103,7 @@ Start or restart the development container:
 ### Environment Variables
 
 - `TDX_VM_NAME`: VM name (default: `nxcc-tdx-dev`)
-- `TDX_VM_ZONE`: GCP zone (default: `us-central1-a`)
+- `TDX_VM_ZONE`: GCP zone (default: `europe-west4-a`)
 - `TDX_VM_MACHINE_TYPE`: Machine type (default: `c3-standard-4`)
 - `TDX_VM_PREEMPTIBLE`: Use preemptible instances (default: `true`)
 - `NXCC_DEV_IMAGE`: Development container image (default: `ghcr.io/nxcc-bridge/dev:latest`)
@@ -236,7 +236,7 @@ gcloud auth list
 gcloud compute project-info describe --project=YOUR_PROJECT
 
 # Check available machine types
-gcloud compute machine-types list --zones=us-central1-a --filter="name~c3"
+gcloud compute machine-types list --zones=europe-west4-a --filter="name~c3"
 ```
 
 ### TDX Verification Issues
@@ -270,7 +270,7 @@ gcloud compute machine-types list --zones=us-central1-a --filter="name~c3"
 ./infra.sh dev status
 
 # Verify SSH connectivity
-gcloud compute ssh ubuntu@nxcc-tdx-dev --zone=us-central1-a
+gcloud compute ssh ubuntu@nxcc-tdx-dev --zone=europe-west4-a
 ```
 
 ## Security Considerations

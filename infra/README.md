@@ -132,7 +132,7 @@ Kubernetes deployment templates for:
 export GCP_PROJECT_ID="your-project-id"
 export GCP_ACCOUNT="your-email@domain.com"
 export GCP_AR_LOCATION="europe"              # Artifact Registry location
-export GCP_GKE_REGION="europe-west1"       # GKE cluster region
+export GCP_GKE_REGION="europe-west4"       # GKE cluster region
 
 # Build Configuration
 export AUTO_YES="true"                      # Skip confirmation prompts
@@ -141,7 +141,7 @@ export IMAGE_TAG_OVERRIDE="custom-tag"      # Override image tag
 
 # TDX Development VM
 export TDX_VM_NAME="nxcc-tdx-dev"          # VM instance name
-export TDX_VM_ZONE="us-central1-a"         # GCP zone
+export TDX_VM_ZONE="europe-west4-a"         # GCP zone
 export TDX_VM_MACHINE_TYPE="c3-standard-4" # Machine type
 export TDX_VM_PREEMPTIBLE="true"           # Use preemptible instances
 export NXCC_DEV_IMAGE="ghcr.io/nxcc-bridge/dev:latest"  # Dev container image
