@@ -16,16 +16,7 @@ export AR_REPO_NAME
 readonly GKE_CLUSTER_NAME="nxcc"
 export GKE_CLUSTER_NAME
 
-# Local KinD Cluster Config
-readonly KIND_CLUSTER_NAME="nxcc-debug"
-export KIND_CLUSTER_NAME
-# LOCAL_IMAGE_NAME and LOCAL_IMAGE_TAG removed - now using nxcc-node:debug/latest scheme
 
-# Helm Chart Config
-# Split declaration and assignment to avoid masking return values
-HELM_CHART_PATH="$(dirname "$(realpath "$0")")/charts/nxcc-node"
-readonly HELM_CHART_PATH
-export HELM_CHART_PATH
 
 # TDX Development VM Config
 readonly TDX_VM_NAME="${TDX_VM_NAME:-nxcc-tdx-dev}"

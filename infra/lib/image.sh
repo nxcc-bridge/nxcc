@@ -174,7 +174,6 @@ image_push() {
 
 	if [[ -z "$target" ]]; then
 		error "Must specify target. Use one of:
-  ./infra.sh image push kind     # Load into KinD cluster
   ./infra.sh image push gcp      # Push to GCP Artifact Registry
   ./infra.sh image push aws      # Push to AWS ECR
   ./infra.sh image push azure    # Push to Azure Container Registry"
@@ -209,9 +208,6 @@ Build it first with: ./infra.sh image build --debug|--release [--tag=$source_tag
 	fi
 
 	case "$target" in
-	kind)
-		_image_push_kind "$source_image" "$custom_tag"
-		;;
 	gcp)
 		_image_push_gcp "$source_image" "$source_tag" "$custom_tag"
 		;;
@@ -222,7 +218,7 @@ Build it first with: ./infra.sh image build --debug|--release [--tag=$source_tag
 		_image_push_azure "$source_image" "$source_tag" "$custom_tag"
 		;;
 	*)
-		error "Invalid target: $target. Use one of: kind, gcp, aws, azure"
+		error "Invalid target: $target. Use one of: gcp, aws, azure"
 		;;
 	esac
 }
@@ -254,28 +250,6 @@ image_list() {
 	esac
 }
 
-################################################################################
-# Push image to KinD cluster.
-# Parameters:
-#   $1: source_image - Local Docker image name
-#   $2: custom_tag - Custom tag (unused for KinD)
-################################################################################
-_image_push_kind() {
-	local source_image="$1"
-	local custom_tag="$2"
-
-	check_deps kind
-
-	info "Loading image into KinD cluster: $source_image"
-
-	if [[ -n "$custom_tag" ]]; then
-		warn "Custom tag '$custom_tag' ignored for KinD target (loads image as-is)"
-	fi
-
-	kind load docker-image "$source_image" --name "${KIND_CLUSTER_NAME}"
-
-	success "Loaded image into KinD cluster: $source_image"
-}
 
 ################################################################################
 # Push image to GCP Artifact Registry.

@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Manages cloud and local Kubernetes resources for the nXCC confidential workload.
+# Manages cloud and local resources for the nXCC confidential workload.
 #
 # This script is the main entrypoint. It sources its functionality from the
 # scripts in the ./lib/ directory.
@@ -21,8 +21,6 @@ source "${LIB_DIR}/common.sh"
 source "${LIB_DIR}/ci.sh"
 source "${LIB_DIR}/cluster.sh"
 source "${LIB_DIR}/image.sh"
-source "${LIB_DIR}/k8s.sh"
-source "${LIB_DIR}/test.sh"
 source "${LIB_DIR}/dev.sh" # Changed to the new single entrypoint
 
 ################################################################################
@@ -31,7 +29,7 @@ source "${LIB_DIR}/dev.sh" # Changed to the new single entrypoint
 usage() {
 	echo "Usage: $0 [-y] <command> <subcommand> [args]"
 	echo
-	echo "Manages cloud (GCP) and local (KinD) resources for the nXCC application."
+	echo "Manages cloud (GCP) and local resources for the nXCC application."
 	echo
 	echo "Options:"
 	echo "  -y  Automatically answer 'yes' to all interactive confirmation prompts."
@@ -49,33 +47,18 @@ usage() {
 	echo "      teardown: Deletes all CI/CD resources."
 	echo
 	echo "  cluster <create|destroy> <env>"
-	echo "    Manages the Kubernetes cluster."
-	echo "      <env>: gke | kind"
+	echo "    Manages the GKE cluster."
+	echo "      <env>: gke"
 	echo "      create:   Creates the specified cluster."
 	echo "      destroy:  Deletes the specified cluster."
-	echo
-	echo "  k8s <deploy|deploy-variations|list-variants|destroy|dump-debug> <env> [options]"
-	echo "    Manages the application deployment via Helm chart."
-	echo "      <env>: debug | staging | prod"
-	echo "      deploy:      Deploys or upgrades the application to the specified environment."
-	echo "                   Options:"
-	echo "                     --with-operator-key [key-file]   Enable operator signing key"
-	echo "      deploy-variations: Deploys multiple node variants for e2e testing."
-	echo "                   Usage: k8s deploy-variations <env> <variant1:overrides> [variant2:overrides]..."
-	echo "                   Example: k8s deploy-variations debug untrusted:operatorKeys.test.enabled=true"
-	echo "      list-variants: Lists all deployed node variants and their access URLs."
-	echo "      destroy:     Uninstalls the application from the specified environment."
-	echo "      dump-debug:  Dumps diagnostic information for a failed deployment."
 	echo
 	echo "  test <env>"
 	echo "    Tests HTTP connectivity to the deployed NXCC node."
 	echo "      <env>: debug | staging | prod"
 	echo
-	echo "  keys <generate|create-secret> <args>"
+	echo "  keys <generate> <args>"
 	echo "    Manages operator signing keys for attestation policies."
 	echo "      generate <output-file>       Generates a new Ed25519 operator signing key"
-	echo "      create-secret <key-file> [secret-name] [namespace]"
-	echo "                                   Creates Kubernetes secret from key file"
 	echo
 	echo "  dev <create|ssh|push|destroy|status|cleanup|container|local>"
 	echo "    Manages TDX development VM for real hardware testing and local development containers."
@@ -97,7 +80,7 @@ usage() {
 	echo "    --tag=TAG                 Custom local tag → nxcc-node:TAG"
 	echo
 	echo "  image push <target> [options]  Push local image to target"
-	echo "    Targets: kind, gcp, aws, azure"
+	echo "    Targets: gcp, aws, azure"
 	echo "    --source=TAG              Local source tag (default: latest)"
 	echo "    --tag=TAG                 Target tag (default: target-specific)"
 	echo
@@ -106,7 +89,6 @@ usage() {
 	echo
 	echo "  Examples:"
 	echo "    image build --debug                # Build debug image locally"
-	echo "    image push kind                    # Load latest local image into KinD"
 	echo "    image push gcp --source=debug      # Push debug build to GCP"
 	echo "    image push gcp --tag=staging-test  # Push with custom tag"
 	echo
@@ -180,8 +162,7 @@ main() {
 		create)
 			case "$env" in
 			gke) cluster_create_gke ;;
-			kind) cluster_create_kind ;;
-			*) error "Invalid or missing environment for 'cluster create'. Use 'gke' or 'kind'." ;;
+			*) error "Invalid or missing environment for 'cluster create'. Use 'gke'." ;;
 			esac
 			;;
 		destroy)
@@ -195,82 +176,11 @@ main() {
 					if [[ $REPLY =~ ^[Yy]$ ]]; then cluster_destroy_gke; else info "Cluster deletion cancelled."; fi
 				fi
 				;;
-			kind)
-				if [[ "$auto_yes" == true ]]; then
-					cluster_destroy_kind
-				else
-					read -p "Are you sure you want to delete the KinD cluster '${KIND_CLUSTER_NAME}'? [y/N] " -n 1 -r
-					echo
-					if [[ $REPLY =~ ^[Yy]$ ]]; then cluster_destroy_kind; else info "Cluster deletion cancelled."; fi
-				fi
-				;;
-			*) error "Invalid or missing environment for 'cluster destroy'. Use 'gke' or 'kind'." ;;
+			*) error "Invalid or missing environment for 'cluster destroy'. Use 'gke'." ;;
 			esac
 			;;
 		*) error "Invalid subcommand for 'cluster'. Use 'create' or 'destroy'." ;;
 		esac
-		;;
-
-	k8s)
-		case "$subcommand" in
-		deploy)
-			if [[ -z "$env" ]]; then error "Missing environment for 'k8s deploy'. Use 'debug', 'staging', or 'prod'."; fi
-
-			# Parse additional options for k8s deploy
-			shift 3 # Remove command, subcommand, and env
-			while [[ $# -gt 0 ]]; do
-				case $1 in
-				--with-operator-key)
-					local key_file="${2:-}"
-					if [[ -n "$key_file" ]] && [[ -f "$key_file" ]]; then
-						info "Using operator key file: $key_file"
-						shift 2
-					else
-						info "Generating new operator key for environment: $env"
-						shift 1
-					fi
-					setup_operator_keys "$env" "$key_file"
-					;;
-				*)
-					warn "Unknown option for k8s deploy: $1"
-					shift
-					;;
-				esac
-			done
-
-			k8s_deploy "$env"
-			;;
-		deploy-variations)
-			if [[ -z "$env" ]]; then error "Missing environment for 'k8s deploy-variations'. Use 'debug', 'staging', or 'prod'."; fi
-			shift 3 # Remove command, subcommand, and env
-			if [[ $# -eq 0 ]]; then error "Missing node variations for 'k8s deploy-variations'. Provide at least one variant:overrides pair."; fi
-			k8s_deploy_variations "$env" "$@"
-			;;
-		list-variants)
-			if [[ -z "$env" ]]; then error "Missing environment for 'k8s list-variants'. Use 'debug', 'staging', or 'prod'."; fi
-			k8s_list_variants "$env"
-			;;
-		destroy)
-			if [[ -z "$env" ]]; then error "Missing environment for 'k8s destroy'. Use 'debug', 'staging', or 'prod'."; fi
-			if [[ "$auto_yes" == true ]]; then
-				k8s_destroy "$env"
-			else
-				read -p "Are you sure you want to uninstall 'nxcc-node-${env}'? [y/N] " -n 1 -r
-				echo
-				if [[ $REPLY =~ ^[Yy]$ ]]; then k8s_destroy "$env"; else info "Uninstall cancelled."; fi
-			fi
-			;;
-		"dump-debug")
-			if [[ -z "$env" ]]; then error "Missing environment for 'k8s dump-debug'. Use 'debug', 'staging', or 'prod'."; fi
-			k8s_dump_debug_info "$env"
-			;;
-		*) error "Invalid subcommand for 'k8s'. Use 'deploy', 'deploy-variations', 'list-variants', 'destroy', or 'dump-debug'." ;;
-		esac
-		;;
-
-	test)
-		if [[ -z "$subcommand" ]]; then error "Missing environment for 'test'. Use 'debug', 'staging', or 'prod'."; fi
-		test_connectivity "$subcommand"
 		;;
 
 	keys)
@@ -279,13 +189,7 @@ main() {
 			if [[ -z "$env" ]]; then error "Missing output file for 'keys generate'. Provide a file path."; fi
 			generate_operator_key "$env"
 			;;
-		create-secret)
-			if [[ -z "$env" ]]; then error "Missing key file for 'keys create-secret'. Provide a key file path."; fi
-			local secret_name="${4:-}"
-			local namespace="${5:-}"
-			create_operator_key_secret "$env" "$secret_name" "$namespace"
-			;;
-		*) error "Invalid subcommand for 'keys'. Use 'generate' or 'create-secret'." ;;
+		*) error "Invalid subcommand for 'keys'. Use 'generate'." ;;
 		esac
 		;;
 

@@ -7,9 +7,8 @@ Deployment and infrastructure management tools for nXCC platform.
 This directory provides comprehensive infrastructure automation for:
 
 - **🏗️ Build Systems**: Docker image builds and CI/CD pipelines
-- **☸️ Kubernetes Deployment**: Helm charts and cluster management
 - **🔧 Development Environment**: TDX-enabled development VMs
-- **🌍 Multi-Environment Support**: Local, staging, and production deployments
+- **🌍 Multi-Cloud Support**: GCP, AWS, and Azure deployments
 
 ## Quick Start
 
@@ -17,16 +16,12 @@ This directory provides comprehensive infrastructure automation for:
 
 - Docker
 - gcloud CLI (for GCP deployments)
-- kubectl (for Kubernetes management)
-- Helm (installed automatically)
 
 ### Local Development
 
 ```bash
-# Build and deploy locally with KinD
+# Build images
 ./infra.sh image build --debug
-./infra.sh image push kind
-./infra.sh cluster create kind
 
 # Create TDX development VM
 ./infra.sh dev create
@@ -42,9 +37,8 @@ This directory provides comprehensive infrastructure automation for:
 ./infra.sh image build --release
 ./infra.sh image push gcp
 
-# Deploy to staging/production
+# Create GKE cluster
 ./infra.sh cluster create gke
-./infra.sh k8s deploy staging
 ```
 
 ## Commands

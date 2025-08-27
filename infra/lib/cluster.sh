@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Functions for managing Kubernetes clusters (GKE and KinD).
+# Functions for managing GKE cluster.
 # This script is intended to be sourced, not executed directly.
 
 ################################################################################
@@ -8,7 +8,7 @@
 ################################################################################
 cluster_create_gke() {
 	info "Starting GKE cluster creation..."
-	check_deps gcloud kubectl
+	check_deps gcloud
 	resolve_gcp_identity
 
 	info "Enabling GKE API..."
@@ -73,42 +73,3 @@ cluster_destroy_gke() {
 	fi
 }
 
-################################################################################
-# Creates a local KinD cluster for debugging.
-################################################################################
-cluster_create_kind() {
-	info "Starting KinD cluster creation..."
-	check_deps kind docker
-
-	if kind get clusters | grep -q "^${KIND_CLUSTER_NAME}$"; then
-		warn "KinD cluster '${KIND_CLUSTER_NAME}' already exists."
-	else
-		info "Creating KinD cluster '${KIND_CLUSTER_NAME}'..."
-		kind create cluster --name "${KIND_CLUSTER_NAME}"
-		success "KinD cluster created."
-	fi
-
-	# Ensure kubectl context is set to the kind cluster
-	info "Setting kubectl context to KinD cluster..."
-	kubectl config use-context "kind-${KIND_CLUSTER_NAME}"
-
-	info "KinD cluster created. Use 'image push kind' to load images into the cluster."
-
-	success "KinD cluster setup is complete. Current context is '$(kubectl config current-context)'."
-}
-
-################################################################################
-# Destroys the local KinD cluster.
-################################################################################
-cluster_destroy_kind() {
-	info "Starting KinD cluster destruction..."
-	check_deps kind
-
-	if kind get clusters | grep -q "^${KIND_CLUSTER_NAME}$"; then
-		info "Deleting KinD cluster '${KIND_CLUSTER_NAME}'..."
-		kind delete cluster --name "${KIND_CLUSTER_NAME}"
-		success "KinD cluster deleted."
-	else
-		warn "KinD cluster '${KIND_CLUSTER_NAME}' does not exist. Nothing to do."
-	fi
-}

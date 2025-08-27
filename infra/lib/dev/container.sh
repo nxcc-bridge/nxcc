@@ -55,7 +55,7 @@ dev_run_container() {
 	fi
 
 	info "Running development container with project mounted at /workspace"
-	info "Available tools: rust, node, pnpm, forge, kubectl, kind, grpcurl"
+	info "Available tools: rust, node, pnpm, forge, grpcurl"
 	info ""
 	info "Try these commands inside the container:"
 	info "  cd /workspace/node && cargo build          # Build Rust components"

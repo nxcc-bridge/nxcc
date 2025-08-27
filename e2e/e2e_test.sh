@@ -2,6 +2,9 @@
 #
 # End-to-End Test Script for NXCC
 #
+# ⚠️ WARNING: This script is currently disabled due to removal of Kubernetes/KinD support.
+# The e2e tests need to be refactored to work without Kubernetes infrastructure.
+#
 # This script tests the complete NXCC workflow:
 # 1. Sets up a kind cluster locally
 # 2. Uses the CLI to init a new project in a temp dir
@@ -23,6 +26,10 @@
 #   --force-cleanup             Force cleanup of cluster resources
 #   --cache-from REPO           Use upstream cache from specified repository
 #   --help                      Show this help message
+
+echo "❌ E2E tests are currently disabled due to Kubernetes infrastructure removal."
+echo "🔧 These tests need to be refactored to work with the new non-K8s architecture."
+exit 1
 
 set -e
 set -o pipefail
