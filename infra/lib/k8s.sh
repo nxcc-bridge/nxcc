@@ -57,7 +57,7 @@ k8s_deploy() {
 	case "$env" in
 	debug)
 		# For local KinD cluster. Use GHCR by default, allow local override.
-		local image_repo="${IMAGE_REPO_OVERRIDE:-ghcr.io/nxcc-bridge/nxcc/node}"
+		local image_repo="${IMAGE_REPO_OVERRIDE:-ghcr.io/nxcc-bridge/node}"
 		local image_tag="${IMAGE_TAG_OVERRIDE:-latest}"
 		local full_image="${image_repo}:${image_tag}"
 
@@ -260,7 +260,7 @@ k8s_deploy_variant() {
 	# Copy base environment configuration
 	case "$env" in
 	debug)
-		local image_repo="${IMAGE_REPO_OVERRIDE:-ghcr.io/nxcc-bridge/nxcc/node}"
+		local image_repo="${IMAGE_REPO_OVERRIDE:-ghcr.io/nxcc-bridge/node}"
 		local image_tag="${IMAGE_TAG_OVERRIDE:-latest}"
 
 		helm_set_args+=(--set seed.replicaCount=1)

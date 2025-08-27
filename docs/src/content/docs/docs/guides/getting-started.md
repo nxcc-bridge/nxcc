@@ -122,7 +122,7 @@ For production blockchain integration, you would typically use the work order AP
 For production deployments:
 
 ```bash
-docker run -p 6922:6922 ghcr.io/nxcc-bridge/nxcc/node:latest
+docker run -p 6922:6922 ghcr.io/nxcc-bridge/node:latest
 ```
 
 ## Core Concepts

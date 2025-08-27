@@ -7,7 +7,7 @@
 set -e
 
 CONTAINER_NAME="nxcc-dev-container"
-CONTAINER_IMAGE="${NXCC_DEV_IMAGE:-ghcr.io/nxcc-bridge/nxcc/dev:latest}"
+CONTAINER_IMAGE="${NXCC_DEV_IMAGE:-ghcr.io/nxcc-bridge/dev:latest}"
 DETACHED=false
 
 # Parse arguments

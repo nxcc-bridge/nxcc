@@ -167,7 +167,7 @@ if [ -f "$container_script" ]; then
 else
 	# Fallback to inline container setup if script not found
 	log "Container setup script not found, using fallback method..."
-	CONTAINER_IMAGE="${NXCC_DEV_IMAGE:-ghcr.io/nxcc-bridge/nxcc/dev:latest}"
+	CONTAINER_IMAGE="${NXCC_DEV_IMAGE:-ghcr.io/nxcc-bridge/dev:latest}"
 	CONTAINER_NAME="nxcc-dev-container"
 
 	log "=== Container Setup Output (Fallback) ==="

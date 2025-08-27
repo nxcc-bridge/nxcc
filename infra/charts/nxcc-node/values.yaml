@@ -9,7 +9,7 @@ fullnameOverride: ""
 
 image:
   # -- The Docker image repository. Defaults to GHCR, can be overridden.
-  repository: ghcr.io/nxcc-bridge/nxcc/node
+  repository: ghcr.io/nxcc-bridge/node
   # -- The Docker image tag.
   tag: "latest"
   # -- The image pull policy.

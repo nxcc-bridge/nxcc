@@ -41,7 +41,7 @@ readonly TDX_VM_IMAGE_FAMILY="${TDX_VM_IMAGE_FAMILY:-ubuntu-2404-lts-amd64}"
 export TDX_VM_IMAGE_FAMILY
 readonly TDX_VM_IMAGE_PROJECT="${TDX_VM_IMAGE_PROJECT:-ubuntu-os-cloud}"
 export TDX_VM_IMAGE_PROJECT
-readonly NXCC_DEV_IMAGE="${NXCC_DEV_IMAGE:-ghcr.io/nxcc-bridge/nxcc/dev:latest}"
+readonly NXCC_DEV_IMAGE="${NXCC_DEV_IMAGE:-ghcr.io/nxcc-bridge/dev:latest}"
 export NXCC_DEV_IMAGE
 readonly TDX_VM_PREEMPTIBLE="${TDX_VM_PREEMPTIBLE:-true}"
 export TDX_VM_PREEMPTIBLE

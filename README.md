@@ -56,10 +56,10 @@ nXCC uses a multi-process architecture where JavaScript workers execute inside t
 
 ```bash
 # Pull the latest image
-docker pull ghcr.io/nxcc-bridge/nxcc/node:latest
+docker pull ghcr.io/nxcc-bridge/node:latest
 
 # Run a local node
-docker run -p 3000:3000 -p 9000:9000 ghcr.io/nxcc-bridge/nxcc/node:latest
+docker run -p 3000:3000 -p 9000:9000 ghcr.io/nxcc-bridge/node:latest
 
 # Deploy your first worker
 curl -X POST http://localhost:3000/workers \
