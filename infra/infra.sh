@@ -22,17 +22,19 @@ source "${LIB_DIR}/ci.sh"
 source "${LIB_DIR}/cluster.sh"
 source "${LIB_DIR}/image.sh"
 source "${LIB_DIR}/dev.sh" # Changed to the new single entrypoint
+source "${LIB_DIR}/state_management.sh"
 
 ################################################################################
 # Displays usage information.
 ################################################################################
 usage() {
-	echo "Usage: $0 [-y] <command> <subcommand> [args]"
+	echo "Usage: $0 [-y] [--bucket=NAME] <command> <subcommand> [args]"
 	echo
 	echo "Manages cloud (GCP) and local resources for the nXCC application."
 	echo
 	echo "Options:"
-	echo "  -y  Automatically answer 'yes' to all interactive confirmation prompts."
+	echo "  -y             Automatically answer 'yes' to all interactive confirmation prompts."
+	echo "  --bucket=NAME  Override GCS bucket for Terraform state (default: PROJECT_ID-terraform-state)"
 	echo
 	echo "Commands:"
 	echo "  image <build|push|list>"
@@ -59,6 +61,14 @@ usage() {
 	echo "  keys <generate> <args>"
 	echo "    Manages operator signing keys for attestation policies."
 	echo "      generate <output-file>       Generates a new Ed25519 operator signing key"
+	echo
+	echo "  deploy <create|destroy|status|plan> <env>"
+	echo "    Manages NXCC infrastructure using Terraform modules (replaces topology)."
+	echo "      create:   Creates infrastructure, auto-generating operator keys"
+	echo "      destroy:  Destroys infrastructure and cleans up resources" 
+	echo "      status:   Shows current deployment status and connection info"
+	echo "      plan:     Shows what changes would be made without applying"
+	echo "      <env>:    Environment name (staging, production, dev-username, e2e-testid)"
 	echo
 	echo "  dev <create|ssh|push|destroy|status|cleanup|container|local>"
 	echo "    Manages TDX development VM for real hardware testing and local development containers."
@@ -95,6 +105,22 @@ usage() {
 	echo "GCP Identity:"
 	echo "  For 'ci' and 'gke' commands, the script will resolve your GCP identity automatically."
 	echo "  You can override this by setting GCP_ACCOUNT and GCP_PROJECT_ID environment variables."
+	echo
+	echo "Common Workflow Examples:"
+	echo "  # Deploy environments (automatically generates operator keys)"
+	echo "  $0 deploy create staging              # Deploy staging environment"
+	echo "  $0 deploy create dev-alice            # Deploy dev environment for 'alice'"
+	echo "  $0 deploy create e2e-pr-123          # Deploy E2E test environment"
+	echo "  $0 deploy status staging             # Show deployment info & endpoints"
+	echo "  $0 deploy destroy dev-alice          # Clean up dev environment"
+	echo
+	echo "  # Generate operator keys manually (if needed)"
+	echo "  $0 keys generate                     # Generate key, output base64"
+	echo "  $0 keys generate operator.key        # Generate key, save to file"
+	echo
+	echo "  # Using custom GCS bucket"
+	echo "  $0 --bucket=my-company-terraform-state deploy create staging"
+	echo "  GCS_STATE_BUCKET=my-bucket $0 deploy create staging  # Via environment variable"
 }
 
 ################################################################################
@@ -102,11 +128,35 @@ usage() {
 ################################################################################
 main() {
 	local auto_yes=false
+	local bucket_override=""
 
-	# Parse -y flag
-	if [[ "$1" == "-y" ]]; then
-		auto_yes=true
-		shift
+	# Parse flags
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		-y)
+			auto_yes=true
+			shift
+			;;
+		--bucket)
+			if [[ -z "$2" ]]; then
+				error "--bucket requires a value"
+			fi
+			bucket_override="$2"
+			shift 2
+			;;
+		--bucket=*)
+			bucket_override="${1#--bucket=}"
+			shift
+			;;
+		*)
+			break
+			;;
+		esac
+	done
+	
+	# Export bucket override for use by common.sh functions
+	if [[ -n "$bucket_override" ]]; then
+		export OVERRIDE_GCS_BUCKET="$bucket_override"
 	fi
 
 	local command="${1-}"
@@ -193,6 +243,34 @@ main() {
 		esac
 		;;
 
+	deploy)
+		check_deps tofu
+		resolve_gcp_identity
+		case "$subcommand" in
+		create)
+			if [[ -z "$env" ]]; then error "Missing environment name for 'deploy create'. Provide an environment (staging, production, dev-username)."; fi
+			deploy_create "$env"
+			;;
+		destroy)
+			if [[ -z "$env" ]]; then error "Missing environment name for 'deploy destroy'. Provide an environment."; fi
+			if [[ "$auto_yes" == true ]]; then
+				deploy_destroy "$env" --auto-approve
+			else
+				deploy_destroy "$env"
+			fi
+			;;
+		status)
+			if [[ -z "$env" ]]; then error "Missing environment name for 'deploy status'. Provide an environment."; fi
+			deploy_status "$env"
+			;;
+		plan)
+			if [[ -z "$env" ]]; then error "Missing environment name for 'deploy plan'. Provide an environment."; fi
+			deploy_plan "$env"
+			;;
+		*) error "Invalid subcommand for 'deploy'. Use 'create', 'destroy', 'status', or 'plan'." ;;
+		esac
+		;;
+
 	dev)
 		case "$subcommand" in
 		--help | help | -h)
@@ -243,37 +321,42 @@ confidential computing and automatically sets up the NXCC development container.
 EOF
 			;;
 		create)
-			check_deps docker gcloud ssh
+			check_deps tofu yq gcloud ssh
+			resolve_gcp_identity
 			shift 2
 			dev_create_vm "$@"
 			;;
 		ssh)
-			check_deps docker gcloud ssh
+			check_deps tofu yq gcloud ssh
+			resolve_gcp_identity
 			shift 2
-			dev_connect_vm "$@"
+			dev_ssh "$@"
 			;;
 		push)
-			check_deps docker gcloud ssh
+			check_deps tofu yq gcloud ssh
+			resolve_gcp_identity
 			shift 2
-			dev_push_code "$@"
+			dev_sync "$@"
 			;;
 		destroy)
-			check_deps docker gcloud ssh
+			check_deps tofu yq gcloud
+			resolve_gcp_identity
 			if [[ "$auto_yes" == true ]]; then
 				dev_destroy_vm
 			else
-				read -p "Are you sure you want to delete the TDX development VM? [y/N] " -n 1 -r
-				echo
-				if [[ $REPLY =~ ^[Yy]$ ]]; then dev_destroy_vm; else info "VM deletion cancelled."; fi
+				dev_destroy_vm  # topology_destroy has its own confirmation
 			fi
 			;;
 		cleanup)
-			check_deps docker gcloud ssh
-			dev_cleanup_managed_vm
+			# Alias for destroy (backwards compatibility)
+			check_deps tofu yq gcloud
+			resolve_gcp_identity
+			dev_destroy_vm
 			;;
 		status)
-			check_deps docker gcloud ssh
-			dev_status_vm
+			check_deps tofu yq gcloud
+			resolve_gcp_identity
+			dev_status
 			;;
 		container)
 			check_deps docker gcloud ssh

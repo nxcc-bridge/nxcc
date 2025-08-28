@@ -1,0 +1,2 @@
+# Allow worker instances to have public IP addresses (required for HTTP API access)
+AVD-GCP-0031
