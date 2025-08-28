@@ -6,11 +6,16 @@ set -euo pipefail
 exec > >(tee /var/log/nxcc-startup.log) 2>&1
 echo "Starting NXCC worker node startup at $(date)"
 
-# Template variables
+# Template variables (substituted by Terraform)
+# shellcheck disable=SC2154
 DOCKER_IMAGE="${docker_image}"
+# shellcheck disable=SC2034,SC2154
 NODE_TYPE="${node_type}"
+# shellcheck disable=SC2154
 ENVIRONMENT="${environment}"
+# shellcheck disable=SC2154
 NAMESPACE="${namespace}"
+# shellcheck disable=SC2154
 OPERATOR_KEY="${operator_key}"
 
 # Update system and install required packages
@@ -18,20 +23,20 @@ apt-get update
 apt-get install -y curl wget gnupg lsb-release jq
 
 # Install Google Cloud SDK if not present (needed for Secret Manager access)
-if ! command -v gcloud &> /dev/null; then
-    echo "Installing Google Cloud SDK..."
-    echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
-    curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key --keyring /usr/share/keyrings/cloud.google.gpg add -
-    apt-get update && apt-get install -y google-cloud-sdk
+if ! command -v gcloud &>/dev/null; then
+	echo "Installing Google Cloud SDK..."
+	echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
+	curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key --keyring /usr/share/keyrings/cloud.google.gpg add -
+	apt-get update && apt-get install -y google-cloud-sdk
 fi
 
 # Install Docker
-if ! command -v docker &> /dev/null; then
-    echo "Installing Docker..."
-    curl -fsSL https://get.docker.com | sh
-    usermod -aG docker ubuntu
-    systemctl enable docker
-    systemctl start docker
+if ! command -v docker &>/dev/null; then
+	echo "Installing Docker..."
+	curl -fsSL https://get.docker.com | sh
+	usermod -aG docker ubuntu
+	systemctl enable docker
+	systemctl start docker
 fi
 
 # Pull NXCC Docker image
@@ -44,29 +49,29 @@ chown -R ubuntu:ubuntu /opt/nxcc
 
 # Retrieve and setup operator key from GCP Secret Manager
 if [[ -n "$OPERATOR_KEY" ]]; then
-    echo "Setting up operator key..."
-    if [[ "$OPERATOR_KEY" == "projects/"* ]]; then
-        # OPERATOR_KEY is a secret name, fetch from Secret Manager
-        echo "Fetching operator key from Secret Manager: $OPERATOR_KEY"
-        if command -v gcloud &> /dev/null; then
-            gcloud secrets versions access latest --secret="$OPERATOR_KEY" | base64 -d > /opt/nxcc/config/operator.key
-        else
-            echo "ERROR: gcloud CLI not available for secret access"
-            exit 1
-        fi
-    else
-        # OPERATOR_KEY is the key data itself (base64 encoded)
-        echo "$OPERATOR_KEY" | base64 -d > /opt/nxcc/config/operator.key
-    fi
-    chown ubuntu:ubuntu /opt/nxcc/config/operator.key
-    chmod 600 /opt/nxcc/config/operator.key
-    echo "Operator key configured successfully"
+	echo "Setting up operator key..."
+	if [[ "$OPERATOR_KEY" == "projects/"* ]]; then
+		# OPERATOR_KEY is a secret name, fetch from Secret Manager
+		echo "Fetching operator key from Secret Manager: $OPERATOR_KEY"
+		if command -v gcloud &>/dev/null; then
+			gcloud secrets versions access latest --secret="$OPERATOR_KEY" | base64 -d >/opt/nxcc/config/operator.key
+		else
+			echo "ERROR: gcloud CLI not available for secret access"
+			exit 1
+		fi
+	else
+		# OPERATOR_KEY is the key data itself (base64 encoded)
+		echo "$OPERATOR_KEY" | base64 -d >/opt/nxcc/config/operator.key
+	fi
+	chown ubuntu:ubuntu /opt/nxcc/config/operator.key
+	chmod 600 /opt/nxcc/config/operator.key
+	echo "Operator key configured successfully"
 else
-    echo "No operator key provided - attestations will not include operator signatures"
+	echo "No operator key provided - attestations will not include operator signatures"
 fi
 
 # Create NXCC configuration
-cat > /opt/nxcc/config/nxcc.toml <<EOF
+cat >/opt/nxcc/config/nxcc.toml <<EOF
 # NXCC Worker Node Configuration
 # Environment: $ENVIRONMENT
 # Namespace: $NAMESPACE
@@ -104,7 +109,7 @@ EOF
 chown ubuntu:ubuntu /opt/nxcc/config/nxcc.toml
 
 # Create systemd service
-cat > /etc/systemd/system/nxcc.service <<EOF
+cat >/etc/systemd/system/nxcc.service <<EOF
 [Unit]
 Description=NXCC Worker Node
 Documentation=https://docs.nxcc.dev
@@ -155,7 +160,7 @@ systemctl enable nxcc
 systemctl start nxcc
 
 # Setup log rotation
-cat > /etc/logrotate.d/nxcc <<EOF
+cat >/etc/logrotate.d/nxcc <<EOF
 /var/log/nxcc-startup.log {
     weekly
     missingok
@@ -176,7 +181,7 @@ cat > /etc/logrotate.d/nxcc <<EOF
 EOF
 
 # Create monitoring script
-cat > /opt/nxcc/health-check.sh <<EOF
+cat >/opt/nxcc/health-check.sh <<EOF
 #!/bin/bash
 # NXCC Health Check Script
 
@@ -207,7 +212,7 @@ chmod +x /opt/nxcc/health-check.sh
 chown ubuntu:ubuntu /opt/nxcc/health-check.sh
 
 # Setup cron for health monitoring
-echo "*/5 * * * * ubuntu /opt/nxcc/health-check.sh >> /opt/nxcc/logs/health.log 2>&1" >> /etc/crontab
+echo "*/5 * * * * ubuntu /opt/nxcc/health-check.sh >> /opt/nxcc/logs/health.log 2>&1" >>/etc/crontab
 
 echo "NXCC worker node startup completed successfully at $(date)"
 echo "Service status:"

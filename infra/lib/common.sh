@@ -16,8 +16,6 @@ export AR_REPO_NAME
 readonly GKE_CLUSTER_NAME="nxcc"
 export GKE_CLUSTER_NAME
 
-
-
 # TDX Development VM Config
 readonly TDX_VM_NAME="${TDX_VM_NAME:-nxcc-tdx-dev}"
 export TDX_VM_NAME
@@ -291,16 +289,16 @@ ensure_adc_credentials() {
 	if gcloud auth application-default print-access-token >/dev/null 2>&1; then
 		return 0
 	fi
-	
+
 	info "Terraform requires Application Default Credentials (ADC)"
 	info "Opening browser for authentication..."
 	echo
-	
+
 	# Run gcloud auth with proper handling
 	if ! gcloud auth application-default login; then
 		error "Failed to set up Application Default Credentials. Please run: gcloud auth application-default login"
 	fi
-	
+
 	success "Application Default Credentials configured"
 }
 
@@ -314,18 +312,18 @@ get_gcs_state_bucket() {
 		echo "$GCS_STATE_BUCKET"
 		return 0
 	fi
-	
+
 	# Allow override via command line option (set by caller)
 	if [[ -n "${OVERRIDE_GCS_BUCKET:-}" ]]; then
 		echo "$OVERRIDE_GCS_BUCKET"
 		return 0
 	fi
-	
+
 	# Auto-generate based on project ID
 	if [[ -z "$RESOLVED_PROJECT_ID" ]]; then
 		error "Cannot determine GCS bucket: no project ID available. Set GCS_STATE_BUCKET environment variable or provide --bucket option"
 	fi
-	
+
 	echo "${RESOLVED_PROJECT_ID}-terraform-state"
 }
 
@@ -339,9 +337,9 @@ get_backend_configs() {
 	local env="$1"
 	local bucket_name
 	bucket_name=$(get_gcs_state_bucket)
-	
+
 	local configs=("-backend-config=bucket=$bucket_name")
-	
+
 	# Add dynamic prefix based on environment type
 	if [[ "$env" =~ ^dev-.+ ]]; then
 		local developer_name="${env#dev-}"
@@ -354,10 +352,9 @@ get_backend_configs() {
 	elif [[ "$env" == "production" ]]; then
 		configs+=("-backend-config=prefix=environments/production")
 	fi
-	
+
 	printf '%s\n' "${configs[@]}"
 }
-
 
 ################################################################################
 # Deploy NXCC infrastructure using Terraform modules
@@ -368,9 +365,9 @@ deploy_create() {
 	local env="$1"
 	local env_dir="infra/environments"
 	local target_dir=""
-	
+
 	info "Deploying NXCC infrastructure for environment: $env"
-	
+
 	# Determine environment directory based on name pattern
 	if [[ "$env" == "staging" ]]; then
 		target_dir="$env_dir/staging"
@@ -385,31 +382,31 @@ deploy_create() {
 	else
 		error "Unknown environment type: $env. Use staging, production, dev-username, or e2e-testid"
 	fi
-	
+
 	if [[ ! -d "$target_dir" ]]; then
 		error "Environment directory not found: $target_dir"
 	fi
-	
+
 	info "Using environment template: $target_dir"
-	
+
 	# Ensure ADC credentials are available for Terraform
 	ensure_adc_credentials
-	
+
 	cd "$target_dir" || error "Failed to change to directory: $target_dir"
-	
+
 	# Initialize Terraform with dynamic backend config
 	info "Initializing Terraform..."
 	local bucket_name
 	bucket_name=$(get_gcs_state_bucket)
 	info "Using GCS state bucket: $bucket_name"
-	
+
 	# Get backend configs and build array manually for POSIX compatibility
 	local backend_configs=()
 	while IFS= read -r config; do
 		backend_configs+=("$config")
 	done < <(get_backend_configs "$env")
 	tofu init "${backend_configs[@]}"
-	
+
 	# Prepare variables based on environment type
 	local tf_vars=()
 	if [[ "$env" =~ ^dev-.+ ]]; then
@@ -417,21 +414,21 @@ deploy_create() {
 	elif [[ "$env" =~ ^e2e-.+ ]]; then
 		tf_vars+=("-var=test_id=$test_id")
 	fi
-	
+
 	# Add project ID if available
 	if [[ -n "$RESOLVED_PROJECT_ID" ]]; then
 		tf_vars+=("-var=project_id=$RESOLVED_PROJECT_ID")
 	fi
-	
+
 	# Plan and apply
 	info "Planning deployment..."
 	tofu plan "${tf_vars[@]}"
-	
+
 	info "Applying deployment..."
 	tofu apply "${tf_vars[@]}" -auto-approve
-	
+
 	success "Environment $env deployed successfully!"
-	
+
 	# Show helpful outputs
 	info "Getting deployment information..."
 	deploy_status "$env"
@@ -448,7 +445,7 @@ deploy_destroy() {
 	local auto_approve="${2:-}"
 	local env_dir="infra/environments"
 	local target_dir=""
-	
+
 	# Determine environment directory (same logic as deploy_create)
 	if [[ "$env" == "staging" ]]; then
 		target_dir="$env_dir/staging"
@@ -463,16 +460,16 @@ deploy_destroy() {
 	else
 		error "Unknown environment type: $env"
 	fi
-	
+
 	if [[ ! -d "$target_dir" ]]; then
 		error "Environment directory not found: $target_dir"
 	fi
-	
+
 	# Ensure ADC credentials are available for Terraform
 	ensure_adc_credentials
-	
+
 	cd "$target_dir" || error "Failed to change to directory: $target_dir"
-	
+
 	# Prepare variables
 	local tf_vars=()
 	if [[ "$env" =~ ^dev-.+ ]]; then
@@ -480,19 +477,19 @@ deploy_destroy() {
 	elif [[ "$env" =~ ^e2e-.+ ]]; then
 		tf_vars+=("-var=test_id=$test_id")
 	fi
-	
+
 	if [[ -n "$RESOLVED_PROJECT_ID" ]]; then
 		tf_vars+=("-var=project_id=$RESOLVED_PROJECT_ID")
 	fi
-	
+
 	info "Destroying environment: $env"
-	
+
 	if [[ "$auto_approve" == "--auto-approve" ]]; then
 		tofu destroy "${tf_vars[@]}" -auto-approve
 	else
 		tofu destroy "${tf_vars[@]}"
 	fi
-	
+
 	success "Environment $env destroyed successfully!"
 }
 
@@ -505,7 +502,7 @@ deploy_status() {
 	local env="$1"
 	local env_dir="infra/environments"
 	local target_dir=""
-	
+
 	# Determine environment directory (same logic as deploy_create)
 	if [[ "$env" == "staging" ]]; then
 		target_dir="$env_dir/staging"
@@ -520,16 +517,16 @@ deploy_status() {
 	else
 		error "Unknown environment type: $env"
 	fi
-	
+
 	if [[ ! -d "$target_dir" ]]; then
 		error "Environment directory not found: $target_dir"
 	fi
-	
+
 	# Ensure ADC credentials are available for Terraform
 	ensure_adc_credentials
-	
+
 	cd "$target_dir" || error "Failed to change to directory: $target_dir"
-	
+
 	# Prepare variables
 	local tf_vars=()
 	if [[ "$env" =~ ^dev-.+ ]]; then
@@ -537,21 +534,21 @@ deploy_status() {
 	elif [[ "$env" =~ ^e2e-.+ ]]; then
 		tf_vars+=("-var=test_id=$test_id")
 	fi
-	
+
 	if [[ -n "$RESOLVED_PROJECT_ID" ]]; then
 		tf_vars+=("-var=project_id=$RESOLVED_PROJECT_ID")
 	fi
-	
+
 	info "Environment: $env"
 	info "Directory: $target_dir"
 	echo
-	
+
 	# Check if state exists
 	if ! tofu show -json >/dev/null 2>&1; then
 		info "No infrastructure deployed for environment: $env"
 		return 0
 	fi
-	
+
 	# Show key outputs
 	info "=== Deployment Summary ==="
 	tofu output -json deployment_summary 2>/dev/null | jq -r '
@@ -566,7 +563,7 @@ deploy_status() {
 			"No deployment summary available"
 		end
 	' 2>/dev/null || echo "Deployment summary not available"
-	
+
 	echo
 	info "=== Worker Endpoints ==="
 	tofu output -json worker_endpoints 2>/dev/null | jq -r '
@@ -576,7 +573,7 @@ deploy_status() {
 			"  No worker endpoints available"
 		end
 	' 2>/dev/null || echo "  Worker endpoints not available"
-	
+
 	echo
 	info "=== Operator Key Information ==="
 	tofu output -json operator_key_info 2>/dev/null | jq -r '
@@ -589,7 +586,7 @@ deploy_status() {
 			"  Operator key information not available"
 		end
 	' 2>/dev/null || echo "  Operator key information not available"
-	
+
 	echo
 	info "=== SSH Commands ==="
 	tofu output -json ssh_commands 2>/dev/null | jq -r '
@@ -610,7 +607,7 @@ deploy_plan() {
 	local env="$1"
 	local env_dir="infra/environments"
 	local target_dir=""
-	
+
 	# Determine environment directory (same logic as deploy_create)
 	if [[ "$env" == "staging" ]]; then
 		target_dir="$env_dir/staging"
@@ -625,23 +622,23 @@ deploy_plan() {
 	else
 		error "Unknown environment type: $env"
 	fi
-	
+
 	if [[ ! -d "$target_dir" ]]; then
 		error "Environment directory not found: $target_dir"
 	fi
-	
+
 	cd "$target_dir" || error "Failed to change to directory: $target_dir"
-	
+
 	# Ensure ADC credentials are available for Terraform
 	ensure_adc_credentials
-	
+
 	# Initialize Terraform if needed with dynamic backend config
 	if [[ ! -d ".terraform" ]]; then
 		info "Initializing Terraform..."
 		local bucket_name
 		bucket_name=$(get_gcs_state_bucket)
 		info "Using GCS state bucket: $bucket_name"
-		
+
 		# Get backend configs and build array manually for POSIX compatibility
 		local backend_configs=()
 		while IFS= read -r config; do
@@ -649,7 +646,7 @@ deploy_plan() {
 		done < <(get_backend_configs "$env")
 		tofu init "${backend_configs[@]}"
 	fi
-	
+
 	# Prepare variables
 	local tf_vars=()
 	if [[ "$env" =~ ^dev-.+ ]]; then
@@ -657,11 +654,11 @@ deploy_plan() {
 	elif [[ "$env" =~ ^e2e-.+ ]]; then
 		tf_vars+=("-var=test_id=$test_id")
 	fi
-	
+
 	if [[ -n "$RESOLVED_PROJECT_ID" ]]; then
 		tf_vars+=("-var=project_id=$RESOLVED_PROJECT_ID")
 	fi
-	
+
 	info "Planning deployment for environment: $env"
 	tofu plan "${tf_vars[@]}"
 }

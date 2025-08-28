@@ -65,7 +65,7 @@ usage() {
 	echo "  deploy <create|destroy|status|plan> <env>"
 	echo "    Manages NXCC infrastructure using Terraform modules (replaces topology)."
 	echo "      create:   Creates infrastructure, auto-generating operator keys"
-	echo "      destroy:  Destroys infrastructure and cleans up resources" 
+	echo "      destroy:  Destroys infrastructure and cleans up resources"
 	echo "      status:   Shows current deployment status and connection info"
 	echo "      plan:     Shows what changes would be made without applying"
 	echo "      <env>:    Environment name (staging, production, dev-username, e2e-testid)"
@@ -153,7 +153,7 @@ main() {
 			;;
 		esac
 	done
-	
+
 	# Export bucket override for use by common.sh functions
 	if [[ -n "$bucket_override" ]]; then
 		export OVERRIDE_GCS_BUCKET="$bucket_override"
@@ -344,7 +344,7 @@ EOF
 			if [[ "$auto_yes" == true ]]; then
 				dev_destroy_vm
 			else
-				dev_destroy_vm  # topology_destroy has its own confirmation
+				dev_destroy_vm # topology_destroy has its own confirmation
 			fi
 			;;
 		cleanup)

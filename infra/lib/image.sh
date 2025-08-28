@@ -250,7 +250,6 @@ image_list() {
 	esac
 }
 
-
 ################################################################################
 # Push image to GCP Artifact Registry.
 # Parameters:

@@ -72,4 +72,3 @@ cluster_destroy_gke() {
 		warn "GKE cluster ${GKE_CLUSTER_NAME} does not exist."
 	fi
 }
-
