@@ -173,7 +173,7 @@ impl From<&AttestationReport> for interface::AttestationReport {
 pub enum ChainIdentifier {
     /// Standard chain identified by its numeric chain ID
     ChainId(u64),
-    /// Custom chain identified by a gateway URL  
+    /// Custom chain identified by a gateway URL
     GatewayUrl(Url),
 }
 

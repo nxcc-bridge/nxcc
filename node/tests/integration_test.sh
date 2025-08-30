@@ -235,11 +235,11 @@ base64 <"$WORKER_BUNDLE_DSSE_FILE" | tr -d '\n' >"$WORKER_BUNDLE_DSSE_B64_FILE"
 WORKER_MANIFEST_FILE="$TEST_DIR/worker_manifest.json"
 jq -n \
 	--rawfile bundle_source_b64 "$WORKER_BUNDLE_DSSE_B64_FILE" \
-	--argjson chain_id "$SECRET_CHAIN_ID" \
+	--argjson chain "$SECRET_CHAIN_ID" \
 	--arg identity_address "$SECRET_IDENTITY_ADDR" \
 	--arg identity_id_str "$SECRET_IDENTITY_ID_NUM" \
 	--arg secret_name "$SECRET_NAME_IN_WORKER" \
-	'{bundle: {source: ("data:application/json;base64," + $bundle_source_b64), hash: null}, identities: [[{chain_id: $chain_id, identity_address: $identity_address, identity_id: $identity_id_str}, $secret_name]], userdata: {}}' >"$WORKER_MANIFEST_FILE"
+	'{bundle: {source: ("data:application/json;base64," + $bundle_source_b64), hash: null}, identities: [[{chain: $chain, identity_address: $identity_address, identity_id: $identity_id_str}, $secret_name]], userdata: {}}' >"$WORKER_MANIFEST_FILE"
 
 # 5. WorkOrderPayload (using files to avoid argument list too long)
 WORK_ORDER_PAYLOAD_FILE="$TEST_DIR/work_order_payload.json"
@@ -557,10 +557,10 @@ EVENT_WORK_ORDER_PAYLOAD_FILE="$TEST_DIR/event_work_order_payload.json"
 jq -n \
 	--arg id "cross-chain-work-order-$(date +%s%N)" \
 	--slurpfile worker_manifest "$EVENT_WORKER_MANIFEST_FILE" \
-	--argjson chain_id_1 "$ANVIL_CHAIN_ID_1" \
+	--argjson chain_1 "$ANVIL_CHAIN_ID_1" \
 	--arg contract_address_1 "$CONTRACT_ADDRESS_1" \
 	--arg value_changed_sig "$EVENT_VALUE_CHANGED_SIGNATURE" \
-	--argjson chain_id_2 "$ANVIL_CHAIN_ID_2" \
+	--argjson chain_2 "$ANVIL_CHAIN_ID_2" \
 	--arg contract_address_2 "$CONTRACT_ADDRESS_2" \
 	--arg other_event_sig "$OTHER_EVENT_SIGNATURE" \
 	--arg anvil_ws_url_1 "$ANVIL_WS_URL_1" \
@@ -573,7 +573,7 @@ jq -n \
             {
                 "handler": "valueChanged",
                 "kind": "web3_event",
-                "chain": $chain_id_1,
+                "chain": $chain_1,
                 "address": [$contract_address_1],
                 "topics": [[$value_changed_sig]],
                 "gateways": [$anvil_ws_url_1]
@@ -581,7 +581,7 @@ jq -n \
             {
                 "handler": "otherEvent",
                 "kind": "web3_event",
-                "chain": $chain_id_2,
+                "chain": $chain_2,
                 "address": [$contract_address_2],
                 "topics": [[$other_event_sig]],
                 "gateways": [$anvil_ws_url_2]

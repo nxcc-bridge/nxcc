@@ -1,9 +1,7 @@
 use std::{
-    collections::{HashMap, hash_map::DefaultHasher},
-    hash::{Hash, Hasher},
+    collections::HashMap,
     path::{Path, PathBuf},
     sync::Arc,
-    time::SystemTime,
 };
 
 use alloy_primitives::hex;
@@ -12,7 +10,6 @@ use nxcc_interface::types::{
     WorkerBundle, WorkerBundlePayload, WorkerBundlePointer, WorkerManifest,
 };
 use percent_encoding::percent_decode_str;
-use tokio::sync::RwLock;
 use tracing::{debug, error, info, trace, warn};
 
 use crate::{config::Config, error::AppError, web3::gateways::GatewayManager};
@@ -20,61 +17,22 @@ use crate::{config::Config, error::AppError, web3::gateways::GatewayManager};
 #[derive(Clone)]
 pub struct PolicyManager {
     gateway_manager: Arc<GatewayManager>,
-    memory_cache: Arc<RwLock<HashMap<SecretId, FullPolicyPackage>>>,
-    disk_cache_path: Option<PathBuf>,
 }
 
 impl PolicyManager {
     pub async fn new(
         gateway_manager: Arc<GatewayManager>,
-        config: &Config,
+        _config: &Config,
     ) -> Result<Self, AppError> {
-        let disk_cache_path = match &config.policy_cache_dir {
-            Some(path) => Some(path.clone()),
-            None => {
-                let sys_temp = std::env::temp_dir();
-                let path = sys_temp.join("nxcc_policy_cache");
-                Some(path)
-            }
-        };
+        info!("Policy caching disabled for development");
 
-        if let Some(path) = &disk_cache_path {
-            tokio::fs::create_dir_all(path)
-                .await
-                .map_err(AppError::Io)?;
-            info!("Using policy disk cache at: {}", path.display());
-        } else {
-            info!("Policy disk cache disabled.");
-        }
-
-        Ok(Self {
-            gateway_manager,
-            memory_cache: Arc::new(RwLock::new(HashMap::new())),
-            disk_cache_path,
-        })
+        Ok(Self { gateway_manager })
     }
 
     /// Fetches a policy, which consists of a `WorkerManifest` and its corresponding `WorkerBundle`.
     /// The `WorkerManifest` (the policy itself) is validated to ensure it requests no identities.
     pub async fn get_policy(&self, secret_id: &SecretId) -> Result<FullPolicyPackage, AppError> {
-        // 1. Check memory cache
-        if let Some(policy) = self.memory_cache.read().await.get(secret_id) {
-            debug!("Policy memory cache hit for secret {:?}", secret_id);
-            return Ok(policy.clone());
-        }
-        debug!("Policy memory cache miss for secret {:?}", secret_id);
-
-        // 2. Check disk cache
-        if let Some(package) = self.load_from_disk(secret_id).await? {
-            debug!("Policy disk cache hit for secret {:?}", secret_id);
-            // Add to memory cache
-            self.memory_cache
-                .write()
-                .await
-                .insert(secret_id.clone(), package.clone());
-            return Ok(package);
-        }
-        debug!("Policy disk cache miss for secret {:?}", secret_id);
+        // Policy caching disabled - always fetch fresh policy
 
         // 3. Fetch manifest from network (this is the "policy")
         let manifest_url = self
@@ -107,14 +65,8 @@ impl PolicyManager {
 
         let package = FullPolicyPackage { manifest, bundle };
 
-        // 6. Store in caches
-        self.store_to_disk(secret_id, &package).await?;
-        self.memory_cache
-            .write()
-            .await
-            .insert(secret_id.clone(), package.clone());
         info!(
-            "Successfully fetched, validated, and cached policy for {:?}",
+            "Successfully fetched and validated policy for {:?}",
             secret_id
         );
 
@@ -420,87 +372,6 @@ impl PolicyManager {
             .map_err(|e| AppError::Validation(format!("WorkerBundle payload is invalid: {}", e)))?;
 
         Ok(bundle)
-    }
-
-    fn get_cache_filepath(&self, secret_id: &SecretId) -> Option<PathBuf> {
-        self.disk_cache_path.as_ref().map(|base_path| {
-            let mut hasher = DefaultHasher::new();
-            secret_id.hash(&mut hasher);
-            let filename = format!("{:x}.policy", hasher.finish());
-            base_path.join(filename)
-        })
-    }
-
-    async fn load_from_disk(
-        &self,
-        secret_id: &SecretId,
-    ) -> Result<Option<FullPolicyPackage>, AppError> {
-        if let Some(filepath) = self.get_cache_filepath(secret_id) {
-            if !filepath.exists() {
-                return Ok(None);
-            }
-
-            match tokio::fs::read(&filepath).await {
-                Ok(data) => {
-                    match ciborium::from_reader::<FullPolicyPackage, _>(&data[..]) {
-                        Ok(package) => {
-                            // TODO: Add cache expiry check?
-                            Ok(Some(package))
-                        }
-                        Err(e) => {
-                            error!(
-                                "Failed to deserialize policy from disk cache {}: {:?}. Removing \
-                                 file.",
-                                filepath.display(),
-                                e
-                            );
-                            // Remove corrupted file
-                            let _ = tokio::fs::remove_file(&filepath).await;
-                            Ok(None)
-                        }
-                    }
-                }
-                Err(e) => {
-                    error!(
-                        "Failed to read policy from disk cache {}: {}",
-                        filepath.display(),
-                        e
-                    );
-                    Ok(None) // Treat read error as cache miss
-                }
-            }
-        } else {
-            Ok(None) // Disk cache disabled
-        }
-    }
-
-    async fn store_to_disk(
-        &self,
-        secret_id: &SecretId,
-        package: &FullPolicyPackage,
-    ) -> Result<(), AppError> {
-        if let Some(filepath) = self.get_cache_filepath(secret_id) {
-            // Using Vec as a temporary buffer for serialization
-            let mut data = Vec::new();
-            match ciborium::into_writer(package, &mut data) {
-                Ok(()) => {
-                    if let Err(e) = tokio::fs::write(&filepath, data).await {
-                        error!(
-                            "Failed to write policy to disk cache {}: {}",
-                            filepath.display(),
-                            e
-                        );
-                        // Don't treat write failure as fatal, just log it
-                    } else {
-                        debug!("Stored policy for {:?} to disk cache.", secret_id);
-                    }
-                }
-                Err(e) => {
-                    error!("Failed to serialize policy for disk cache: {:?}", e);
-                }
-            }
-        }
-        Ok(())
     }
 }
 
