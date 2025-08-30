@@ -13,7 +13,7 @@ tonic = { version = "0.14.1", features = ["transport", "tls-aws-lc"] }
 tracing = "0.1.41"
 tokio-stream = { version = "0.1.17", optional = true }
 serde = { version = "1.0", features = ["derive"] }
-tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 x25519-dalek = { version = "2.0.1", features = ["getrandom", "static_secrets"] }
 aes-gcm-siv = { version = "0.11.1", features = ["std"] }
 sha2 = "0.10.8"
