@@ -16,8 +16,10 @@ export interface WorkerBundlePointer {
   hash?: number[];
 }
 
+export type ChainIdentifier = number | string;
+
 export interface SecretId {
-  chain_id: number;
+  chain: ChainIdentifier;
   identity_address: Address;
   identity_id: string; // U256 as string
 }
@@ -48,7 +50,7 @@ export interface HttpRequestWorkerEvent extends BaseWorkerEvent {
 
 export interface Web3WorkerEvent extends BaseWorkerEvent {
   kind: "web3_event";
-  chain: number;
+  chain: ChainIdentifier;
   address: Address[];
   topics: Hex[][];
 }

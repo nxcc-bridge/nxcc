@@ -28,7 +28,8 @@ async function deploy(
     const manifestDir = path.dirname(manifestAbsPath);
 
     const manifestContent = await fs.readFile(manifestAbsPath, "utf-8");
-    const workerManifest: WorkerManifest = JSON.parse(manifestContent);
+    const manifestJson = JSON.parse(manifestContent);
+    const workerManifest: WorkerManifest = manifestJson;
 
     if (options.bundle) {
       const bundlePath = workerManifest.bundle.source;
@@ -54,15 +55,10 @@ async function deploy(
       workerManifest.bundle.source = `data:application/json;base64,${bundleB64}`;
     }
 
-    const launchEvent: LaunchWorkerEvent = {
-      handler: "launch",
-      kind: "launch",
-    };
-
     const workOrderPayload: WorkOrderPayload = {
       id: `cli-wo-${randomBytes(8).toString("hex")}`,
       worker: workerManifest,
-      events: [launchEvent],
+      events: manifestJson?.events ?? [],
     };
 
     const payloadJson = JSON.stringify(workOrderPayload);
