@@ -7,9 +7,10 @@ use alloy_primitives::{Address, U256};
 use nxcc_interface::{
     proto::enclave::{runner_server::Runner as _, secrets_server::Secrets as _},
     types::{
-        AttestationReport, ConsumerInfo, DSSE_WORKER_BUNDLE_PAYLOAD_TYPE, DsseEnvelope,
-        DsseSignatureEntry, EnvReport, PolicyExecutionReport, PolicyExecutionRequest, SecretId,
-        SecretsBox, WorkerBundle, WorkerBundlePayload, WorkerBundlePointer, WorkerManifest,
+        AttestationReport, ChainIdentifier, ConsumerInfo, DSSE_WORKER_BUNDLE_PAYLOAD_TYPE,
+        DsseEnvelope, DsseSignatureEntry, EnvReport, PolicyExecutionReport, PolicyExecutionRequest,
+        SecretId, SecretsBox, WorkerBundle, WorkerBundlePayload, WorkerBundlePointer,
+        WorkerManifest,
     },
 };
 use nxcc_vm_base::client::mock::{MockExecutionBehavior, MockVmServiceClient};
@@ -25,7 +26,7 @@ use crate::{
 
 pub fn test_secret_id(id_num: u64) -> SecretId {
     SecretId {
-        chain_id: 1,
+        chain: ChainIdentifier::ChainId(1),
         identity_address: Address::from_slice(&[id_num as u8; 20]),
         identity_id: U256::from(id_num),
     }

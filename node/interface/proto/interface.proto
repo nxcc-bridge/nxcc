@@ -24,8 +24,15 @@ message SecretsBox {
   repeated SecretIdentifier contained_secret_ids = 4;
 }
 
+message ChainIdentifier {
+  oneof identifier {
+    uint64 chain_id = 1;
+    string gateway_url = 2;
+  }
+}
+
 message SecretIdentifier {
-  uint64 chain_id = 1;
+  ChainIdentifier chain = 1;
   string identity_address = 2;
   string identity_id = 3;
 }
@@ -61,7 +68,7 @@ message PolicyExecutionReport {
 
 // Configuration for a Web3 event trigger.
 message Web3EventConfig {
-  uint64 chain_id = 1;
+  ChainIdentifier chain = 1;
   // List of contract addresses to filter for.
   // An empty list implies a wildcard (any address).
   repeated string address = 2;
@@ -69,7 +76,7 @@ message Web3EventConfig {
   // If fewer than 4 are provided, subsequent topic positions are wildcards.
   repeated ProtoTopicFilter topics = 3;
   // Explicit gateways (WebSocket RPC URLs) to connect to for this event.
-  // If empty, the daemon will use a default gateway based on chain_id.
+  // If empty, the daemon will use a default gateway based on chain.
   repeated string gateways = 4;
 }
 

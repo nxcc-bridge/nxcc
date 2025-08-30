@@ -3,9 +3,9 @@ use std::sync::Arc;
 use nxcc_interface::{
     proto::vm::WorkerStatus,
     types::{
-        AttestationReport, ConsumerInfo, DSSE_WORKER_BUNDLE_PAYLOAD_TYPE, DsseEnvelope,
-        DsseSignatureEntry, EnvReport, PolicyExecutionRequest, SecretId, WorkerBundle,
-        WorkerBundlePayload, WorkerBundlePointer, WorkerManifest,
+        AttestationReport, ChainIdentifier, ConsumerInfo, DSSE_WORKER_BUNDLE_PAYLOAD_TYPE,
+        DsseEnvelope, DsseSignatureEntry, EnvReport, PolicyExecutionRequest, SecretId,
+        WorkerBundle, WorkerBundlePayload, WorkerBundlePointer, WorkerManifest,
     },
 };
 use nxcc_vm_base::client::{
@@ -19,7 +19,7 @@ use crate::{runner::RunnerService, secrets::Secrets};
 // Helper function to create a default SecretId for tests
 pub fn test_secret_id(id: u64) -> SecretId {
     SecretId {
-        chain_id: 1,
+        chain: ChainIdentifier::ChainId(1),
         identity_address: format!("0x{:040x}", id).parse().unwrap(),
         identity_id: alloy_primitives::Uint::from_limbs_slice(&[id]),
     }

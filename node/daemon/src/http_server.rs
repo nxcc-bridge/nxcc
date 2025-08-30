@@ -20,8 +20,10 @@ use tower_http::cors::{Any, CorsLayer};
 use tracing::{debug, error, info, instrument, warn};
 
 use crate::{
-    config::HttpConfig, error::AppError, grpc::enclave_client::EnclaveClient,
-    services::{work_order_orchestrator::WorkOrderOrchestrator, secrets::SecretsService},
+    config::HttpConfig,
+    error::AppError,
+    grpc::enclave_client::EnclaveClient,
+    services::{secrets::SecretsService, work_order_orchestrator::WorkOrderOrchestrator},
 };
 
 /// Registry for tracking attached VMs
@@ -311,7 +313,9 @@ struct EnvReportResponse {
 }
 
 /// Handles env report requests, returning the node's environment report including attestation and operator signature.
-async fn env_report_handler(State(state): State<Arc<AppState>>) -> Result<impl IntoResponse, ApiError> {
+async fn env_report_handler(
+    State(state): State<Arc<AppState>>,
+) -> Result<impl IntoResponse, ApiError> {
     info!("Received env report request");
 
     // Get the env report from the secrets service
@@ -324,8 +328,9 @@ async fn env_report_handler(State(state): State<Arc<AppState>>) -> Result<impl I
     // Convert to JSON for response
     let attestation_json = serde_json::to_value(&env_report.attestation)
         .map_err(|e| ApiError::from(format!("Failed to serialize attestation: {}", e)))?;
-    
-    let operator_signature_json = env_report.operator_signature
+
+    let operator_signature_json = env_report
+        .operator_signature
         .map(|sig| serde_json::to_value(&sig))
         .transpose()
         .map_err(|e| ApiError::from(format!("Failed to serialize operator signature: {}", e)))?;

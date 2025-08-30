@@ -2,14 +2,16 @@ use std::thread::sleep;
 
 use alloy_primitives::U256;
 use chrono::Utc;
-use nxcc_interface::types::{ConsumerInfo, PolicyExecutionReport, PolicyExecutionRequest};
+use nxcc_interface::types::{
+    ChainIdentifier, ConsumerInfo, PolicyExecutionReport, PolicyExecutionRequest,
+};
 
 use super::*;
 
 // Helper function to create a test SecretId
 fn test_secret_id(id: u64) -> SecretId {
     SecretId {
-        chain_id: 1,
+        chain: ChainIdentifier::ChainId(1),
         identity_address: format!("0x{:040x}", id).parse().unwrap(),
         identity_id: U256::from(id),
     }

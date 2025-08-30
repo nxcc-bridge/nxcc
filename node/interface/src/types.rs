@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt};
 
 use alloy_primitives::{Address, B256, U256};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
@@ -6,6 +6,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
+use url::Url;
 
 use crate::proto::{enclave, interface};
 
@@ -164,9 +165,101 @@ impl From<&AttestationReport> for interface::AttestationReport {
     }
 }
 
+/// Identifies a chain either by its numeric ID or by a custom gateway URL.
+/// Custom gateways are treated as separate chains even if they have the same chain_id,
+/// since we cannot verify that a custom gateway actually represents the intended chain.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[serde(untagged)]
+pub enum ChainIdentifier {
+    /// Standard chain identified by its numeric chain ID
+    ChainId(u64),
+    /// Custom chain identified by a gateway URL  
+    GatewayUrl(Url),
+}
+
+impl ChainIdentifier {
+    /// Returns the chain ID if this is a ChainId variant, otherwise returns None
+    pub fn chain_id(&self) -> Option<u64> {
+        match self {
+            ChainIdentifier::ChainId(id) => Some(*id),
+            ChainIdentifier::GatewayUrl(_) => None,
+        }
+    }
+
+    /// Returns the gateway URL if this is a GatewayUrl variant, otherwise returns None
+    pub fn gateway_url(&self) -> Option<&Url> {
+        match self {
+            ChainIdentifier::ChainId(_) => None,
+            ChainIdentifier::GatewayUrl(url) => Some(url),
+        }
+    }
+}
+
+impl Default for ChainIdentifier {
+    fn default() -> Self {
+        ChainIdentifier::ChainId(0)
+    }
+}
+
+impl fmt::Display for ChainIdentifier {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ChainIdentifier::ChainId(id) => write!(f, "{}", id),
+            ChainIdentifier::GatewayUrl(url) => write!(f, "{}", url),
+        }
+    }
+}
+
+impl TryFrom<interface::ChainIdentifier> for ChainIdentifier {
+    type Error = ConversionError;
+    fn try_from(p: interface::ChainIdentifier) -> Result<Self, Self::Error> {
+        match p.identifier {
+            Some(interface::chain_identifier::Identifier::ChainId(id)) => {
+                Ok(ChainIdentifier::ChainId(id))
+            }
+            Some(interface::chain_identifier::Identifier::GatewayUrl(url)) => {
+                let parsed_url = Url::parse(&url).map_err(|e| ConversionError::InvalidValue {
+                    field: "gateway_url".to_string(),
+                    message: e.to_string(),
+                })?;
+                Ok(ChainIdentifier::GatewayUrl(parsed_url))
+            }
+            None => Err(ConversionError::MissingField("identifier".to_string())),
+        }
+    }
+}
+
+impl From<ChainIdentifier> for interface::ChainIdentifier {
+    fn from(value: ChainIdentifier) -> Self {
+        let identifier = match value {
+            ChainIdentifier::ChainId(id) => interface::chain_identifier::Identifier::ChainId(id),
+            ChainIdentifier::GatewayUrl(url) => {
+                interface::chain_identifier::Identifier::GatewayUrl(url.to_string())
+            }
+        };
+        interface::ChainIdentifier {
+            identifier: Some(identifier),
+        }
+    }
+}
+
+impl From<&ChainIdentifier> for interface::ChainIdentifier {
+    fn from(value: &ChainIdentifier) -> Self {
+        let identifier = match value {
+            ChainIdentifier::ChainId(id) => interface::chain_identifier::Identifier::ChainId(*id),
+            ChainIdentifier::GatewayUrl(url) => {
+                interface::chain_identifier::Identifier::GatewayUrl(url.to_string())
+            }
+        };
+        interface::ChainIdentifier {
+            identifier: Some(identifier),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SecretId {
-    pub chain_id: u64,
+    pub chain: ChainIdentifier,
     pub identity_address: Address,
     pub identity_id: U256,
 }
@@ -175,7 +268,10 @@ impl TryFrom<interface::SecretIdentifier> for SecretId {
     type Error = ConversionError;
     fn try_from(p: interface::SecretIdentifier) -> Result<Self, Self::Error> {
         Ok(Self {
-            chain_id: p.chain_id,
+            chain: p
+                .chain
+                .ok_or(ConversionError::MissingField("chain".to_string()))?
+                .try_into()?,
             identity_address: p.identity_address.parse().map_err(
                 |e: alloy_primitives::hex::FromHexError| ConversionError::InvalidValue {
                     field: "identity_address".to_string(),
@@ -195,7 +291,7 @@ impl TryFrom<interface::SecretIdentifier> for SecretId {
 impl From<SecretId> for interface::SecretIdentifier {
     fn from(value: SecretId) -> Self {
         interface::SecretIdentifier {
-            chain_id: value.chain_id,
+            chain: Some(value.chain.into()),
             identity_address: format!("{:#x}", value.identity_address),
             identity_id: value.identity_id.to_string(),
         }
@@ -205,7 +301,7 @@ impl From<SecretId> for interface::SecretIdentifier {
 impl From<&SecretId> for interface::SecretIdentifier {
     fn from(value: &SecretId) -> Self {
         interface::SecretIdentifier {
-            chain_id: value.chain_id,
+            chain: Some(value.chain.clone().into()),
             identity_address: format!("{:#x}", value.identity_address),
             identity_id: value.identity_id.to_string(),
         }
@@ -974,7 +1070,7 @@ impl RateMode {
 /// This is the Rust representation of the JSON `Web3Event` type in the work order.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Web3Event {
-    pub chain: u64,
+    pub chain: ChainIdentifier,
     /// Contract addresses to filter for.
     /// - `None` or empty `Vec` typically means wildcard (any address), depending on RPC interpretation.
     ///   Our interpretation: empty Vec means wildcard.
@@ -997,7 +1093,10 @@ impl TryFrom<interface::Web3EventConfig> for Web3Event {
     type Error = ConversionError;
     fn try_from(p: interface::Web3EventConfig) -> Result<Self, Self::Error> {
         Ok(Self {
-            chain: p.chain_id,
+            chain: p
+                .chain
+                .ok_or(ConversionError::MissingField("chain".to_string()))?
+                .try_into()?,
             address: p
                 .address
                 .into_iter()
@@ -1032,7 +1131,7 @@ impl TryFrom<interface::Web3EventConfig> for Web3Event {
 impl From<Web3Event> for interface::Web3EventConfig {
     fn from(value: Web3Event) -> Self {
         interface::Web3EventConfig {
-            chain_id: value.chain,
+            chain: Some(value.chain.into()),
             address: value.address.iter().map(|a| format!("{a:#x}")).collect(),
             topics: value
                 .topics
@@ -1361,5 +1460,116 @@ mod tests {
         assert!(rate_mode.end_at.is_none());
         assert!(rate_mode.max_occurrences.is_none());
         assert!(rate_mode.policy.is_none());
+    }
+
+    #[test]
+    fn test_chain_identifier_serialization() {
+        // Test JSON serialization backwards compatibility
+        let chain_id = ChainIdentifier::ChainId(1);
+        let json = serde_json::to_string(&chain_id).unwrap();
+        assert_eq!(json, "1");
+
+        let gateway = ChainIdentifier::GatewayUrl("wss://custom.com".parse().unwrap());
+        let json = serde_json::to_string(&gateway).unwrap();
+        assert_eq!(json, "\"wss://custom.com/\"");
+    }
+
+    #[test]
+    fn test_chain_identifier_deserialization_edge_cases() {
+        // Test invalid URLs
+        let result: Result<ChainIdentifier, _> = serde_json::from_str("\"not-a-url\"");
+        assert!(result.is_err());
+
+        // Test various URL schemes
+        let schemes = ["ws://", "wss://", "http://", "https://"];
+        for scheme in schemes {
+            let url = format!("\"{}example.com\"", scheme);
+            let result: Result<ChainIdentifier, _> = serde_json::from_str(&url);
+            assert!(result.is_ok());
+        }
+    }
+
+    #[test]
+    fn test_chain_identifier_display() {
+        let chain_id = ChainIdentifier::ChainId(42);
+        assert_eq!(chain_id.to_string(), "42");
+
+        let gateway = ChainIdentifier::GatewayUrl("wss://test.com".parse().unwrap());
+        assert_eq!(gateway.to_string(), "wss://test.com/");
+    }
+
+    #[test]
+    fn test_chain_identifier_helper_methods() {
+        let chain_id = ChainIdentifier::ChainId(123);
+        assert_eq!(chain_id.chain_id(), Some(123));
+        assert_eq!(chain_id.gateway_url(), None);
+
+        let url: Url = "wss://example.com".parse().unwrap();
+        let gateway = ChainIdentifier::GatewayUrl(url.clone());
+        assert_eq!(gateway.chain_id(), None);
+        assert_eq!(gateway.gateway_url(), Some(&url));
+    }
+
+    #[test]
+    fn test_chain_identifier_protobuf_conversion() {
+        // Test ChainId conversion
+        let chain_id = ChainIdentifier::ChainId(42);
+        let proto: interface::ChainIdentifier = chain_id.clone().into();
+        let back: ChainIdentifier = proto.try_into().unwrap();
+        assert_eq!(chain_id, back);
+
+        // Test GatewayUrl conversion
+        let gateway = ChainIdentifier::GatewayUrl("wss://test.com".parse().unwrap());
+        let proto: interface::ChainIdentifier = gateway.clone().into();
+        let back: ChainIdentifier = proto.try_into().unwrap();
+        assert_eq!(gateway, back);
+    }
+
+    #[test]
+    fn test_protobuf_conversion_errors() {
+        // Test missing identifier field
+        let proto = interface::ChainIdentifier { identifier: None };
+        let result: Result<ChainIdentifier, _> = proto.try_into();
+        assert!(result.is_err());
+
+        // Test invalid URL in protobuf
+        let proto = interface::ChainIdentifier {
+            identifier: Some(interface::chain_identifier::Identifier::GatewayUrl(
+                "not-a-valid-url".to_string(),
+            )),
+        };
+        let result: Result<ChainIdentifier, _> = proto.try_into();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_secret_id_with_custom_gateway() {
+        let gateway_url = "wss://custom.chain.com".parse().unwrap();
+        let secret_id = SecretId {
+            chain: ChainIdentifier::GatewayUrl(gateway_url),
+            identity_address: Address::from([1u8; 20]),
+            identity_id: U256::from(456),
+        };
+
+        // Test serialization roundtrip
+        let json = serde_json::to_string(&secret_id).unwrap();
+        let deserialized: SecretId = serde_json::from_str(&json).unwrap();
+        assert_eq!(secret_id, deserialized);
+    }
+
+    #[test]
+    fn test_web3_event_with_custom_gateway() {
+        let gateway_url = "wss://custom.chain.com".parse().unwrap();
+        let event = Web3Event {
+            chain: ChainIdentifier::GatewayUrl(gateway_url),
+            address: vec![],
+            topics: vec![],
+            gateways: vec![],
+        };
+
+        // Test that custom gateway works in event context
+        let json = serde_json::to_string(&event).unwrap();
+        let deserialized: Web3Event = serde_json::from_str(&json).unwrap();
+        assert_eq!(event, deserialized);
     }
 }

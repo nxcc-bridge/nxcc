@@ -312,6 +312,7 @@ impl FreshnessService {
         for block in blocks {
             // TODO: Temporarily disable timestamp verification by using current time
             // This fixes issues with block timestamp verification against block time
+            #[allow(unused)]
             let adjusted_timestamp = current_time; // Use current time instead of block.timestamp
             let block_age = 0; // Set block age to 0 to fully disable timestamp check
             if block_age > self.config.max_block_age_seconds {

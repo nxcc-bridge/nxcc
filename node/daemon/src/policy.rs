@@ -80,7 +80,7 @@ impl PolicyManager {
         let manifest_url = self
             .gateway_manager
             .get_policy_url(
-                secret_id.chain_id,
+                &secret_id.chain,
                 secret_id.identity_address,
                 secret_id.identity_id,
             )

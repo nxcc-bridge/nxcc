@@ -61,13 +61,13 @@ pub async fn start_web3_event_listener(
     );
 
     let gateway = match gateway_manager
-        .gateways_for_event(config.chain, &config.gateways)
+        .gateways_for_event(&config.chain, &config.gateways)
         .await
     {
         Ok(g) => g,
         Err(e) => {
             error!(
-                "Failed to resolve gateways for work_order_id: {}, chain_id {}: {}",
+                "Failed to resolve gateways for work_order_id: {}, chain {}: {}",
                 work_order_id, config.chain, e
             );
             return;
@@ -79,8 +79,8 @@ pub async fn start_web3_event_listener(
             Ok(p) => p,
             Err(e) => {
                 error!(
-                    "Failed to get provider for work_order_id: {}, chain_id {}: {}. Retrying \
-                     after delay.",
+                    "Failed to get provider for work_order_id: {}, chain {}: {}. Retrying after \
+                     delay.",
                     work_order_id, config.chain, e
                 );
                 tokio::select! {
@@ -95,7 +95,7 @@ pub async fn start_web3_event_listener(
         };
 
         info!(
-            "Attempting to subscribe to logs for work_order_id: {} on chain_id: {}",
+            "Attempting to subscribe to logs for work_order_id: {} on chain: {}",
             work_order_id, config.chain
         );
         match provider.subscribe_logs(&filter).await {

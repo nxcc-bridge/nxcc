@@ -4,7 +4,7 @@ use aes_gcm_siv::{
     AeadCore as _, Aes256GcmSiv,
     aead::{Aead, KeyInit, OsRng, generic_array::GenericArray},
 };
-use nxcc_interface::types::{AttestationReport, SecretId, SecretsBox};
+use nxcc_interface::types::{AttestationReport, ChainIdentifier, SecretId, SecretsBox};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use x25519_dalek::{PublicKey, SharedSecret, StaticSecret};
@@ -324,12 +324,12 @@ mod tests {
         let recipient_kx = KeyExchangeKeyPair::generate();
 
         let secret_id1 = SecretId {
-            chain_id: 1,
+            chain: ChainIdentifier::ChainId(1),
             identity_address: Address::random(),
             identity_id: U256::from(123),
         };
         let secret_id2 = SecretId {
-            chain_id: 5,
+            chain: ChainIdentifier::ChainId(5),
             identity_address: Address::random(),
             identity_id: U256::from(456),
         };
