@@ -44,7 +44,7 @@ It is an array of tuples, where each tuple contains a `SecretId` object and a `s
 "identities": [
   [
     {
-      "chain_id": 1,
+      "chain": 1,
       "identity_address": "0x...",
       "identity_id": "123"
     },
@@ -56,7 +56,7 @@ It is an array of tuples, where each tuple contains a `SecretId` object and a `s
 In this example, the worker requests the secret for identity `123`. If the identity's policy approves the request, the secret will be available in the worker's runtime as `env.ETHEREUM_SIGNER`.
 
 - **`SecretId` Object**:
-  - `chain_id` (Number): The chain ID where the identity exists.
+  - `chain` (Number): The chain ID where the identity exists.
   - `identity_address` (String): The address of the `Identity.sol` contract.
   - `identity_id` (String): The token ID of the identity NFT.
 

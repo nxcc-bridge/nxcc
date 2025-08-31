@@ -52,7 +52,7 @@ cd e2e
 
 Options:
   --env local|staging|prod    Environment to test (default: local)
-  --skip-cluster-setup        Skip cluster creation (assumes cluster exists)
+  --skip-deploy               Skip deployment (assumes deployment exists)
   --skip-cleanup              Skip cleanup at the end
   --test-staging              Also test staging deployment after local
   --verbose                   Enable verbose logging
@@ -97,7 +97,6 @@ export BUILD_SINGLE_ARCH="true"        # Single arch builds for faster testing
 export E2E_DOCKER_BUILD_TIMEOUT="900"  # Docker build timeout (15 minutes)
 export E2E_WORKER_DEPLOY_TIMEOUT="300" # Worker deployment timeout (5 minutes)
 export E2E_HTTP_TEST_TIMEOUT="180"     # HTTP test timeout (3 minutes)
-export HELM_TIMEOUT="10m"              # Helm operation timeout
 
 # Testing configuration
 export E2E_VERBOSE="true"              # Enable verbose logging

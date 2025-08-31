@@ -314,7 +314,7 @@ grpcurl -plaintext -d '{"vm_id": "test"}' localhost:9001 daemon.Debug/ListVms
 
 ```bash
 # Check node health
-curl http://localhost:6922/health
+curl http://localhost:6922/api/status
 
 # List work orders
 curl http://localhost:6922/api/work-orders

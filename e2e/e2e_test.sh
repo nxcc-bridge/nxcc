@@ -2,38 +2,31 @@
 #
 # End-to-End Test Script for NXCC
 #
-# ⚠️ WARNING: This script is currently disabled due to removal of Kubernetes/KinD support.
-# The e2e tests need to be refactored to work without Kubernetes infrastructure.
-#
 # This script tests the complete NXCC workflow:
-# 1. Sets up a kind cluster locally
+# 1. Deploys NXCC nodes using infra.sh (2 TDX workers + 1 non-TDX worker)
 # 2. Uses the CLI to init a new project in a temp dir
-# 3. Modifies the project to have an HTTP handler that echoes text
-# 4. Builds and deploys the project to the local node
-# 5. Gets logs and makes HTTP requests to verify functionality
-# 6. Optionally deploys to GKE staging environment
+# 3. Modifies the project to have an HTTP handler that echoes text  
+# 4. Builds and deploys the project to the nodes
+# 5. Tests TEE policy validation workflow
+# 6. Gets logs and makes HTTP requests to verify functionality
 #
 # Usage:
 #   ./e2e/e2e_test.sh [options]
 #   cd e2e && ./e2e_test.sh [options]
 #
 # Options:
-#   --env local|staging|prod    Environment to test (default: local)
-#   --skip-cluster-setup        Skip cluster creation (assumes cluster exists)
-#   --skip-cleanup              Skip cleanup at the end
-#   --test-staging              Also test staging deployment after local
+#   --env staging               Environment to test (only staging supported)
+#   --test-id ID                [DISABLED] Test identifier for e2e environment (default: e2e-default)
+#   --skip-deploy               Skip node deployment (assumes nodes exist)
+#   --force-rebuild             Force rebuild of Docker images (ignore cache)
+#   --no-cleanup                Skip infrastructure cleanup (DANGEROUS - leaves resources running)
 #   --verbose                   Enable verbose logging
-#   --force-cleanup             Force cleanup of cluster resources
-#   --cache-from REPO           Use upstream cache from specified repository
 #   --help                      Show this help message
-
-echo "❌ E2E tests are currently disabled due to Kubernetes infrastructure removal."
-echo "🔧 These tests need to be refactored to work with the new non-K8s architecture."
-exit 1
 
 set -e
 set -o pipefail
 set -u # Exit on undefined variables
+# set -x
 
 # Function to handle errors and exit immediately
 error_exit() {
@@ -47,7 +40,6 @@ error_exit() {
 trap 'error_exit $LINENO "$BASH_COMMAND" "$?"' ERR
 
 # Reduce timeouts for faster failure detection
-export HELM_TIMEOUT="90s"              # Reduced from 3m to 90s
 export E2E_WORKER_DEPLOY_TIMEOUT="120" # Reduced from 300s to 120s
 export E2E_HTTP_TEST_TIMEOUT="60"      # Reduced from 180s to 60s
 

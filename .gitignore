@@ -6,3 +6,4 @@ benchmarks/workers/dist/
 benchmarks/workers/node_modules/
 .claude/
 sdk/lib/dist
+**/*.log
