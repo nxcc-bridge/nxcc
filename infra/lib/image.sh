@@ -34,15 +34,50 @@ _docker_build_common() {
 		error "Dockerfile not found at '$dockerfile_path'. Please ensure you're in the project root."
 	fi
 
+	# ---------------- Cache config ----------------
+	# Picks a sane cache directory automatically:
+	# - On GitHub Actions:  $RUNNER_TEMP/buildx-cache
+	# - Locally:            ${XDG_CACHE_HOME:-$HOME/.cache}/docker/buildx-cache
+	# You can override with DOCKER_BUILD_CACHE_DIR.
+
+	local cache_dir
+	if [[ -n "${DOCKER_BUILD_CACHE_DIR:-}" ]]; then
+		cache_dir="$DOCKER_BUILD_CACHE_DIR"
+	elif [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+		cache_dir="${RUNNER_TEMP:-/tmp}/buildx-cache"
+	else
+		cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/docker/buildx-cache"
+	fi
+	mkdir -p "$cache_dir"
+
 	# Configure cache settings
 	local cache_args=()
-	if [[ -n "$cache_from" ]]; then
+	if [[ "${FORCE_REBUILD:-false}" == "true" ]]; then
+		info "Force rebuild requested - disabling all caches"
+		cache_args=(--no-cache)
+	elif [[ -n "${cache_from:-}" ]]; then
 		info "Using upstream cache from: $cache_from"
-		cache_args=(--cache-from "type=registry,ref=$cache_from")
+		cache_args=(
+			--cache-from "type=registry,ref=$cache_from"
+			--cache-from "type=local,src=$cache_dir"
+			--cache-to "type=local,dest=$cache_dir,mode=max"
+		)
 	elif [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
-		info "Using GitHub Actions cache"
-		cache_args=(--cache-from "type=gha")
+		info "Using GitHub Actions cache + local fallback at: $cache_dir"
+		cache_args=(
+			--cache-from "type=gha"
+			--cache-to "type=gha,mode=max"
+			--cache-from "type=local,src=$cache_dir"
+			--cache-to "type=local,dest=$cache_dir,mode=max"
+		)
+	else
+		info "Using local Docker buildx cache at: $cache_dir"
+		cache_args=(
+			--cache-from "type=local,src=$cache_dir"
+			--cache-to "type=local,dest=$cache_dir,mode=max"
+		)
 	fi
+	# --------------------------------------------------------
 
 	# Configure platform settings - default to amd64 for speed and TEE compatibility
 	local build_platforms="${BUILD_PLATFORMS:-linux/amd64}"

@@ -60,22 +60,23 @@ RUN mkdir -p interface/src daemon/src enclave/src vm/base/src vm/workerd/src cha
 # Cache the crates
 RUN cargo metadata --format-version 1 > /dev/null
 
-# Copy all source code.
-# This is done after Cargo files for better layer caching if only source code changes.
-COPY interface ./interface
-COPY daemon ./daemon
-COPY enclave ./enclave
-COPY vm ./vm
-COPY chainlist ./chainlist
-COPY attestation ./attestation
-
 # Build mode configuration. Set `--build-arg BUILD_MODE=` to do a debug build.
 ARG BUILD_MODE=release
 ENV BUILD_FLAG=${BUILD_MODE:+--release}
 
+COPY interface ./interface
+RUN cargo build --locked ${BUILD_FLAG} -p nxcc-interface
+
 # Build crates in separate layers to improve cacheability
+COPY vm ./vm
 RUN cargo build --locked ${BUILD_FLAG} -p nxcc-workerd-vm --no-default-features --features uds
+
+COPY attestation ./attestation
+COPY enclave ./enclave
 RUN cargo build --locked ${BUILD_FLAG} -p nxcc-platform-enclave --no-default-features --features uds
+
+COPY chainlist ./chainlist
+COPY daemon ./daemon
 RUN cargo build --locked ${BUILD_FLAG} -p nxcc-daemon
 
 # Stage 2: Runtime
@@ -100,7 +101,8 @@ RUN groupadd --gid ${USER_GID} ${USERNAME} && \
 RUN mkdir -p /run/nxcc && chown ${USERNAME}:${USERNAME} /run/nxcc
 
 WORKDIR /home/${USERNAME}/app
-USER ${USERNAME}
+# TODO: Run as nxcc user when TSM configfs permissions are resolved
+# USER ${USERNAME}
 
 # Copy the workerd binary from the downloader stage.
 COPY --from=workerd-downloader --chown=${USERNAME}:${USERNAME} /opt/workerd /usr/local/bin/workerd
