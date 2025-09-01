@@ -12,6 +12,7 @@
     "lint": "prettier --check . --cache"
   },
   "dependencies": {
+    "@astrojs/sitemap": "^3.2.1",
     "@astrojs/starlight": "^0.35.1",
     "@astrojs/vue": "^5.1.0",
     "@fontsource/inter": "^5.2.6",

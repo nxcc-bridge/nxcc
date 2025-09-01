@@ -1,5 +1,6 @@
 // @ts-check
 import { defineConfig } from "astro/config";
+import sitemap from "@astrojs/sitemap";
 import starlight from "@astrojs/starlight";
 
 import tailwindcss from "@tailwindcss/vite";
@@ -8,6 +9,8 @@ import vue from "@astrojs/vue";
 
 // https://astro.build/config
 export default defineConfig({
+  // Canonical site URL for sitemap and absolute links.
+  site: "https://nxcc.org",
   integrations: [
     starlight({
       title: "nXCC",
@@ -100,6 +103,7 @@ export default defineConfig({
       customCss: ["./src/styles/global.css"],
     }),
     vue(),
+    sitemap(),
   ],
 
   vite: {
