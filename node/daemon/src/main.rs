@@ -1,6 +1,6 @@
 #![allow(warnings)]
 
-use tokio::time::{Duration, interval};
+use tokio::time::{Duration, interval, sleep};
 mod config;
 mod error;
 mod grpc;
@@ -68,20 +68,43 @@ async fn main() -> anyhow::Result<()> {
     let (daemon_event_tx, mut daemon_event_rx) =
         tokio::sync::mpsc::channel::<enclave_proto::EventDelivery>(DAEMON_EVENT_QUEUE_CAPACITY);
 
-    // Connect to the enclave
+    // Connect to the enclave with retry logic
     info!(
         "connecting to enclave over UDS {}",
         config.enclave.enclave_uds_path.clone()
     );
-    let enclave_client =
-        grpc::enclave_client::EnclaveClient::connect_uds(config.enclave.enclave_uds_path.clone())
+
+    let enclave_client = {
+        let mut attempts = 0;
+        const MAX_ATTEMPTS: u32 = 10;
+        loop {
+            attempts += 1;
+            match grpc::enclave_client::EnclaveClient::connect_uds(
+                config.enclave.enclave_uds_path.clone(),
+            )
             .await
-            .unwrap_or_else(|e| {
-                panic!(
-                    "Failed to create EnclaveClient: {}. Ensure the enclave is running on {}.",
-                    e, config.enclave.enclave_uds_path,
-                )
-            });
+            {
+                Ok(client) => break client,
+                Err(e) => {
+                    if attempts >= MAX_ATTEMPTS {
+                        panic!(
+                            "Failed to create EnclaveClient after {} attempts: {}. Ensure the \
+                             enclave is running on {}.",
+                            MAX_ATTEMPTS, e, config.enclave.enclave_uds_path,
+                        );
+                    }
+                    warn!(
+                        "Failed to connect to enclave (attempt {}/{}): {}. Retrying in {}ms...",
+                        attempts,
+                        MAX_ATTEMPTS,
+                        e,
+                        attempts * 100
+                    );
+                    sleep(Duration::from_millis(attempts as u64 * 100)).await;
+                }
+            }
+        }
+    };
 
     // Create VM registry for tracking attached VMs
     let vm_registry = VmRegistry::new();
