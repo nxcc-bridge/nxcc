@@ -7,6 +7,7 @@
     "nxcc": "dist/index.js"
   },
   "scripts": {
+    "prebuild": "node scripts/extract-contract-data.js",
     "build": "tsc && chmod +x dist/index.js",
     "prepack": "pnpm build",
     "prepare": "pnpm build",

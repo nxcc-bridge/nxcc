@@ -1,7 +1,16 @@
-import { createPublicClient, createWalletClient, http, Hex, Address } from "viem";
+import {
+  createPublicClient,
+  createWalletClient,
+  http,
+  Hex,
+  Address,
+  keccak256,
+  getCreate2Address,
+} from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { anvil } from "viem/chains";
 import IdentityAbi from "../abi/Identity.json";
+import { IDENTITY_ABI, IDENTITY_BYTECODE, DDP_DEPLOYER, DEFAULT_SALT } from "../contracts/identity";
 
 const identityContractAbi = IdentityAbi.abi;
 
@@ -102,4 +111,86 @@ export async function getPolicy(gatewayUrl: string, contractAddress: Address, to
   });
 
   return policyUrl;
+}
+
+export async function deployIdentity(
+  gatewayUrl: string,
+  signerKey: Hex,
+  options: {
+    allowNondeterministicAddress?: boolean;
+    salt?: Hex;
+  } = {},
+): Promise<{ address: Address; txHash: Hex; isDeterministic: boolean }> {
+  const { publicClient, walletClient } = getClients(gatewayUrl, signerKey);
+  if (!walletClient) {
+    throw new Error("Signer key is required to deploy an identity");
+  }
+
+  const salt = options.salt || DEFAULT_SALT;
+
+  // Check if DDP is available on this chain
+  const ddpCode = await publicClient.getCode({ address: DDP_DEPLOYER });
+  const hasDDP = ddpCode && ddpCode !== "0x" && ddpCode.length > 2;
+
+  if (!hasDDP && !options.allowNondeterministicAddress) {
+    throw new Error(
+      `Deterministic Deployment Proxy not found at ${DDP_DEPLOYER}. ` +
+        "Use --allow-nondeterministic-address to deploy with non-deterministic address.",
+    );
+  }
+
+  let deployTxHash: Hex;
+  let deployedAddress: Address;
+
+  if (hasDDP) {
+    // Use deterministic deployment via DDP
+    const initcode = IDENTITY_BYTECODE;
+
+    // Compute the deterministic address first
+    deployedAddress = getCreate2Address({
+      from: DDP_DEPLOYER,
+      salt,
+      bytecodeHash: keccak256(initcode),
+    });
+
+    // Check if contract already exists at this address
+    const existingCode = await publicClient.getCode({ address: deployedAddress });
+    if (existingCode && existingCode !== "0x" && existingCode.length > 2) {
+      // Contract already exists, return early
+      return {
+        address: deployedAddress,
+        txHash: "0x0000000000000000000000000000000000000000000000000000000000000000" as Hex,
+        isDeterministic: true,
+      };
+    }
+
+    // DDP expects: salt (32 bytes) + initcode
+    const deployData = `${salt}${initcode.slice(2)}` as Hex;
+
+    deployTxHash = await walletClient.sendTransaction({
+      to: DDP_DEPLOYER,
+      data: deployData,
+    });
+  } else {
+    // Use regular deployment (non-deterministic)
+    deployTxHash = await walletClient.deployContract({
+      abi: IDENTITY_ABI,
+      bytecode: IDENTITY_BYTECODE,
+    });
+
+    const receipt = await publicClient.waitForTransactionReceipt({
+      hash: deployTxHash,
+    });
+
+    deployedAddress = receipt.contractAddress!;
+  }
+
+  // Wait for deployment transaction
+  await publicClient.waitForTransactionReceipt({ hash: deployTxHash });
+
+  return {
+    address: deployedAddress,
+    txHash: deployTxHash,
+    isDeterministic: !!hasDDP,
+  };
 }

@@ -2,7 +2,7 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import { Command } from "commander";
 import { Address, Hex } from "viem";
-import { createIdentity, getPolicy, setPolicy } from "../utils/web3";
+import { createIdentity, getPolicy, setPolicy, deployIdentity } from "../utils/web3";
 
 async function create(
   address: Address,
@@ -66,6 +66,38 @@ async function getPolicyCmd(address: Address, id: string, options: { gatewayUrl:
   }
 }
 
+async function deployCmd(options: {
+  gatewayUrl: string;
+  signer: Hex;
+  allowNondeterministicAddress?: boolean;
+  salt?: Hex;
+}) {
+  try {
+    const result = await deployIdentity(options.gatewayUrl, options.signer, {
+      allowNondeterministicAddress: options.allowNondeterministicAddress,
+      salt: options.salt,
+    });
+
+    if (result.txHash === "0x0000000000000000000000000000000000000000000000000000000000000000") {
+      console.log("Identity contract already exists:");
+    } else {
+      console.log("Identity contract deployed successfully:");
+    }
+    console.log(`Address: ${result.address}`);
+    if (result.txHash !== "0x0000000000000000000000000000000000000000000000000000000000000000") {
+      console.log(`Transaction Hash: ${result.txHash}`);
+    }
+    console.log(`Deterministic: ${result.isDeterministic}`);
+
+    if (!result.isDeterministic) {
+      console.warn("⚠️  Address is not deterministic across chains");
+    }
+  } catch (error) {
+    console.error("Failed to deploy identity:", error);
+    process.exit(1);
+  }
+}
+
 export function identitySubcommand(program: Command) {
   const identity = program
     .command("identity")
@@ -89,4 +121,12 @@ export function identitySubcommand(program: Command) {
     .command("get-policy <address> <id>")
     .description("Get the policy worker URL for an identity")
     .action(getPolicyCmd);
+
+  identity
+    .command("deploy")
+    .description("Deploy a new Identity contract")
+    .requiredOption("--signer <private-key>", "Private key to sign the transaction")
+    .option("--allow-nondeterministic-address", "Allow deployment without deterministic address")
+    .option("--salt <hex>", "Custom salt for deterministic deployment (default: 0x0...0)")
+    .action(deployCmd);
 }

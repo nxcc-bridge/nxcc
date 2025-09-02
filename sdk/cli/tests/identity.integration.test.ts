@@ -62,40 +62,39 @@ describe("Identity CLI Integration Tests", () => {
       });
     }
 
-    // Deploy Identity contract using forge script
+    // Deploy Identity contract using CLI
     console.log("Deploying Identity contract...");
-    const contractsDir = path.join(projectRoot, "contracts/evm");
-
-    // Install dependencies if needed
     try {
-      await fs.access(path.join(contractsDir, "dependencies"));
-    } catch {
-      console.log("Installing contract dependencies...");
-      await execAsync("forge soldeer install", { cwd: contractsDir });
-    }
+      const deployResult = await execAsync(
+        `node "${cliPath}" identity deploy --gateway-url ${anvilRpcUrl} --signer ${testPrivateKey}`,
+      );
 
-    // Build contracts
-    await execAsync("forge build", { cwd: contractsDir });
+      // Extract address from deploy output
+      const addressMatch = deployResult.stdout.match(/Address: (0x[a-fA-F0-9]{40})/);
+      if (addressMatch) {
+        identityContractAddress = addressMatch[1] as Address;
+      } else {
+        throw new Error(`Could not extract address from deploy output: ${deployResult.stdout}`);
+      }
+    } catch (error) {
+      console.error("Deploy failed, falling back to forge script...");
 
-    try {
-      // Deploy using the script
+      // Fallback to forge script deployment
+      const contractsDir = path.join(projectRoot, "contracts/evm");
+      await execAsync("forge soldeer install || true", { cwd: contractsDir });
+      await execAsync("forge build", { cwd: contractsDir });
+
       const deployResult = await execAsync(
         `PRIVATE_KEY="${testPrivateKey}" forge script script/DeployIdentity.s.sol --rpc-url ${anvilRpcUrl} --broadcast`,
         { cwd: contractsDir },
       );
 
-      // Extract contract address from output
       const addressMatch = deployResult.stdout.match(/Identity deployed to: (0x[a-fA-F0-9]{40})/);
       if (addressMatch) {
         identityContractAddress = addressMatch[1] as Address;
       } else {
-        // Use default CREATE2 address
-        identityContractAddress = "0xb1c985140805a55bf6d5Ea42232B73023dc51eE0" as Address;
+        identityContractAddress = "0x843f604F71dDaaaE82a82551d6b19571E6C6E23A" as Address; // Default DDP address
       }
-    } catch (error) {
-      // Contract likely already deployed, use deterministic CREATE2 address
-      console.log("Contract already deployed, using deterministic address");
-      identityContractAddress = "0xb1c985140805a55bf6d5Ea42232B73023dc51eE0" as Address;
     }
 
     console.log(`Identity contract deployed at: ${identityContractAddress}`);
@@ -271,6 +270,28 @@ describe("Identity CLI Integration Tests", () => {
         ),
       ).rejects.toThrow();
     });
+  });
+
+  describe("identity deploy", () => {
+    it("should deploy identity contract deterministically", async () => {
+      const { stdout } = await execAsync(
+        `node "${cliPath}" identity deploy --gateway-url ${anvilRpcUrl} --signer ${testPrivateKey}`,
+      );
+
+      expect(stdout).toMatch(/Identity contract (deployed successfully|already exists):/);
+      expect(stdout).toMatch(/Address: 0x[a-fA-F0-9]{40}/);
+      expect(stdout).toMatch(/Deterministic: true/);
+    }, 30000);
+
+    it("should deploy with custom salt", async () => {
+      const customSalt = "0x1234567890123456789012345678901234567890123456789012345678901234";
+      const { stdout } = await execAsync(
+        `node "${cliPath}" identity deploy --gateway-url ${anvilRpcUrl} --signer ${testPrivateKey} --salt ${customSalt}`,
+      );
+
+      expect(stdout).toMatch(/Identity contract (deployed successfully|already exists):/);
+      expect(stdout).toMatch(/Address: 0x[a-fA-F0-9]{40}/);
+    }, 30000);
   });
 
   describe("full workflow", () => {
