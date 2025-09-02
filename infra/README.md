@@ -54,11 +54,12 @@ This directory provides comprehensive infrastructure automation for:
 ./infra.sh ci <setup|teardown>         # Manage CI/CD resources
 ```
 
-### Cluster Operations
+### Deployment Operations
 
 ```bash
-./infra.sh cluster <create|destroy> <gke|kind>       # Manage Kubernetes clusters
-./infra.sh k8s <deploy|destroy|dump-debug> <debug|staging|prod>  # Deploy applications
+./infra.sh cluster <create|destroy> kind            # Manage local KinD cluster
+./infra.sh deploy <create|destroy|status|plan> <env> # Terraform deployments
+./infra.sh keys generate <output-file>              # Generate operator keys
 ```
 
 ### Development Environment
@@ -78,21 +79,21 @@ This directory provides comprehensive infrastructure automation for:
 - Registry-specific tagging and authentication
 - Build caching and optimization
 
-### Cluster Management (`lib/cluster.sh`, `lib/k8s.sh`)
+### Infrastructure Management (`lib/cluster.sh`)
 
 - KinD for local development
-- GKE for cloud deployments
-- Automatic ingress and networking
+- Terraform for cloud deployments
 - Multi-environment isolation
+- Automated resource provisioning
 
-### Helm Charts (`charts/nxcc-node/`)
+### Terraform Modules (`modules/`)
 
-Kubernetes deployment templates for:
+Infrastructure as Code templates for:
 
-- nXCC daemon pods with P2P networking
-- Enclave containers with TEE support
-- Service meshes and ingress configuration
-- Resource limits and security policies
+- VM instances with TEE support
+- Network configuration and security
+- Load balancers and ingress
+- Multi-environment deployments
 
 ### Development Tools (`lib/dev/`)
 
@@ -103,7 +104,7 @@ Kubernetes deployment templates for:
 
 ## Environments
 
-### Local (`local`)
+### Local (`e2e-debug`)
 
 - **Platform**: KinD (Kubernetes in Docker)
 - **Build Mode**: Debug (faster iteration)
@@ -112,16 +113,16 @@ Kubernetes deployment templates for:
 
 ### Staging (`staging`)
 
-- **Platform**: GKE (Google Kubernetes Engine)
+- **Platform**: Terraform-managed GCP VMs
 - **Build Mode**: Debug with caching
-- **Network**: Public ingress with load balancer
+- **Network**: Public load balancer
 - **Use Case**: Integration testing and validation
 
-### Production (`prod`)
+### Production (`production`)
 
-- **Platform**: GKE with enhanced security
+- **Platform**: Terraform-managed GCP VMs
 - **Build Mode**: Release (optimized)
-- **Network**: Production ingress with CDN
+- **Network**: Production load balancer with security
 - **Use Case**: Live deployment
 
 ## Configuration
@@ -132,8 +133,8 @@ Kubernetes deployment templates for:
 # GCP Configuration
 export GCP_PROJECT_ID="your-project-id"
 export GCP_ACCOUNT="your-email@domain.com"
-export GCP_AR_LOCATION="europe"              # Artifact Registry location
-export GCP_GKE_REGION="europe-west4"       # GKE cluster region
+export GCP_AR_LOCATION="europe-west4"       # Artifact Registry location
+export GCP_GKE_REGION="europe-west4"       # Deployment region
 
 # Build Configuration
 export AUTO_YES="true"                      # Skip confirmation prompts
@@ -150,7 +151,7 @@ export NXCC_DEV_IMAGE="ghcr.io/nxcc-bridge/dev:latest"  # Dev container image
 
 ### Customization
 
-- **Helm Values**: Edit `charts/nxcc-node/values.yaml`
+- **Terraform Variables**: Edit `environments/*/terraform.tfvars`
 - **Image Config**: Use `image build` options for custom builds
 - **VM Config**: Adjust TDX settings in `lib/dev/vm.sh`
 
@@ -162,6 +163,7 @@ export NXCC_DEV_IMAGE="ghcr.io/nxcc-bridge/dev:latest"  # Dev container image
    ./infra.sh image build --debug
    ./infra.sh image push kind
    ./infra.sh cluster create kind
+   ./infra.sh deploy create e2e-debug
    ```
 
 2. **TDX Development**:
@@ -182,7 +184,7 @@ export NXCC_DEV_IMAGE="ghcr.io/nxcc-bridge/dev:latest"  # Dev container image
    ```bash
    ./infra.sh image build --release
    ./infra.sh image push gcp
-   ./infra.sh k8s deploy prod
+   ./infra.sh deploy create production
    ```
 
 For detailed TDX development environment usage, see the [development environment documentation](lib/dev/).

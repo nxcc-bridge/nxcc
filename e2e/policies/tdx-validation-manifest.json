@@ -1,0 +1,10 @@
+{
+  "bundle": {
+    "source": "dist/configurable-policy.js",
+    "hash": null
+  },
+  "identities": [],
+  "userdata": {
+    "enforce_validation": true
+  }
+}

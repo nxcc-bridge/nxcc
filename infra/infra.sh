@@ -19,7 +19,6 @@ LIB_DIR="$(dirname "$0")/lib"
 # shellcheck disable=SC1091  # Library files are sourced dynamically
 source "${LIB_DIR}/common.sh"
 source "${LIB_DIR}/ci.sh"
-source "${LIB_DIR}/cluster.sh"
 source "${LIB_DIR}/image.sh"
 source "${LIB_DIR}/dev.sh" # Changed to the new single entrypoint
 source "${LIB_DIR}/state_management.sh"
@@ -48,11 +47,6 @@ usage() {
 	echo "      setup:    Creates and configures all CI/CD resources."
 	echo "      teardown: Deletes all CI/CD resources."
 	echo
-	echo "  cluster <create|destroy> <env>"
-	echo "    Manages the GKE cluster."
-	echo "      <env>: gke"
-	echo "      create:   Creates the specified cluster."
-	echo "      destroy:  Deletes the specified cluster."
 	echo
 	echo "  test <env>"
 	echo "    Tests HTTP connectivity to the deployed NXCC node."
@@ -103,7 +97,7 @@ usage() {
 	echo "    image push gcp --tag=staging-test  # Push with custom tag"
 	echo
 	echo "GCP Identity:"
-	echo "  For 'ci' and 'gke' commands, the script will resolve your GCP identity automatically."
+	echo "  For 'ci' and 'deploy' commands, the script will resolve your GCP identity automatically."
 	echo "  You can override this by setting GCP_ACCOUNT and GCP_PROJECT_ID environment variables."
 	echo
 	echo "Common Workflow Examples:"
@@ -207,31 +201,7 @@ main() {
 		esac
 		;;
 
-	cluster)
-		case "$subcommand" in
-		create)
-			case "$env" in
-			gke) cluster_create_gke ;;
-			*) error "Invalid or missing environment for 'cluster create'. Use 'gke'." ;;
-			esac
-			;;
-		destroy)
-			case "$env" in
-			gke)
-				if [[ "$auto_yes" == true ]]; then
-					cluster_destroy_gke
-				else
-					read -p "Are you sure you want to delete the GKE cluster '${GKE_CLUSTER_NAME}'? [y/N] " -n 1 -r
-					echo
-					if [[ $REPLY =~ ^[Yy]$ ]]; then cluster_destroy_gke; else info "Cluster deletion cancelled."; fi
-				fi
-				;;
-			*) error "Invalid or missing environment for 'cluster destroy'. Use 'gke'." ;;
-			esac
-			;;
-		*) error "Invalid subcommand for 'cluster'. Use 'create' or 'destroy'." ;;
-		esac
-		;;
+	# cluster command removed - use 'deploy' for Terraform-managed infrastructure
 
 	keys)
 		case "$subcommand" in

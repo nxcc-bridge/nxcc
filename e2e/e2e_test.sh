@@ -5,7 +5,7 @@
 # This script tests the complete NXCC workflow:
 # 1. Deploys NXCC nodes using infra.sh (2 TDX workers + 1 non-TDX worker)
 # 2. Uses the CLI to init a new project in a temp dir
-# 3. Modifies the project to have an HTTP handler that echoes text  
+# 3. Modifies the project to have an HTTP handler that echoes text
 # 4. Builds and deploys the project to the nodes
 # 5. Tests TEE policy validation workflow
 # 6. Gets logs and makes HTTP requests to verify functionality

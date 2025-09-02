@@ -1,0 +1,16 @@
+{
+  "name": "@nxcc/e2e-policies",
+  "version": "1.0.0",
+  "private": true,
+  "description": "E2E test policies for NXCC",
+  "scripts": {
+    "build": "esbuild configurable-policy.ts --bundle --format=esm --outdir=dist"
+  },
+  "dependencies": {
+    "@nxcc/sdk": "file:../../sdk/lib"
+  },
+  "devDependencies": {
+    "esbuild": "^0.21.0",
+    "typescript": "^5.5.0"
+  }
+}
