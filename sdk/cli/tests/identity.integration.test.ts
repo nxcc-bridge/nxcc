@@ -155,6 +155,59 @@ describe("Identity CLI Integration Tests", () => {
       process.env.TEST_IDENTITY_ID = result.id;
     }, 30000);
 
+    it("should create identity with policy from file path", async () => {
+      const { stdout } = await execAsync(
+        `node "${cliPath}" identity create ${identityContractAddress} --gateway-url ${anvilRpcUrl} --signer ${testPrivateKey} --policy ${testPolicyPath}`,
+      );
+
+      // Extract JSON from stdout
+      const jsonMatch = stdout.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error(`No JSON found in output: ${stdout}`);
+      }
+      const result = JSON.parse(jsonMatch[0]);
+      expect(result).toMatchObject({
+        chain: 31337,
+        address: identityContractAddress,
+        id: expect.any(String),
+        txHash: expect.stringMatching(/^0x[a-fA-F0-9]{64}$/),
+      });
+
+      // Verify policy was set by getting it back
+      const getPolicyResult = await execAsync(
+        `node "${cliPath}" identity get-policy ${identityContractAddress} ${result.id} --gateway-url ${anvilRpcUrl}`,
+      );
+      expect(getPolicyResult.stdout).toMatch(/Policy URL: data:application\/json;base64,/);
+    }, 30000);
+
+    it("should create identity with policy from data URL", async () => {
+      const dataPolicyUrl =
+        "data:application/json;base64,eyJidW5kbGUiOnsic291cmNlIjoiZGF0YTphcHBsaWNhdGlvbi9qYXZhc2NyaXB0O2Jhc2U2NCxZMjl1YzI5c1pTNXNiMmNvSWtobGJHeGJJSGR2Y214a0lTSXAiLCJoYXNoIjpudWxsfSwiaWRlbnRpdGllcyI6W10sImV2ZW50cyI6W3siaGFuZGxlciI6ImxhdW5jaCIsImtpbmQiOiJsYXVuY2gifV0sInVzZXJkYXRhIjp7InRlc3RQb2xpY3kiOnRydWV9fQ==";
+
+      const { stdout } = await execAsync(
+        `node "${cliPath}" identity create ${identityContractAddress} --gateway-url ${anvilRpcUrl} --signer ${testPrivateKey} --policy "${dataPolicyUrl}"`,
+      );
+
+      // Extract JSON from stdout
+      const jsonMatch = stdout.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error(`No JSON found in output: ${stdout}`);
+      }
+      const result = JSON.parse(jsonMatch[0]);
+      expect(result).toMatchObject({
+        chain: 31337,
+        address: identityContractAddress,
+        id: expect.any(String),
+        txHash: expect.stringMatching(/^0x[a-fA-F0-9]{64}$/),
+      });
+
+      // Verify policy was set by getting it back
+      const getPolicyResult = await execAsync(
+        `node "${cliPath}" identity get-policy ${identityContractAddress} ${result.id} --gateway-url ${anvilRpcUrl}`,
+      );
+      expect(getPolicyResult.stdout).toMatch(/Policy URL: data:application\/json;base64,/);
+    }, 30000);
+
     it("should fail with invalid contract address", async () => {
       await expect(
         execAsync(
