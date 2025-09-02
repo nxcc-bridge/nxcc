@@ -1,5 +1,6 @@
 import { createPublicClient, createWalletClient, http, Hex, Address } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
+import { anvil } from "viem/chains";
 import IdentityAbi from "../abi/Identity.json";
 
 const identityContractAbi = IdentityAbi.abi;
@@ -7,12 +8,16 @@ const identityContractAbi = IdentityAbi.abi;
 function getClients(gatewayUrl: string, signerKey?: Hex) {
   const transport = http(gatewayUrl);
 
-  const publicClient = createPublicClient({ transport });
+  const publicClient = createPublicClient({
+    chain: anvil,
+    transport,
+  });
 
   if (signerKey) {
     const account = privateKeyToAccount(signerKey);
     const walletClient = createWalletClient({
       account,
+      chain: anvil,
       transport,
     });
     return { publicClient, walletClient };
@@ -23,7 +28,6 @@ function getClients(gatewayUrl: string, signerKey?: Hex) {
 
 export async function createIdentity(
   gatewayUrl: string,
-  chainId: number,
   contractAddress: Address,
   signerKey: Hex,
   policyUrl: string,
@@ -32,6 +36,8 @@ export async function createIdentity(
   if (!walletClient) {
     throw new Error("Signer key is required to create an identity");
   }
+
+  const chainId = await publicClient.getChainId();
 
   const { request } = await publicClient.simulateContract({
     address: contractAddress,
@@ -64,7 +70,6 @@ export async function createIdentity(
 
 export async function setPolicy(
   gatewayUrl: string,
-  chainId: number,
   contractAddress: Address,
   tokenId: string,
   policyUrl: string,
@@ -86,12 +91,7 @@ export async function setPolicy(
   return hash;
 }
 
-export async function getPolicy(
-  gatewayUrl: string,
-  chainId: number,
-  contractAddress: Address,
-  tokenId: string,
-) {
+export async function getPolicy(gatewayUrl: string, contractAddress: Address, tokenId: string) {
   const { publicClient } = getClients(gatewayUrl);
 
   const policyUrl = await publicClient.readContract({
