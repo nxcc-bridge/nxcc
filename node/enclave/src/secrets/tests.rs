@@ -52,7 +52,16 @@ fn test_policy_report(request: PolicyExecutionRequest, decision: bool) -> Policy
 
 #[test]
 fn test_new_secrets_service() {
-    let secrets = Secrets::new();
+    let ephemeral_kx_keypair = std::sync::Arc::new(crate::crypto::KeyExchangeKeyPair::generate());
+    let mock_gateway = std::sync::Arc::new(crate::attestation::MockGatewayProvider);
+    let attestation_manager = Arc::new(
+        crate::attestation::PlatformAttestationManager::new(
+            ephemeral_kx_keypair.clone(),
+            mock_gateway,
+        )
+        .unwrap(),
+    );
+    let secrets = Secrets::new_with_keypair(ephemeral_kx_keypair, attestation_manager);
     assert!(secrets.secrets_storage.read().unwrap().is_empty());
     assert!(secrets.authorizations.read().unwrap().is_empty());
     let _pk = secrets.ephemeral_kx_keypair.public_key();
@@ -71,12 +80,14 @@ async fn test_get_report() {
     // Initialize the platform attestation manager for this test
     let ephemeral_kx_keypair = std::sync::Arc::new(crate::crypto::KeyExchangeKeyPair::generate());
     let mock_gateway = std::sync::Arc::new(crate::attestation::MockGatewayProvider);
-    let _ = crate::attestation::initialize_platform_attestation_manager(
-        ephemeral_kx_keypair.clone(),
-        mock_gateway,
+    let attestation_manager = Arc::new(
+        crate::attestation::PlatformAttestationManager::new(
+            ephemeral_kx_keypair.clone(),
+            mock_gateway,
+        )
+        .unwrap(),
     );
-
-    let secrets = Secrets::new_with_keypair(ephemeral_kx_keypair.clone());
+    let secrets = Secrets::new_with_keypair(ephemeral_kx_keypair.clone(), attestation_manager);
     let report = secrets.get_report().await.unwrap();
     let userdata = user_data_binding::UserData::from_cbor(&report.detached_userdata).unwrap();
 
@@ -89,7 +100,16 @@ async fn test_get_report() {
 
 #[test]
 fn test_store_and_check_authorization() {
-    let secrets = Secrets::new();
+    let ephemeral_kx_keypair = std::sync::Arc::new(crate::crypto::KeyExchangeKeyPair::generate());
+    let mock_gateway = std::sync::Arc::new(crate::attestation::MockGatewayProvider);
+    let attestation_manager = Arc::new(
+        crate::attestation::PlatformAttestationManager::new(
+            ephemeral_kx_keypair.clone(),
+            mock_gateway,
+        )
+        .unwrap(),
+    );
+    let secrets = Secrets::new_with_keypair(ephemeral_kx_keypair, attestation_manager);
     let secret_id = test_secret_id(123);
 
     let client_kx = KeyExchangeKeyPair::generate();
@@ -130,7 +150,16 @@ fn test_store_and_check_authorization() {
 
 #[test]
 fn test_store_authorization_with_negative_decision() {
-    let secrets = Secrets::new();
+    let ephemeral_kx_keypair = std::sync::Arc::new(crate::crypto::KeyExchangeKeyPair::generate());
+    let mock_gateway = std::sync::Arc::new(crate::attestation::MockGatewayProvider);
+    let attestation_manager = Arc::new(
+        crate::attestation::PlatformAttestationManager::new(
+            ephemeral_kx_keypair.clone(),
+            mock_gateway,
+        )
+        .unwrap(),
+    );
+    let secrets = Secrets::new_with_keypair(ephemeral_kx_keypair, attestation_manager);
     let secret_id = test_secret_id(234);
 
     let client_kx = KeyExchangeKeyPair::generate();
@@ -157,7 +186,16 @@ fn test_store_authorization_with_negative_decision() {
 
 #[test]
 fn test_authorization_expiry() {
-    let secrets = Secrets::new();
+    let ephemeral_kx_keypair = std::sync::Arc::new(crate::crypto::KeyExchangeKeyPair::generate());
+    let mock_gateway = std::sync::Arc::new(crate::attestation::MockGatewayProvider);
+    let attestation_manager = Arc::new(
+        crate::attestation::PlatformAttestationManager::new(
+            ephemeral_kx_keypair.clone(),
+            mock_gateway,
+        )
+        .unwrap(),
+    );
+    let secrets = Secrets::new_with_keypair(ephemeral_kx_keypair, attestation_manager);
     let secret_id = test_secret_id(345);
 
     let client_kx = KeyExchangeKeyPair::generate();
@@ -193,9 +231,18 @@ fn test_authorization_expiry() {
     assert!(*auth_map.get(&auth_id).unwrap() < Utc::now().timestamp() as u64); // But expired
 }
 
-#[tokio::test]
-async fn test_put_secrets_epk_binding_success() {
-    let secrets = Secrets::new(); // Receiver
+#[test]
+fn test_put_secrets_epk_binding_success() {
+    let ephemeral_kx_keypair = std::sync::Arc::new(crate::crypto::KeyExchangeKeyPair::generate());
+    let mock_gateway = std::sync::Arc::new(crate::attestation::MockGatewayProvider);
+    let attestation_manager = Arc::new(
+        crate::attestation::PlatformAttestationManager::new(
+            ephemeral_kx_keypair.clone(),
+            mock_gateway,
+        )
+        .unwrap(),
+    );
+    let secrets = Secrets::new_with_keypair(ephemeral_kx_keypair, attestation_manager); // Receiver
     let secret_id = test_secret_id(456);
     let secret_data = vec![10, 20, 30];
     let expiry = Utc::now().timestamp() as u64 + 3600;
@@ -247,9 +294,18 @@ async fn test_put_secrets_epk_binding_success() {
     assert_eq!(stored.expiry, expiry);
 }
 
-#[tokio::test]
-async fn test_put_secrets_epk_binding_mismatch() {
-    let secrets = Secrets::new();
+#[test]
+fn test_put_secrets_epk_binding_mismatch() {
+    let ephemeral_kx_keypair = std::sync::Arc::new(crate::crypto::KeyExchangeKeyPair::generate());
+    let mock_gateway = std::sync::Arc::new(crate::attestation::MockGatewayProvider);
+    let attestation_manager = Arc::new(
+        crate::attestation::PlatformAttestationManager::new(
+            ephemeral_kx_keypair.clone(),
+            mock_gateway,
+        )
+        .unwrap(),
+    );
+    let secrets = Secrets::new_with_keypair(ephemeral_kx_keypair, attestation_manager);
     let secret_id = test_secret_id(457);
 
     let sender_kx = KeyExchangeKeyPair::generate();
@@ -301,9 +357,18 @@ async fn test_put_secrets_epk_binding_mismatch() {
     );
 }
 
-#[tokio::test]
-async fn test_put_secrets_existing_is_canonical() {
-    let secrets = Secrets::new();
+#[test]
+fn test_put_secrets_existing_is_canonical() {
+    let ephemeral_kx_keypair = std::sync::Arc::new(crate::crypto::KeyExchangeKeyPair::generate());
+    let mock_gateway = std::sync::Arc::new(crate::attestation::MockGatewayProvider);
+    let attestation_manager = Arc::new(
+        crate::attestation::PlatformAttestationManager::new(
+            ephemeral_kx_keypair.clone(),
+            mock_gateway,
+        )
+        .unwrap(),
+    );
+    let secrets = Secrets::new_with_keypair(ephemeral_kx_keypair, attestation_manager);
     let secret_id = test_secret_id(555);
     let initial_secret_data = vec![1, 1, 1];
 
@@ -391,9 +456,18 @@ async fn test_put_secrets_existing_is_canonical() {
     assert!(stored_after.generation_timestamp > initial_timestamp);
 }
 
-#[tokio::test]
-async fn test_put_secrets_unauthorized_with_attestation() {
-    let secrets = Secrets::new();
+#[test]
+fn test_put_secrets_unauthorized_with_attestation() {
+    let ephemeral_kx_keypair = std::sync::Arc::new(crate::crypto::KeyExchangeKeyPair::generate());
+    let mock_gateway = std::sync::Arc::new(crate::attestation::MockGatewayProvider);
+    let attestation_manager = Arc::new(
+        crate::attestation::PlatformAttestationManager::new(
+            ephemeral_kx_keypair.clone(),
+            mock_gateway,
+        )
+        .unwrap(),
+    );
+    let secrets = Secrets::new_with_keypair(ephemeral_kx_keypair, attestation_manager);
     let secret_id = test_secret_id(567);
 
     let sender_kx = KeyExchangeKeyPair::generate();
@@ -420,7 +494,7 @@ async fn test_put_secrets_unauthorized_with_attestation() {
         secrets_box,
         presented_env_report,
         ConsumerInfo::default(),
-    )]).await;
+    )]);
     assert!(result.is_ok());
     assert!(!result.unwrap()); // Should fail due to no authorization
     assert!(
@@ -432,9 +506,18 @@ async fn test_put_secrets_unauthorized_with_attestation() {
     );
 }
 
-#[tokio::test]
-async fn test_put_secrets_expired() {
-    let secrets = Secrets::new();
+#[test]
+fn test_put_secrets_expired() {
+    let ephemeral_kx_keypair = std::sync::Arc::new(crate::crypto::KeyExchangeKeyPair::generate());
+    let mock_gateway = std::sync::Arc::new(crate::attestation::MockGatewayProvider);
+    let attestation_manager = Arc::new(
+        crate::attestation::PlatformAttestationManager::new(
+            ephemeral_kx_keypair.clone(),
+            mock_gateway,
+        )
+        .unwrap(),
+    );
+    let secrets = Secrets::new_with_keypair(ephemeral_kx_keypair, attestation_manager);
     let secret_id = test_secret_id(678);
     let expiry = Utc::now().timestamp() as u64 - 3600; // Expired
 
@@ -475,9 +558,18 @@ async fn test_put_secrets_expired() {
     );
 }
 
-#[tokio::test]
-async fn test_put_secrets_older_ignored() {
-    let secrets = Secrets::new();
+#[test]
+fn test_put_secrets_older_ignored() {
+    let ephemeral_kx_keypair = std::sync::Arc::new(crate::crypto::KeyExchangeKeyPair::generate());
+    let mock_gateway = std::sync::Arc::new(crate::attestation::MockGatewayProvider);
+    let attestation_manager = Arc::new(
+        crate::attestation::PlatformAttestationManager::new(
+            ephemeral_kx_keypair.clone(),
+            mock_gateway,
+        )
+        .unwrap(),
+    );
+    let secrets = Secrets::new_with_keypair(ephemeral_kx_keypair, attestation_manager);
     let secret_id = test_secret_id(679);
 
     let sender_kx = KeyExchangeKeyPair::generate();
@@ -545,9 +637,18 @@ async fn test_put_secrets_older_ignored() {
     assert_eq!(stored.generation_timestamp, 2);
 }
 
-#[tokio::test]
-async fn test_put_secrets_multiple_bundles() {
-    let secrets = Secrets::new();
+#[test]
+fn test_put_secrets_multiple_bundles() {
+    let ephemeral_kx_keypair = std::sync::Arc::new(crate::crypto::KeyExchangeKeyPair::generate());
+    let mock_gateway = std::sync::Arc::new(crate::attestation::MockGatewayProvider);
+    let attestation_manager = Arc::new(
+        crate::attestation::PlatformAttestationManager::new(
+            ephemeral_kx_keypair.clone(),
+            mock_gateway,
+        )
+        .unwrap(),
+    );
+    let secrets = Secrets::new_with_keypair(ephemeral_kx_keypair, attestation_manager);
     let secret_id1 = test_secret_id(789); // Authorized for node1
     let secret_id2 = test_secret_id(790); // Authorized for node2
     let secret_id3_unauth = test_secret_id(791); // Unauthorized in bundle 1
@@ -629,7 +730,16 @@ async fn test_put_secrets_multiple_bundles() {
 
 #[tokio::test]
 async fn test_get_secrets_authorization_check() {
-    let secrets = Secrets::new();
+    let ephemeral_kx_keypair = std::sync::Arc::new(crate::crypto::KeyExchangeKeyPair::generate());
+    let mock_gateway = std::sync::Arc::new(crate::attestation::MockGatewayProvider);
+    let attestation_manager = Arc::new(
+        crate::attestation::PlatformAttestationManager::new(
+            ephemeral_kx_keypair.clone(),
+            mock_gateway,
+        )
+        .unwrap(),
+    );
+    let secrets = Secrets::new_with_keypair(ephemeral_kx_keypair, attestation_manager);
     let secret_id1 = test_secret_id(890); // Authorized
     let secret_id2 = test_secret_id(891); // Not authorized for this requester
 

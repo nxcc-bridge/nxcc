@@ -227,62 +227,6 @@ pub fn decrypt_secrets_box(
     Ok(secrets)
 }
 
-/// Generates an attestation bundle using the platform attestation manager.
-/// Falls back to dummy attestation if the manager is not available.
-pub async fn generate_attestation(ephemeral_kx_pk: &PublicKey) -> Result<AttestationBundle> {
-    use nxcc_attestation::user_data_binding;
-
-    use crate::attestation::get_platform_attestation_manager;
-
-    tracing::debug!(
-        "generate_attestation called with ephemeral_key: {}",
-        hex::encode(ephemeral_kx_pk.as_bytes()),
-    );
-
-    // Try to use the platform attestation manager if initialized
-    if let Some(manager) = std::panic::catch_unwind(|| get_platform_attestation_manager()).ok() {
-        tracing::debug!("Platform attestation manager available, generating bound attestation");
-        match manager.generate_attestation().await {
-            Ok(bundle) => {
-                tracing::info!(
-                    "Successfully generated platform attestation with detached userdata size: {}",
-                    bundle.detached_userdata.len()
-                );
-                return Ok(bundle);
-            }
-            Err(e) => {
-                tracing::warn!(
-                    "Failed to generate platform attestation: {}, falling back to dummy",
-                    e
-                );
-            }
-        }
-    } else {
-        tracing::warn!("Platform attestation manager not initialized, using dummy attestation");
-    }
-
-    // Fallback to dummy attestation
-    tracing::debug!("Using dummy attestation fallback");
-    use nxcc_interface::types::attestation::RawAttestation;
-
-    let user_data_payload =
-        user_data_binding::UserData::new(ephemeral_kx_pk.as_bytes().to_vec(), vec![]);
-    let detached_userdata = user_data_payload.to_cbor()?;
-    let userdata_hash = user_data_binding::hash_userdata(&detached_userdata);
-
-    let mut evidence = vec![0u8; 64];
-    evidence[..32].copy_from_slice(&userdata_hash);
-
-    Ok(AttestationBundle {
-        raw_attestation: RawAttestation {
-            platform_type: "dummy".to_string(),
-            evidence, // Placeholder with hash
-            certificates: None,
-        },
-        detached_userdata,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use alloy_primitives::{Address, U256};

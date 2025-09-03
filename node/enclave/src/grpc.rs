@@ -488,21 +488,25 @@ pub async fn start_grpc_server(config: &EnclaveConfig) -> Result<(), Box<dyn std
     let ephemeral_kx_keypair = std::sync::Arc::new(crate::crypto::KeyExchangeKeyPair::generate());
 
     // Instantiate shared services with the shared keypair
-    let secrets_service = Secrets::new_with_keypair(ephemeral_kx_keypair.clone());
-    let runner_service = Arc::new(RunnerService::new(secrets_service.clone()));
-
-    // Initialize the platform attestation manager with a mock gateway provider and shared keypair
     let mock_gateway = std::sync::Arc::new(crate::attestation::MockGatewayProvider);
+    let attestation_manager = Arc::new(
+        crate::attestation::PlatformAttestationManager::new(
+            ephemeral_kx_keypair.clone(),
+            mock_gateway,
+        )
+        .map_err(|e| {
+            tracing::error!("Failed to initialize platform attestation manager: {}", e);
+            e
+        })?,
+    );
+    tracing::info!("Platform attestation manager initialized successfully");
 
-    if let Err(e) = crate::attestation::initialize_platform_attestation_manager(
-        ephemeral_kx_keypair,
-        mock_gateway,
-    ) {
-        tracing::warn!("Failed to initialize platform attestation manager: {}", e);
-        tracing::info!("Continuing with fallback attestation...");
-    } else {
-        tracing::info!("Platform attestation manager initialized successfully");
-    }
+    let secrets_service =
+        Secrets::new_with_keypair(ephemeral_kx_keypair.clone(), attestation_manager.clone());
+    let runner_service = Arc::new(RunnerService::new(
+        secrets_service.clone(),
+        attestation_manager,
+    ));
 
     // Instantiate gRPC service wrappers
     let secrets_grpc = SecretsGrpcService::new(secrets_service);

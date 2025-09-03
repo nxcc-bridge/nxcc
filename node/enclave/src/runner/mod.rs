@@ -19,7 +19,7 @@ use tracing::{Instrument as _, debug, debug_span, error, info, info_span};
 
 pub use self::error::RunnerError;
 use self::vm_client::VmClient;
-use crate::secrets::Secrets;
+use crate::{attestation::PlatformAttestationManager, secrets::Secrets};
 
 /// Manages attached VM clients and worker mappings.
 pub struct RunnerService {
@@ -33,6 +33,7 @@ pub struct RunnerService {
     secrets: Arc<Secrets>,
     /// Sender for the internal event queue: (worker_id, handler_name, serialized_vm_invocation_payload)
     event_tx: mpsc::UnboundedSender<(String, String, Vec<u8>)>,
+    attestation_manager: Arc<PlatformAttestationManager>,
 }
 
 /// Structure passed as payload to VmClient::invoke_worker for event delivery.
@@ -46,7 +47,10 @@ pub(crate) struct VmEventInvocation<'a> {
 }
 
 impl RunnerService {
-    pub fn new(secrets: Arc<Secrets>) -> Self {
+    pub fn new(
+        secrets: Arc<Secrets>,
+        attestation_manager: Arc<PlatformAttestationManager>,
+    ) -> Self {
         let (event_tx, mut event_rx) = mpsc::unbounded_channel::<(String, String, Vec<u8>)>();
 
         let vms_clone = Arc::new(RwLock::new(HashMap::<String, VmClient>::new()));
@@ -177,6 +181,7 @@ impl RunnerService {
             dead_worker_map: dead_worker_map_clone,
             secrets,
             event_tx,
+            attestation_manager,
         }
     }
 }

@@ -28,33 +28,29 @@ impl RunnerService {
 
         // First, enhance contexts with attestation claims by verifying their attestation reports
         for context in &mut contexts {
-            if let Some(manager) =
-                std::panic::catch_unwind(|| crate::attestation::get_platform_attestation_manager())
-                    .ok()
+            // Try to verify the attestation and extract standardized claims
+            match self
+                .verify_attestation_and_extract_claims(
+                    &context.env_report.attestation,
+                    &self.attestation_manager,
+                )
+                .await
             {
-                // Try to verify the attestation and extract standardized claims
-                match self
-                    .verify_attestation_and_extract_claims(&context.env_report.attestation, manager)
-                    .await
-                {
-                    Ok(claims) => {
-                        info!(
-                            "Successfully verified attestation with platform {}",
-                            claims.eat_profile
-                        );
-                        context.attestation_claims = Some(claims);
-                    }
-                    Err(e) => {
-                        warn!(
-                            "Failed to verify attestation: {}. Policy will run without verified \
-                             claims.",
-                            e
-                        );
-                        // Continue without claims - policy can decide whether to allow this
-                    }
+                Ok(claims) => {
+                    info!(
+                        "Successfully verified attestation with platform {}",
+                        claims.eat_profile
+                    );
+                    context.attestation_claims = Some(claims);
                 }
-            } else {
-                debug!("Platform attestation manager not available");
+                Err(e) => {
+                    warn!(
+                        "Failed to verify attestation: {}. Policy will run without verified \
+                         claims.",
+                        e
+                    );
+                    // Continue without claims - policy can decide whether to allow this
+                }
             }
         }
 

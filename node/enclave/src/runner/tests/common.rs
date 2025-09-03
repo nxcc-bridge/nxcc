@@ -80,22 +80,18 @@ pub fn setup() -> (Arc<Secrets>, RunnerService, MockVmServiceClient) {
     // Generate ephemeral keypair for the attestation manager
     let ephemeral_kx_keypair = std::sync::Arc::new(crate::crypto::KeyExchangeKeyPair::generate());
 
-    // Initialize the platform attestation manager with a mock gateway provider
     let mock_gateway = std::sync::Arc::new(crate::attestation::MockGatewayProvider);
-    if let Err(e) = crate::attestation::initialize_platform_attestation_manager(
-        ephemeral_kx_keypair.clone(),
-        mock_gateway,
-    ) {
-        // In tests, we can ignore initialization errors since the manager might already be initialized
-        // from a previous test run
-        eprintln!(
-            "Platform attestation manager already initialized or failed: {}",
-            e
-        );
-    }
+    let attestation_manager = Arc::new(
+        crate::attestation::PlatformAttestationManager::new(
+            ephemeral_kx_keypair.clone(),
+            mock_gateway,
+        )
+        .expect("Failed to create attestation manager for test"),
+    );
 
-    let secrets = Secrets::new_with_keypair(ephemeral_kx_keypair);
-    let runner_service = RunnerService::new(secrets.clone());
+    let secrets =
+        Secrets::new_with_keypair(ephemeral_kx_keypair.clone(), attestation_manager.clone());
+    let runner_service = RunnerService::new(secrets.clone(), attestation_manager);
     let mock_client = MockVmServiceClient::new();
     (secrets, runner_service, mock_client)
 }

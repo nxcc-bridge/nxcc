@@ -24,6 +24,7 @@ use tonic::Request;
 use tracing::info;
 
 use crate::{
+    attestation::PlatformAttestationManager,
     crypto::{KeyExchangeKeyPair, decrypt_secrets_box, encrypt_secrets_box},
     grpc::{EnclaveRunnerGrpcService, SecretsGrpcService},
     runner::RunnerService,
@@ -70,8 +71,18 @@ pub fn setup_services() -> (
     SecretsGrpcService,
     EnclaveRunnerGrpcService,
 ) {
-    let secrets_service = Secrets::new();
-    let runner_service = Arc::new(RunnerService::new(secrets_service.clone()));
+    let ephemeral_kx_keypair = Arc::new(crate::crypto::KeyExchangeKeyPair::generate());
+    let mock_gateway = Arc::new(crate::attestation::MockGatewayProvider);
+    let attestation_manager = Arc::new(
+        PlatformAttestationManager::new(ephemeral_kx_keypair.clone(), mock_gateway).unwrap(),
+    );
+
+    let secrets_service =
+        Secrets::new_with_keypair(ephemeral_kx_keypair.clone(), attestation_manager.clone());
+    let runner_service = Arc::new(RunnerService::new(
+        secrets_service.clone(),
+        attestation_manager,
+    ));
     let mock_vm_client = MockVmServiceClient::new();
 
     let secrets_grpc = SecretsGrpcService::new(secrets_service.clone());

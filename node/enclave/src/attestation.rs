@@ -62,29 +62,6 @@ impl PlatformAttestationManager {
     }
 }
 
-// Global instance (to be initialized at startup)
-use std::sync::OnceLock;
-static PLATFORM_ATTESTATION_MANAGER: OnceLock<PlatformAttestationManager> = OnceLock::new();
-
-/// Initialize the platform attestation manager
-pub fn initialize_platform_attestation_manager(
-    ephemeral_kx_keypair: Arc<KeyExchangeKeyPair>,
-    gateway_provider: Arc<dyn GatewayProvider>,
-) -> Result<()> {
-    let manager = PlatformAttestationManager::new(ephemeral_kx_keypair, gateway_provider)?;
-    PLATFORM_ATTESTATION_MANAGER
-        .set(manager)
-        .map_err(|_| anyhow::anyhow!("Platform attestation manager already initialized"))?;
-    Ok(())
-}
-
-/// Get the global platform attestation manager
-pub fn get_platform_attestation_manager() -> &'static PlatformAttestationManager {
-    PLATFORM_ATTESTATION_MANAGER
-        .get()
-        .expect("Platform attestation manager not initialized")
-}
-
 pub struct MockGatewayProvider;
 
 #[async_trait]

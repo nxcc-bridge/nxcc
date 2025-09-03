@@ -1,6 +1,3 @@
-#[cfg(test)]
-mod tests;
-
 use std::{
     collections::HashMap,
     hash::{Hash, Hasher},
@@ -14,13 +11,13 @@ use nxcc_interface::types::{
     policy::PolicyExecutionReport,
     secrets::{ConsumerInfo, SecretId, SecretsBox},
 };
-use once_cell::sync::Lazy;
 use sha2::{Digest, Sha256};
 use tracing::{debug, error, info, warn};
 use x25519_dalek::PublicKey;
 
-use crate::crypto::{
-    KeyExchangeKeyPair, decrypt_secrets_box, encrypt_secrets_box, generate_attestation,
+use crate::{
+    attestation::PlatformAttestationManager,
+    crypto::{KeyExchangeKeyPair, decrypt_secrets_box, encrypt_secrets_box},
 };
 
 /// Represents a secret stored in the enclave's memory.
@@ -64,16 +61,89 @@ fn calculate_authorization_id(
     AuthorizationId(<[u8; 32]>::from(hasher.finalize()))
 }
 
-/// Verifies a TEE attestation bundle using the platform attestation service.
-async fn verify_attestation(bundle: &AttestationBundle) -> Result<Vec<u8>, String> {
-    use crate::attestation::get_platform_attestation_manager;
+/// The core state and logic for managing secrets within the enclave.
+pub struct Secrets {
+    /// Ephemeral keypair for Diffie-Hellman, generated once per enclave instance.
+    pub(self) ephemeral_kx_keypair: KeyExchangeKeyPair,
+    /// In-memory storage for decrypted secrets.
+    pub(self) secrets_storage: RwLock<HashMap<SecretId, StoredSecret>>,
+    /// Stores granted authorizations based on runner policy execution reports.
+    /// Key: AuthorizationId (hash of request details), Value: Expiry timestamp (or timestamp of grant).
+    authorizations: RwLock<HashMap<AuthorizationId, u64>>,
+    attestation_manager: Arc<PlatformAttestationManager>,
+}
 
-    // Try to use the platform attestation manager if initialized
-    if let Some(manager) = std::panic::catch_unwind(|| get_platform_attestation_manager()).ok() {
+impl Secrets {
+    /// Creates a new Secrets service instance with a provided ephemeral keypair.
+    /// This ensures consistency with the platform attestation manager.
+    pub fn new_with_keypair(
+        ephemeral_kx_keypair: Arc<KeyExchangeKeyPair>,
+        attestation_manager: Arc<PlatformAttestationManager>,
+    ) -> Arc<Self> {
+        // Clone the keypair data to create an owned instance
+        let keypair = KeyExchangeKeyPair::from_bytes(&ephemeral_kx_keypair.to_bytes()).unwrap();
+        Arc::new(Self {
+            ephemeral_kx_keypair: keypair,
+            secrets_storage: RwLock::new(HashMap::new()),
+            authorizations: RwLock::new(HashMap::new()),
+            attestation_manager,
+        })
+    }
+
+    /// Returns an attestation report binding the ephemeral public key and user data.
+    /// The ephemeral key is generated lazily on first call and reused subsequently.
+    pub async fn get_report(&self) -> Result<AttestationBundle, String> {
+        let public_key = self.ephemeral_kx_keypair.public_key();
+        debug!(
+            "Secrets::get_report using ephemeral_key: {}",
+            hex::encode(public_key.as_bytes()),
+        );
+
+        match self.attestation_manager.generate_attestation().await {
+            Ok(bundle) => {
+                info!(
+                    "Successfully generated platform attestation with detached userdata size: {}",
+                    bundle.detached_userdata.len()
+                );
+                Ok(bundle)
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to generate platform attestation: {}, falling back to dummy",
+                    e
+                );
+                // Fallback to dummy attestation
+                debug!("Using dummy attestation fallback");
+                use nxcc_attestation::user_data_binding;
+                use nxcc_interface::types::attestation::RawAttestation;
+
+                let user_data_payload =
+                    user_data_binding::UserData::new(public_key.as_bytes().to_vec(), vec![]);
+                let detached_userdata = user_data_payload.to_cbor().map_err(|e| e.to_string())?;
+                let userdata_hash = user_data_binding::hash_userdata(&detached_userdata);
+
+                let mut evidence = vec![0u8; 64];
+                evidence[..32].copy_from_slice(&userdata_hash);
+
+                Ok(AttestationBundle {
+                    raw_attestation: RawAttestation {
+                        platform_type: "dummy".to_string(),
+                        evidence, // Placeholder with hash
+                        certificates: None,
+                    },
+                    detached_userdata,
+                })
+            }
+        }
+    }
+
+    /// Verifies a TEE attestation bundle using the platform attestation service.
+    async fn verify_attestation(&self, bundle: &AttestationBundle) -> Result<Vec<u8>, String> {
         // Verify using the attestation service
-        match manager
+        match self
+            .attestation_manager
             .attestation_service()
-            .verify_attestation(&bundle)
+            .verify_attestation(bundle)
             .await
         {
             Ok(claims) => {
@@ -95,79 +165,6 @@ async fn verify_attestation(bundle: &AttestationBundle) -> Result<Vec<u8>, Strin
             }
             Err(e) => Err(format!("Attestation verification failed: {}", e)),
         }
-    } else {
-        error!(
-            "CRITICAL: Platform attestation manager not initialized! This should not happen in \
-             integration tests."
-        );
-
-        // Fallback to basic validation for development/testing
-        use nxcc_attestation::user_data_binding;
-        let userdata = user_data_binding::UserData::from_cbor(&bundle.detached_userdata)
-            .map_err(|e| format!("Failed to parse userdata in fallback: {}", e))?;
-        let ephemeral_key = userdata.ephemeral_public_key;
-        if ephemeral_key.len() != 32 {
-            return Err("Invalid ephemeral public key length in attestation".to_string());
-        }
-
-        debug!(
-            "Placeholder: Attestation verification using fallback for bundle with key: {}, \
-             returning user_data",
-            hex::encode(&ephemeral_key)
-        );
-        Ok(bundle.detached_userdata.clone())
-    }
-}
-
-/// The core state and logic for managing secrets within the enclave.
-pub struct Secrets {
-    /// Ephemeral keypair for Diffie-Hellman, generated once per enclave instance.
-    pub(self) ephemeral_kx_keypair: KeyExchangeKeyPair,
-    /// In-memory storage for decrypted secrets.
-    pub(self) secrets_storage: RwLock<HashMap<SecretId, StoredSecret>>,
-    /// Stores granted authorizations based on runner policy execution reports.
-    /// Key: AuthorizationId (hash of request details), Value: Expiry timestamp (or timestamp of grant).
-    authorizations: RwLock<HashMap<AuthorizationId, u64>>,
-}
-
-impl Secrets {
-    /// Creates a new Secrets service instance.
-    pub fn new() -> Arc<Self> {
-        Arc::new(Self {
-            ephemeral_kx_keypair: KeyExchangeKeyPair::generate(),
-            secrets_storage: RwLock::new(HashMap::new()),
-            authorizations: RwLock::new(HashMap::new()),
-        })
-    }
-
-    /// Creates a new Secrets service instance with a provided ephemeral keypair.
-    /// This ensures consistency with the platform attestation manager.
-    pub fn new_with_keypair(ephemeral_kx_keypair: Arc<KeyExchangeKeyPair>) -> Arc<Self> {
-        // Clone the keypair data to create an owned instance
-        let keypair = KeyExchangeKeyPair::from_bytes(&ephemeral_kx_keypair.to_bytes()).unwrap();
-        Arc::new(Self {
-            ephemeral_kx_keypair: keypair,
-            secrets_storage: RwLock::new(HashMap::new()),
-            authorizations: RwLock::new(HashMap::new()),
-        })
-    }
-
-    /// Returns an attestation report binding the ephemeral public key and user data.
-    /// The ephemeral key is generated lazily on first call and reused subsequently.
-    pub async fn get_report(&self) -> Result<AttestationBundle, String> {
-        let public_key = self.ephemeral_kx_keypair.public_key();
-        debug!(
-            "Secrets::get_report using ephemeral_key: {}",
-            hex::encode(public_key.as_bytes()),
-        );
-        let report = generate_attestation(public_key)
-            .await
-            .map_err(|e| e.to_string())?;
-        debug!(
-            "Generated attestation report with detached userdata size: {}",
-            report.detached_userdata.len()
-        );
-        Ok(report)
     }
 
     /// Stores secrets received from peers after verifying authorization and attestation binding.
@@ -188,7 +185,7 @@ impl Secrets {
             );
 
             // 1. Verify the Attestation Report from the EnvReport
-            let verified_user_data = match verify_attestation(&env_report.attestation).await {
+            let verified_user_data = match self.verify_attestation(&env_report.attestation).await {
                 Ok(data) => data,
                 Err(e) => {
                     error!("Attestation verification failed for bundle: {}", e);
@@ -197,14 +194,18 @@ impl Secrets {
             };
             debug!("Attestation verified");
 
-            verified_bundles.push((secrets_box, env_report, local_consumer_info, verified_user_data));
+            verified_bundles.push((
+                secrets_box,
+                env_report,
+                local_consumer_info,
+                verified_user_data,
+            ));
         }
 
         // Now acquire write lock and process verified bundles
         let mut secrets_map = self.secrets_storage.write().unwrap();
 
         for (secrets_box, env_report, local_consumer_info, verified_user_data) in verified_bundles {
-
             // TODO (important!): verify that env report is bound to the attestation (node_id is used but untrusted)
 
             // 2. Deserialize userdata to get sender's EPK
@@ -449,13 +450,15 @@ impl Secrets {
 
         // 1. Verify the requester's EnvReport's attestation
         // This is crucial to ensure we are sending secrets to a trusted enclave.
-        let verified_requester_detached_userdata =
-            match verify_attestation(&requester_env_report.attestation).await {
-                Ok(data) => data, // We don't necessarily need the user_data here, just verification success
-                Err(e) => {
-                    return Err(format!("Requester attestation verification failed: {}", e));
-                }
-            };
+        let verified_requester_detached_userdata = match self
+            .verify_attestation(&requester_env_report.attestation)
+            .await
+        {
+            Ok(data) => data, // We don't necessarily need the user_data here, just verification success
+            Err(e) => {
+                return Err(format!("Requester attestation verification failed: {}", e));
+            }
+        };
         debug!("Requester attestation verified");
         use nxcc_attestation::user_data_binding;
         let requester_userdata =
