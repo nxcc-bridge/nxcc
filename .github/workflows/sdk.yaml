@@ -30,6 +30,15 @@ jobs:
       - name: Install pnpm
         run: npm install -g pnpm
 
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Build smart contracts
+        working-directory: contracts/evm
+        run: |
+          forge soldeer install
+          FOUNDRY_PROFILE=release forge build
+
       - name: Install workspace dependencies
         working-directory: sdk
         run: pnpm install

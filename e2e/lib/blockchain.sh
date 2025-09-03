@@ -30,11 +30,9 @@ deploy_identity_contract() {
 
 	# Deploy using NXCC CLI
 	local deploy_output
-	deploy_output=$(cd "$project_root" && npx --prefix sdk/cli nxcc identity deploy \
+	if ! deploy_output=$(cd "$project_root" && npx --prefix sdk/cli nxcc identity deploy \
 		--gateway-url "$anvil_rpc_url" \
-		--signer "$deployer_private_key" 2>&1)
-
-	if [[ $? -ne 0 ]]; then
+		--signer "$deployer_private_key" 2>&1); then
 		error "Failed to deploy Identity contract. Output: $deploy_output"
 	fi
 
@@ -84,12 +82,10 @@ create_identity_with_policy() {
 
 	# Create identity using NXCC CLI
 	local create_output
-	create_output=$(cd "$project_root" && npx --prefix sdk/cli nxcc identity create "$contract_address" \
+	if ! create_output=$(cd "$project_root" && npx --prefix sdk/cli nxcc identity create "$contract_address" \
 		--gateway-url "$anvil_rpc_url" \
 		--signer "$signer_private_key" \
-		--policy "$policy_url" 2>&1)
-
-	if [[ $? -ne 0 ]]; then
+		--policy "$policy_url" 2>&1); then
 		error "Failed to create identity. Output: $create_output"
 	fi
 
