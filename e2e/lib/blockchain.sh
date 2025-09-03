@@ -20,38 +20,30 @@ deploy_identity_contract() {
 	script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 	project_root="$(cd "$script_dir/../.." && pwd)"
 
-	cd "$project_root/contracts/evm" || error "Failed to change to contracts directory"
-
-	# Install dependencies if needed
-	if [[ ! -d "dependencies" ]]; then
-		log "Installing Solidity dependencies..." >&2
-		forge soldeer install
+	# Build CLI if needed
+	if [[ ! -f "$project_root/sdk/cli/dist/index.js" ]]; then
+		log "Building NXCC CLI..." >&2
+		if ! (cd "$project_root/sdk/cli" && pnpm install && pnpm build); then
+			error "Failed to build NXCC CLI"
+		fi
 	fi
 
-	# Build contracts
-	log "Building contracts..." >&2
-	forge build >&2
-
-	# Deploy Identity contract using the tested deploy script
+	# Deploy using NXCC CLI
 	local deploy_output
-	deploy_output=$(PRIVATE_KEY="$deployer_private_key" forge script script/DeployIdentity.s.sol \
-		--rpc-url "$anvil_rpc_url" \
-		--broadcast 2>&1)
+	deploy_output=$(cd "$project_root" && npx --prefix sdk/cli nxcc identity deploy \
+		--gateway-url "$anvil_rpc_url" \
+		--signer "$deployer_private_key" 2>&1)
 
+	if [[ $? -ne 0 ]]; then
+		error "Failed to deploy Identity contract. Output: $deploy_output"
+	fi
+
+	# Extract contract address from CLI output
 	local contract_address
+	contract_address=$(echo "$deploy_output" | grep "Address:" | awk '{print $2}')
 
-	# Check if deployment succeeded or if contract already exists
-	if echo "$deploy_output" | grep -q "CreateCollision"; then
-		# Contract already deployed, compute the address
-		contract_address="0xb1c985140805a55bf6d5Ea42232B73023dc51eE0" # Default salt CREATE2 address
-		log "Identity contract already deployed at deterministic address: $contract_address" >&2
-	else
-		# Extract the contract address from successful deployment
-		contract_address=$(echo "$deploy_output" | grep "Identity deployed to:" | awk '{print $4}')
-
-		if [[ -z "$contract_address" ]]; then
-			error "Failed to deploy Identity contract. Output: $deploy_output"
-		fi
+	if [[ -z "$contract_address" ]]; then
+		error "Failed to extract contract address from deploy output: $deploy_output"
 	fi
 
 	log "Identity contract deployed at: $contract_address" >&2
@@ -66,7 +58,21 @@ create_identity_with_policy() {
 	local policy_manifest_path="$4"
 	local signer_private_key="$5"
 
-	log "Creating identity with policy using cast commands..." >&2
+	log "Creating identity with policy using NXCC CLI..." >&2
+
+	# Get project root dynamically
+	local script_dir
+	local project_root
+	script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+	project_root="$(cd "$script_dir/../.." && pwd)"
+
+	# Build CLI if needed
+	if [[ ! -f "$project_root/sdk/cli/dist/index.js" ]]; then
+		log "Building NXCC CLI..." >&2
+		if ! (cd "$project_root/sdk/cli" && pnpm install && pnpm build); then
+			error "Failed to build NXCC CLI"
+		fi
+	fi
 
 	# First upload the policy bundle to get its URL
 	local bundle_url
@@ -76,61 +82,23 @@ create_identity_with_policy() {
 	local policy_url
 	policy_url=$(upload_policy_manifest "$policy_manifest_path" "$bundle_url")
 
-	# Create identity by minting NFT with policy URL
-	log "Minting new identity NFT with policy URL..." >&2
-	local mint_output
-	local mint_output
-	mint_output=$(cast send "$contract_address" "mint(string)" "$policy_url" \
-		--rpc-url "$anvil_rpc_url" \
-		--private-key "$signer_private_key" 2>&1)
+	# Create identity using NXCC CLI
+	local create_output
+	create_output=$(cd "$project_root" && npx --prefix sdk/cli nxcc identity create "$contract_address" \
+		--gateway-url "$anvil_rpc_url" \
+		--signer "$signer_private_key" \
+		--policy "$policy_url" 2>&1)
 
-	if ! echo "$mint_output" | grep -q "transactionHash"; then
-		error "Failed to mint identity NFT: $mint_output"
+	if [[ $? -ne 0 ]]; then
+		error "Failed to create identity. Output: $create_output"
 	fi
 
-	# Get the transaction hash from output (exclude logs JSON)
-	local tx_hash
-	tx_hash=$(echo "$mint_output" | grep "^transactionHash" | awk '{print $2}')
-
-	if [[ -z "$tx_hash" ]]; then
-		error "Failed to extract transaction hash from mint output: $mint_output"
-	fi
-
-	log "Identity minted in transaction: $tx_hash" >&2
-
-	# Get the minted token ID using a simpler approach
+	# Extract token ID from CLI output (JSON format)
 	local token_id
-	# Use transaction receipt to get the token ID from Transfer event
-	if [[ -n "$tx_hash" ]]; then
-		# Wait a moment for transaction to be included
-		sleep 1
-		local receipt_logs
-		receipt_logs=$(cast receipt "$tx_hash" --rpc-url "$anvil_rpc_url" 2>/dev/null | grep -A 1 "Transfer")
-		# Extract the token ID from the Transfer event (last topic)
-		token_id=$(echo "$receipt_logs" | grep "topics" -A 10 | grep "0x" | tail -1 | grep -o '0x[0-9a-fA-F]*' | tail -1)
-		if [[ -n "$token_id" ]]; then
-			token_id=$(printf "%d" "$token_id")
-		fi
-	fi
+	token_id=$(echo "$create_output" | jq -r '.id' 2>/dev/null)
 
-	# Fallback: find the highest token ID owned by the signer
-	if [[ -z "$token_id" ]]; then
-		local signer_address
-		signer_address=$(cast wallet address --private-key "$signer_private_key")
-		# Try token IDs 1-20 to find the latest one owned by signer
-		for test_id in {20..1}; do
-			local owner
-			owner=$(cast call "$contract_address" "ownerOf(uint256)" "$test_id" --rpc-url "$anvil_rpc_url" 2>/dev/null)
-			# Remove 0x prefix and padding, compare addresses
-			local owner_clean="${owner#0x}"
-			owner_clean="${owner_clean#000000000000000000000000}"
-			local signer_clean="${signer_address#0x}"
-			if [[ "$(echo "$owner_clean" | tr '[:upper:]' '[:lower:]')" == "$(echo "$signer_clean" | tr '[:upper:]' '[:lower:]')" ]]; then
-				token_id="$test_id"
-				break
-			fi
-		done
-		log "Using latest owned token ID: $token_id" >&2
+	if [[ -z "$token_id" || "$token_id" == "null" ]]; then
+		error "Failed to extract token ID from create output: $create_output"
 	fi
 
 	log "Identity created with token ID: $token_id and policy URL: $policy_url" >&2
