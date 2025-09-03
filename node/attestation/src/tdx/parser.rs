@@ -1,6 +1,7 @@
-use std::convert::TryInto;
+use std::{collections::HashMap, convert::TryInto};
 
 use anyhow::{anyhow, Result};
+use serde::{Deserialize, Serialize};
 
 /// TDX-specific constants
 pub const TEE_TYPE_TDX: u32 = 0x81;
@@ -93,6 +94,39 @@ pub struct TdxAttestationClaims {
     pub has_valid_signature: bool, // Whether signature could be parsed
     pub signature_present: bool,   // Whether signature data exists
     pub cert_chain_present: bool,  // Whether cert chain is available
+}
+
+/// Parsed TDX quote with extracted measurements and claims
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParsedTdxQuote {
+    /// Version of the quote
+    pub version: u16,
+    /// TEE type
+    pub tee_type: u32,
+    /// Software measurement (MRTD)
+    pub mrtd: Vec<u8>,
+    /// Configuration ID
+    pub mrconfigid: Vec<u8>,
+    /// Owner ID
+    pub mrowner: Vec<u8>,
+    /// Owner config ID
+    pub mrownerconfig: Vec<u8>,
+    /// Runtime measurements
+    pub rtmrs: HashMap<String, Vec<u8>>,
+    /// TD attributes
+    pub td_attributes: Vec<u8>,
+    /// XFAM
+    pub xfam: Vec<u8>,
+    /// CPU SVN
+    pub cpu_svn: Vec<u8>,
+    /// Report data (user provided)
+    pub report_data: Vec<u8>,
+    /// Quote signature data
+    pub signature_data: Vec<u8>,
+    /// Debug flag from attributes
+    pub debug_enabled: bool,
+    /// Security version (derived from TCB info)
+    pub security_version: u64,
 }
 
 /// Working TDX Quote Parser
@@ -467,6 +501,41 @@ impl TdxParser {
             has_valid_signature,
             signature_present,
             cert_chain_present,
+        }
+    }
+
+    /// Extract claims into the serializable ParsedTdxQuote format
+    pub fn extract_parsed_quote(quote: &TdxQuote) -> ParsedTdxQuote {
+        let td_report = &quote.td_report;
+
+        let mut rtmrs = HashMap::new();
+        rtmrs.insert("rtmr0".to_string(), td_report.rtmr[0].to_vec());
+        rtmrs.insert("rtmr1".to_string(), td_report.rtmr[1].to_vec());
+        rtmrs.insert("rtmr2".to_string(), td_report.rtmr[2].to_vec());
+        rtmrs.insert("rtmr3".to_string(), td_report.rtmr[3].to_vec());
+
+        // Extract debug flag from attributes (bit 0)
+        let debug_enabled = (td_report.td_attributes & 0x01) != 0;
+
+        // Extract security version from TCB SVN
+        let security_version =
+            u64::from_le_bytes(td_report.tcb_svn[0..8].try_into().unwrap_or([0u8; 8]));
+
+        ParsedTdxQuote {
+            version: quote.header.version,
+            tee_type: quote.header.tee_type,
+            mrtd: td_report.mrtd.to_vec(),
+            mrconfigid: td_report.mr_config_id.to_vec(),
+            mrowner: td_report.mr_owner.to_vec(),
+            mrownerconfig: td_report.mr_owner_config.to_vec(),
+            rtmrs,
+            td_attributes: td_report.td_attributes.to_le_bytes().to_vec(),
+            xfam: td_report.xfam.to_le_bytes().to_vec(),
+            cpu_svn: td_report.tcb_svn.to_vec(),
+            report_data: td_report.report_data.to_vec(),
+            signature_data: quote.raw_signature_data.clone(),
+            debug_enabled,
+            security_version,
         }
     }
 

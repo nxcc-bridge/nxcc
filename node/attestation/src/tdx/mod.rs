@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 
 pub mod hardware;
 pub mod parser;
-pub mod quote_parser;
 
 // Re-export commonly used items
 pub use parser::{TdxAttestationClaims, TdxParser, QUOTE_VERSION_4, TEE_TYPE_TDX};
@@ -154,26 +153,30 @@ impl TdxGuest {
 
     /// Parse a TDX quote and extract key information
     pub fn parse_quote(quote_bytes: &[u8]) -> Result<TdxQuote> {
-        use crate::tdx::quote_parser::TdxQuoteV4;
+        use crate::tdx::parser::TdxParser;
 
         // Use the proper quote parser
-        let parsed_quote = TdxQuoteV4::parse(quote_bytes)?;
-        let claims = parsed_quote.extract_claims();
+        let parsed_quote = TdxParser::parse_quote(quote_bytes)?;
+        let claims = TdxParser::extract_claims(&parsed_quote);
 
         // Convert to legacy format for compatibility
         let header = TdxQuoteHeader {
-            version: claims.version,
-            ak_type: 0, // Not used in V4
+            version: claims.quote_version,
+            ak_type: claims.att_key_type,
             tee_type: claims.tee_type,
             qe_svn: 0,               // Not directly available in V4
             pce_svn: 0,              // Not directly available in V4
             qe_vendor_id: [0u8; 16], // Would need to extract from signature data
-            user_data: claims.report_data[..20].try_into().unwrap_or([0u8; 20]),
+            user_data: claims.user_data[..20.min(claims.user_data.len())]
+                .try_into()
+                .unwrap_or([0u8; 20]),
         };
 
         let td_report = TdReport {
             report_type: 0x81, // TDX report type
-            cpu_svn: claims.cpu_svn.try_into().unwrap_or([0u8; 16]),
+            cpu_svn: claims.tcb_svn[..16.min(claims.tcb_svn.len())]
+                .try_into()
+                .unwrap_or([0u8; 16]),
             tee_tcb_info: [0u8; 239], // Would need proper parsing
             tee_info: {
                 let mut tee_info = [0u8; 512];
@@ -182,7 +185,9 @@ impl TdxGuest {
                     tee_info[0..claims.mrtd.len()].copy_from_slice(&claims.mrtd);
                 }
                 let mut offset = 48;
-                for rtmr in claims.rtmrs.values() {
+                // Pack RTMRs in order
+                let rtmrs = [&claims.rtmr0, &claims.rtmr1, &claims.rtmr2, &claims.rtmr3];
+                for rtmr in rtmrs {
                     if offset + rtmr.len() <= 512 {
                         let end = offset + rtmr.len();
                         tee_info[offset..end].copy_from_slice(rtmr);
@@ -191,13 +196,16 @@ impl TdxGuest {
                 }
                 tee_info
             },
-            report_data: claims.report_data.try_into().unwrap_or([0u8; 64]),
+            report_data: claims.report_data[..64.min(claims.report_data.len())]
+                .try_into()
+                .unwrap_or([0u8; 64]),
         };
 
+        // Build legacy TdxQuote struct
         Ok(TdxQuote {
             header,
             td_report,
-            signature_data: claims.signature_data,
+            signature_data: parsed_quote.raw_signature_data,
         })
     }
 
