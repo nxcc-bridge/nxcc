@@ -90,7 +90,7 @@ impl SecretsServerTrait for SecretsGrpcService {
             bundles.push((secrets_box, env_report, consumer_info));
         }
 
-        match self.secrets.put_secrets(bundles) {
+        match self.secrets.put_secrets(bundles).await {
             Ok(success) => Ok(Response::new(PutSecretsResponse { success })),
             Err(e) => {
                 error!("PutSecrets failed: {}", e);

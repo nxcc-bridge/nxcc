@@ -65,18 +65,17 @@ fn calculate_authorization_id(
 }
 
 /// Verifies a TEE attestation bundle using the platform attestation service.
-fn verify_attestation(bundle: &AttestationBundle) -> Result<Vec<u8>, String> {
+async fn verify_attestation(bundle: &AttestationBundle) -> Result<Vec<u8>, String> {
     use crate::attestation::get_platform_attestation_manager;
 
     // Try to use the platform attestation manager if initialized
     if let Some(manager) = std::panic::catch_unwind(|| get_platform_attestation_manager()).ok() {
         // Verify using the attestation service
-        match futures::executor::block_on(async {
-            manager
-                .attestation_service()
-                .verify_attestation(&bundle)
-                .await
-        }) {
+        match manager
+            .attestation_service()
+            .verify_attestation(&bundle)
+            .await
+        {
             Ok(claims) => {
                 // Log the first measurement if available, otherwise use a placeholder
                 let measurement_info = claims
@@ -172,16 +171,15 @@ impl Secrets {
     }
 
     /// Stores secrets received from peers after verifying authorization and attestation binding.
-    pub fn put_secrets(
+    pub async fn put_secrets(
         &self,
         bundles: Vec<(SecretsBox, EnvReport, ConsumerInfo)>,
     ) -> Result<bool, String> {
         let mut secrets_added_count = 0;
         let current_time = Utc::now().timestamp() as u64;
 
-        // Acquire write lock once for efficiency
-        let mut secrets_map = self.secrets_storage.write().unwrap();
-
+        // First, verify all attestations without holding any locks
+        let mut verified_bundles = Vec::new();
         for (secrets_box, env_report, local_consumer_info) in bundles {
             debug!(
                 "Processing secrets box for consumer bundle_hash {:?} containing {} secrets",
@@ -190,7 +188,7 @@ impl Secrets {
             );
 
             // 1. Verify the Attestation Report from the EnvReport
-            let verified_user_data = match verify_attestation(&env_report.attestation) {
+            let verified_user_data = match verify_attestation(&env_report.attestation).await {
                 Ok(data) => data,
                 Err(e) => {
                     error!("Attestation verification failed for bundle: {}", e);
@@ -198,6 +196,14 @@ impl Secrets {
                 }
             };
             debug!("Attestation verified");
+
+            verified_bundles.push((secrets_box, env_report, local_consumer_info, verified_user_data));
+        }
+
+        // Now acquire write lock and process verified bundles
+        let mut secrets_map = self.secrets_storage.write().unwrap();
+
+        for (secrets_box, env_report, local_consumer_info, verified_user_data) in verified_bundles {
 
             // TODO (important!): verify that env report is bound to the attestation (node_id is used but untrusted)
 
@@ -444,7 +450,7 @@ impl Secrets {
         // 1. Verify the requester's EnvReport's attestation
         // This is crucial to ensure we are sending secrets to a trusted enclave.
         let verified_requester_detached_userdata =
-            match verify_attestation(&requester_env_report.attestation) {
+            match verify_attestation(&requester_env_report.attestation).await {
                 Ok(data) => data, // We don't necessarily need the user_data here, just verification success
                 Err(e) => {
                     return Err(format!("Requester attestation verification failed: {}", e));

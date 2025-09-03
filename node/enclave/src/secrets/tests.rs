@@ -193,8 +193,8 @@ fn test_authorization_expiry() {
     assert!(*auth_map.get(&auth_id).unwrap() < Utc::now().timestamp() as u64); // But expired
 }
 
-#[test]
-fn test_put_secrets_epk_binding_success() {
+#[tokio::test]
+async fn test_put_secrets_epk_binding_success() {
     let secrets = Secrets::new(); // Receiver
     let secret_id = test_secret_id(456);
     let secret_data = vec![10, 20, 30];
@@ -236,7 +236,7 @@ fn test_put_secrets_epk_binding_success() {
         secrets_box.clone(),
         presented_env_report.clone(),
         ConsumerInfo::default(),
-    )]);
+    )]).await;
     assert!(result.is_ok(), "put_secrets failed: {:?}", result.err());
     assert!(result.unwrap(), "put_secrets returned false, expected true");
 
@@ -247,8 +247,8 @@ fn test_put_secrets_epk_binding_success() {
     assert_eq!(stored.expiry, expiry);
 }
 
-#[test]
-fn test_put_secrets_epk_binding_mismatch() {
+#[tokio::test]
+async fn test_put_secrets_epk_binding_mismatch() {
     let secrets = Secrets::new();
     let secret_id = test_secret_id(457);
 
@@ -289,7 +289,7 @@ fn test_put_secrets_epk_binding_mismatch() {
         secrets_box.clone(),
         presented_env_report_wrong_key,
         ConsumerInfo::default(),
-    )]);
+    )]).await;
     assert!(result.is_ok());
     assert!(!result.unwrap()); // Should fail due to hash mismatch
     assert!(
@@ -301,8 +301,8 @@ fn test_put_secrets_epk_binding_mismatch() {
     );
 }
 
-#[test]
-fn test_put_secrets_existing_is_canonical() {
+#[tokio::test]
+async fn test_put_secrets_existing_is_canonical() {
     let secrets = Secrets::new();
     let secret_id = test_secret_id(555);
     let initial_secret_data = vec![1, 1, 1];
@@ -334,7 +334,7 @@ fn test_put_secrets_existing_is_canonical() {
         secrets_box1,
         env_report1.clone(),
         ConsumerInfo::default(),
-    )]);
+    )]).await;
     assert!(result1.is_ok() && result1.unwrap());
     let initial_timestamp = secrets
         .secrets_storage
@@ -376,7 +376,7 @@ fn test_put_secrets_existing_is_canonical() {
         secrets_box2,
         env_report2.clone(),
         ConsumerInfo::default(),
-    )]);
+    )]).await;
     assert!(result2.is_ok());
     assert!(result2.unwrap()); // Should update with newer timestamp
 
@@ -391,8 +391,8 @@ fn test_put_secrets_existing_is_canonical() {
     assert!(stored_after.generation_timestamp > initial_timestamp);
 }
 
-#[test]
-fn test_put_secrets_unauthorized_with_attestation() {
+#[tokio::test]
+async fn test_put_secrets_unauthorized_with_attestation() {
     let secrets = Secrets::new();
     let secret_id = test_secret_id(567);
 
@@ -420,7 +420,7 @@ fn test_put_secrets_unauthorized_with_attestation() {
         secrets_box,
         presented_env_report,
         ConsumerInfo::default(),
-    )]);
+    )]).await;
     assert!(result.is_ok());
     assert!(!result.unwrap()); // Should fail due to no authorization
     assert!(
@@ -432,8 +432,8 @@ fn test_put_secrets_unauthorized_with_attestation() {
     );
 }
 
-#[test]
-fn test_put_secrets_expired() {
+#[tokio::test]
+async fn test_put_secrets_expired() {
     let secrets = Secrets::new();
     let secret_id = test_secret_id(678);
     let expiry = Utc::now().timestamp() as u64 - 3600; // Expired
@@ -463,7 +463,7 @@ fn test_put_secrets_expired() {
         secrets_box,
         presented_env_report,
         ConsumerInfo::default(),
-    )]);
+    )]).await;
     assert!(result.is_ok());
     assert!(!result.unwrap()); // False because secret was expired
     assert!(
@@ -475,8 +475,8 @@ fn test_put_secrets_expired() {
     );
 }
 
-#[test]
-fn test_put_secrets_older_ignored() {
+#[tokio::test]
+async fn test_put_secrets_older_ignored() {
     let secrets = Secrets::new();
     let secret_id = test_secret_id(679);
 
@@ -503,6 +503,7 @@ fn test_put_secrets_older_ignored() {
     assert!(
         secrets
             .put_secrets(vec![(box1, env1.clone(), ConsumerInfo::default())])
+            .await
             .unwrap()
     );
 
@@ -528,6 +529,7 @@ fn test_put_secrets_older_ignored() {
     secrets.store_authorization(test_policy_report(auth_req2, true));
     let res2 = secrets
         .put_secrets(vec![(box2, env2.clone(), consumer_info_for_auth_req2)]) // Pass it here
+        .await
         .unwrap();
 
     assert!(!res2);
@@ -543,8 +545,8 @@ fn test_put_secrets_older_ignored() {
     assert_eq!(stored.generation_timestamp, 2);
 }
 
-#[test]
-fn test_put_secrets_multiple_bundles() {
+#[tokio::test]
+async fn test_put_secrets_multiple_bundles() {
     let secrets = Secrets::new();
     let secret_id1 = test_secret_id(789); // Authorized for node1
     let secret_id2 = test_secret_id(790); // Authorized for node2
@@ -613,7 +615,7 @@ fn test_put_secrets_multiple_bundles() {
     let result = secrets.put_secrets(vec![
         (secrets_box1, env_report1, consumer_info1),
         (secrets_box2, env_report2, consumer_info2),
-    ]);
+    ]).await;
     assert!(result.is_ok());
 
     assert!(result.unwrap()); // True because bundle 2 succeeded
@@ -625,8 +627,8 @@ fn test_put_secrets_multiple_bundles() {
     assert_eq!(secrets_map.get(&secret_id2).unwrap().data, vec![4, 5, 6]);
 }
 
-#[test]
-fn test_get_secrets_authorization_check() {
+#[tokio::test]
+async fn test_get_secrets_authorization_check() {
     let secrets = Secrets::new();
     let secret_id1 = test_secret_id(890); // Authorized
     let secret_id2 = test_secret_id(891); // Not authorized for this requester
@@ -667,13 +669,15 @@ fn test_get_secrets_authorization_check() {
     };
     secrets.store_authorization(test_policy_report(auth_req, true));
 
-    let result = futures::executor::block_on(secrets.get_secrets(
-        vec![
-            (secret_id1.clone(), consumer_for_auth_req.clone()),
-            (secret_id2.clone(), consumer_for_auth_req), // Use same consumer for simplicity
-        ],
-        requester_env_report.clone(), // Requester presents their EnvReport
-    ));
+    let result = secrets
+        .get_secrets(
+            vec![
+                (secret_id1.clone(), consumer_for_auth_req.clone()),
+                (secret_id2.clone(), consumer_for_auth_req), // Use same consumer for simplicity
+            ],
+            requester_env_report.clone(), // Requester presents their EnvReport
+        )
+        .await;
     assert!(result.is_ok(), "get_secrets failed: {:?}", result);
     let secrets_box = result.unwrap();
     assert_eq!(secrets_box.contained_secret_ids.len(), 1);
