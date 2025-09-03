@@ -292,7 +292,7 @@ impl AttestationProvider for MockTdxProvider {
         // Verify userdata binding
         let received_userdata_hash = user_data_binding::hash_userdata(&bundle.detached_userdata);
         if tdx_claims.report_data.len() < 32
-            || &tdx_claims.report_data[..32] != &received_userdata_hash[..]
+            || tdx_claims.report_data[..32] != received_userdata_hash[..]
         {
             return Ok(VerificationResult::Failed(
                 "Userdata hash mismatch".to_string(),

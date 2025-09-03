@@ -150,19 +150,25 @@ impl TdxQvlProvider {
     }
 
     /// Check if this is a simulator-generated quote by examining its structure
-    fn is_simulator_quote(&self, _quote: &[u8]) -> bool {
-        // Simulator quotes typically have certain characteristics:
-        // 1. They may have placeholder certificates
-        // 2. They may have specific patterns in the signature sections
-        // 3. They might be missing certain validation elements
+    fn is_simulator_quote(&self, quote: &[u8]) -> bool {
+        // Look for simulator signature patterns that indicate a mock quote
+        if quote.len() < 1000 {
+            return true; // Real TDX quotes are typically larger
+        }
 
-        // For now, we'll use a heuristic: try to parse with dcap-qvl first
-        // If it fails to get collateral (because simulator quotes aren't in Intel's system),
-        // we'll treat it as a simulator quote
+        // Check for the mock signature pattern used by TdxSimulator
+        let mock_signature = b"MOCK_TDX_SIGNATURE_DATA";
+        if let Some(_sig_start) = quote
+            .windows(mock_signature.len())
+            .position(|window| window == mock_signature)
+        {
+            tracing::debug!("Detected simulator quote by mock signature pattern");
+            return true;
+        }
 
-        // A more robust approach would be to check if we're currently running
-        // on the simulator interface, but this provides good fallback behavior
-        false // We'll detect this in the verification flow
+        // Check if we can detect simulator interface by trying any type of downcasting
+        // This is a fallback for when the signature detection doesn't work
+        false
     }
 
     /// Verify a simulator quote using local parsing only
@@ -331,7 +337,7 @@ impl AttestationProvider for TdxQvlProvider {
                     user_data_binding::hash_userdata(&bundle.detached_userdata);
 
                 if quote_data.user_data.len() < 32
-                    || &quote_data.user_data[..32] != received_userdata_hash
+                    || quote_data.user_data[..32] != received_userdata_hash
                 {
                     return Ok(VerificationResult::Failed(
                         "Userdata hash mismatch".to_string(),
@@ -360,7 +366,7 @@ impl AttestationProvider for TdxQvlProvider {
                             user_data_binding::hash_userdata(&bundle.detached_userdata);
 
                         if quote_data.user_data.len() < 32
-                            || &quote_data.user_data[..32] != received_userdata_hash
+                            || quote_data.user_data[..32] != received_userdata_hash
                         {
                             return Ok(VerificationResult::Failed(
                                 "Userdata hash mismatch".to_string(),

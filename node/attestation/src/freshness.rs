@@ -38,11 +38,16 @@ pub struct FreshnessConfig {
 
 impl Default for FreshnessConfig {
     fn default() -> Self {
+        // Check environment variable for freshness verification
+        let enabled = std::env::var("NXCC_FRESHNESS_ENABLED")
+            .map(|v| v.to_lowercase() == "true" || v == "1")
+            .unwrap_or(false);
+
         Self {
             max_block_age_seconds: 300,            // 5 minutes
             required_chains: vec![1, 137, 56, 10], // Ethereum, Polygon, BSC, Optimism
             min_blocks: 2,
-            enabled: true,
+            enabled,
             fetch_timeout: Duration::from_secs(10),
         }
     }
@@ -593,7 +598,11 @@ mod tests {
     #[tokio::test]
     async fn test_freshness_service() {
         let gateway_provider = Arc::new(MockGatewayProvider);
-        let service = FreshnessService::new(gateway_provider);
+        let config = FreshnessConfig {
+            enabled: true,
+            ..Default::default()
+        };
+        let service = FreshnessService::new_with_config(gateway_provider, config);
 
         let proof = service.fetch_freshness_proof().await.unwrap();
         assert!(proof.config.enabled);

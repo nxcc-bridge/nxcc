@@ -60,6 +60,20 @@ impl AttestationService {
         }
     }
 
+    /// Create AttestationService with custom freshness configuration
+    pub fn new_with_config(
+        gateway_provider: Arc<dyn GatewayProvider>,
+        freshness_config: freshness::FreshnessConfig,
+    ) -> Self {
+        let freshness_service =
+            FreshnessService::new_with_config(gateway_provider.clone(), freshness_config);
+        Self {
+            providers: HashMap::new(),
+            _gateway_provider: gateway_provider,
+            freshness_service,
+        }
+    }
+
     /// Register a provider for a specific platform type
     pub fn register_provider(
         &mut self,

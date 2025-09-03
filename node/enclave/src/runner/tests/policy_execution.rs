@@ -430,6 +430,9 @@ async fn test_execute_policy_with_attestation_claims() {
         ],
     );
 
+    let userdata_cbor = test_userdata.to_cbor().unwrap();
+    let userdata_hash = nxcc_attestation::user_data_binding::hash_userdata(&userdata_cbor);
+
     let attestation_bundle = AttestationBundle {
         raw_attestation: RawAttestation {
             platform_type: "tdx".to_string(),
@@ -437,11 +440,11 @@ async fn test_execute_policy_with_attestation_claims() {
                 // Create a realistic TDX quote structure for testing
                 use nxcc_attestation::tdx::hardware::TdxSimulator;
                 let simulator = TdxSimulator::new();
-                simulator.generate_quote(&[0x42; 32]).unwrap()
+                simulator.generate_quote(&userdata_hash).unwrap()
             },
             certificates: None,
         },
-        detached_userdata: test_userdata.to_cbor().unwrap(),
+        detached_userdata: userdata_cbor,
     };
 
     let env_report = EnvReport {
@@ -652,17 +655,21 @@ async fn test_execute_policy_verification_before_execution() {
         }],
     );
 
+    let good_userdata_cbor = good_test_userdata.to_cbor().unwrap();
+    let good_userdata_hash =
+        nxcc_attestation::user_data_binding::hash_userdata(&good_userdata_cbor);
+
     let good_attestation = AttestationBundle {
         raw_attestation: RawAttestation {
             platform_type: "tdx".to_string(),
             evidence: {
                 use nxcc_attestation::tdx::hardware::TdxSimulator;
                 let simulator = TdxSimulator::new();
-                simulator.generate_quote(&[0x42; 32]).unwrap()
+                simulator.generate_quote(&good_userdata_hash).unwrap()
             },
             certificates: None,
         },
-        detached_userdata: good_test_userdata.to_cbor().unwrap(),
+        detached_userdata: good_userdata_cbor,
     };
 
     let env_report = EnvReport {
