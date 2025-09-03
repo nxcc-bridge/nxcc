@@ -129,25 +129,22 @@ pub struct ParsedTdxQuote {
     pub security_version: u64,
 }
 
-/// Working TDX Quote Parser
-pub struct TdxParser;
-
-impl TdxParser {
+impl TdxQuote {
     /// Parse a complete TDX quote
-    pub fn parse_quote(quote_bytes: &[u8]) -> Result<TdxQuote> {
+    pub fn parse(quote_bytes: &[u8]) -> Result<TdxQuote> {
         let mut offset = 0;
 
         // Parse header (48 bytes)
-        let header = Self::parse_header(quote_bytes, &mut offset)?;
+        let header = TdxQuoteHeader::parse(quote_bytes, &mut offset)?;
 
         // Validate quote
-        Self::validate_quote_header(&header)?;
+        header.validate()?;
 
         // Parse TD Report (584 bytes)
-        let td_report = Self::parse_td_report(quote_bytes, &mut offset)?;
+        let td_report = TdReport::parse(quote_bytes, &mut offset)?;
 
         // Parse signature length (4 bytes)
-        let signature_len = Self::parse_u32_le(quote_bytes, &mut offset)? as usize;
+        let signature_len = parse_u32_le(quote_bytes, &mut offset)? as usize;
 
         // Bound the signature buffer
         if quote_bytes.len() < offset + signature_len {
@@ -170,7 +167,7 @@ impl TdxParser {
 
         // Try to parse signature structure if we have enough data
         let signature = if raw_signature_data.len() >= 134 {
-            Self::parse_signature_structure(&raw_signature_data).ok()
+            QuoteSignature::parse(&raw_signature_data).ok()
         } else {
             None
         };
@@ -184,168 +181,130 @@ impl TdxParser {
         })
     }
 
-    /// Parse quote header (48 bytes)
-    fn parse_header(data: &[u8], offset: &mut usize) -> Result<TdxQuoteHeader> {
-        if data.len() < *offset + 48 {
-            return Err(anyhow!("Insufficient data for quote header"));
+    /// Verify quote structure and basic constraints (without upstream services)
+    pub fn verify_structure(&self) -> Result<()> {
+        // Check header constraints
+        self.header.validate()?;
+
+        // Check that measurements are not all zeros
+        if self.td_report.mrtd.iter().all(|&b| b == 0) {
+            return Err(anyhow!("MRTD measurement is all zeros"));
         }
 
-        let version = Self::parse_u16_le(data, offset)?;
-        let att_key_type = Self::parse_u16_le(data, offset)?;
-        let tee_type = Self::parse_u32_le(data, offset)?;
-        let reserved = Self::parse_u32_le(data, offset)?;
-        let vendor_id = Self::parse_bytes(data, offset, 16)?;
-        let user_data = Self::parse_bytes(data, offset, 20)?;
-
-        Ok(TdxQuoteHeader {
-            version,
-            att_key_type,
-            tee_type,
-            reserved,
-            vendor_id: vendor_id.try_into().unwrap(),
-            user_data: user_data.try_into().unwrap(),
-        })
-    }
-
-    /// Parse TD Report (584 bytes)
-    fn parse_td_report(data: &[u8], offset: &mut usize) -> Result<TdReport> {
-        if data.len() < *offset + 584 {
-            return Err(anyhow!("Insufficient data for TD report"));
-        }
-
-        let tcb_svn = Self::parse_bytes(data, offset, 16)?.try_into().unwrap();
-        let mr_seam = Self::parse_bytes(data, offset, 48)?.try_into().unwrap();
-        let mr_signer_seam = Self::parse_bytes(data, offset, 48)?.try_into().unwrap();
-        let seam_attributes = Self::parse_u64_le(data, offset)?;
-        let td_attributes = Self::parse_u64_le(data, offset)?;
-        let xfam = Self::parse_u64_le(data, offset)?;
-        let mrtd = Self::parse_bytes(data, offset, 48)?.try_into().unwrap();
-        let mr_config_id = Self::parse_bytes(data, offset, 48)?.try_into().unwrap();
-        let mr_owner = Self::parse_bytes(data, offset, 48)?.try_into().unwrap();
-        let mr_owner_config = Self::parse_bytes(data, offset, 48)?.try_into().unwrap();
-
-        // Parse 4 RTMRs
-        let mut rtmr = [[0u8; 48]; 4];
-        for item in &mut rtmr {
-            *item = Self::parse_bytes(data, offset, 48)?.try_into().unwrap();
-        }
-
-        let report_data = Self::parse_bytes(data, offset, 64)?.try_into().unwrap();
-
-        Ok(TdReport {
-            tcb_svn,
-            mr_seam,
-            mr_signer_seam,
-            seam_attributes,
-            td_attributes,
-            xfam,
-            mrtd,
-            mr_config_id,
-            mr_owner,
-            mr_owner_config,
-            rtmr,
-            report_data,
-        })
-    }
-
-    /// Parse signature structure from raw signature data
-    fn parse_signature_structure(sig: &[u8]) -> Result<QuoteSignature> {
-        let mut o = 0;
-
-        // Helper function to check bounds
-        let check_bounds = |offset: usize, len: usize| -> Result<()> {
-            if offset + len > sig.len() {
-                Err(anyhow!("Signature section truncated"))
-            } else {
-                Ok(())
-            }
-        };
-
-        check_bounds(o, 64)?;
-        let ecdsa_signature = sig[o..o + 64].try_into().unwrap();
-        o += 64;
-
-        check_bounds(o, 64)?;
-        let ecdsa_public_key = sig[o..o + 64].try_into().unwrap();
-        o += 64;
-
-        check_bounds(o, 2)?;
-        let cert_data_type = u16::from_le_bytes(sig[o..o + 2].try_into().unwrap());
-        o += 2;
-
-        check_bounds(o, 4)?;
-        let cert_data_size = u32::from_le_bytes(sig[o..o + 4].try_into().unwrap());
-        o += 4;
-
-        check_bounds(o, 384)?;
-        let qe_report = sig[o..o + 384].try_into().unwrap();
-        o += 384;
-
-        check_bounds(o, 64)?;
-        let qe_signature = sig[o..o + 64].try_into().unwrap();
-        o += 64;
-
-        check_bounds(o, 2)?;
-        let qe_auth_data_size = u16::from_le_bytes(sig[o..o + 2].try_into().unwrap());
-        o += 2;
-
-        check_bounds(o, qe_auth_data_size as usize)?;
-        let qe_auth_data = sig[o..o + qe_auth_data_size as usize].to_vec();
-        o += qe_auth_data_size as usize;
-
-        // Certificate blob (may be zero)
-        let (cert_type, cert_size, cert_data) = if o + 6 <= sig.len() {
-            let cert_type = u16::from_le_bytes(sig[o..o + 2].try_into().unwrap());
-            o += 2;
-            let cert_size = u32::from_le_bytes(sig[o..o + 4].try_into().unwrap());
-            o += 4;
-            check_bounds(o, cert_size as usize)?;
-            let cert_data = sig[o..o + cert_size as usize].to_vec();
-            (cert_type, cert_size, cert_data)
-        } else {
-            (0u16, 0u32, Vec::new())
-        };
-
-        Ok(QuoteSignature {
-            ecdsa_signature,
-            ecdsa_public_key,
-            cert_data_type,
-            cert_data_size,
-            qe_report,
-            qe_signature,
-            qe_auth_data_size,
-            qe_auth_data,
-            cert_type,
-            cert_size,
-            cert_data,
-        })
-    }
-
-    /// Validate quote header constraints
-    fn validate_quote_header(header: &TdxQuoteHeader) -> Result<()> {
-        if header.version != QUOTE_VERSION_4 {
-            return Err(anyhow!("Unsupported quote version: {}", header.version));
-        }
-
-        if header.tee_type != TEE_TYPE_TDX {
+        // With the new bound, these are always equal
+        let expected_total = 48 + 584 + 4 + self.signature_len as usize;
+        let actual_total = 48 + 584 + 4 + self.raw_signature_data.len();
+        if expected_total != actual_total {
             return Err(anyhow!(
-                "Invalid TEE type: expected TDX (0x{:x}), got 0x{:x}",
-                TEE_TYPE_TDX,
-                header.tee_type
+                "Signature length mismatch: declared {}, got {}",
+                self.signature_len,
+                self.raw_signature_data.len()
             ));
         }
 
         Ok(())
     }
 
+    /// Extract standardized attestation claims from parsed quote
+    pub fn extract_claims(&self) -> TdxAttestationClaims {
+        let td_report = &self.td_report;
+
+        // Extract debug flag from TD attributes (bit 0)
+        let debug_enabled = (td_report.td_attributes & 0x1) != 0;
+
+        // Try to extract ephemeral key from report data (first 32 bytes)
+        let ephemeral_key = if td_report.report_data.iter().take(32).any(|&b| b != 0) {
+            Some(td_report.report_data[..32].to_vec())
+        } else {
+            None
+        };
+
+        // Check signature availability
+        let signature_present = !self.raw_signature_data.is_empty();
+        let has_valid_signature = self.signature.is_some();
+        let cert_chain_present = self
+            .signature
+            .as_ref()
+            .map(|s| !s.cert_data.is_empty())
+            .unwrap_or(false);
+
+        TdxAttestationClaims {
+            // Core measurements
+            mrtd: td_report.mrtd.to_vec(),
+            rtmr0: td_report.rtmr[0].to_vec(),
+            rtmr1: td_report.rtmr[1].to_vec(),
+            rtmr2: td_report.rtmr[2].to_vec(),
+            rtmr3: td_report.rtmr[3].to_vec(),
+            mr_config_id: td_report.mr_config_id.to_vec(),
+            mr_owner: td_report.mr_owner.to_vec(),
+            mr_seam: td_report.mr_seam.to_vec(),
+
+            // Security attributes
+            debug_enabled,
+            td_attributes: td_report.td_attributes,
+            seam_attributes: td_report.seam_attributes,
+            tcb_svn: td_report.tcb_svn.to_vec(),
+
+            // User data and keys
+            report_data: td_report.report_data.to_vec(),
+            user_data: self.header.user_data.to_vec(),
+            ephemeral_key,
+
+            // Quote metadata
+            quote_version: self.header.version,
+            tee_type: self.header.tee_type,
+            att_key_type: self.header.att_key_type,
+
+            // Signature info
+            has_valid_signature,
+            signature_present,
+            cert_chain_present,
+        }
+    }
+
+    /// Extract claims into the serializable ParsedTdxQuote format
+    pub fn extract_parsed_quote(&self) -> ParsedTdxQuote {
+        let td_report = &self.td_report;
+
+        let mut rtmrs = HashMap::new();
+        rtmrs.insert("rtmr0".to_string(), td_report.rtmr[0].to_vec());
+        rtmrs.insert("rtmr1".to_string(), td_report.rtmr[1].to_vec());
+        rtmrs.insert("rtmr2".to_string(), td_report.rtmr[2].to_vec());
+        rtmrs.insert("rtmr3".to_string(), td_report.rtmr[3].to_vec());
+
+        // Extract debug flag from attributes (bit 0)
+        let debug_enabled = (td_report.td_attributes & 0x01) != 0;
+
+        // Extract security version from TCB SVN
+        let security_version =
+            u64::from_le_bytes(td_report.tcb_svn[0..8].try_into().unwrap_or([0u8; 8]));
+
+        ParsedTdxQuote {
+            version: self.header.version,
+            tee_type: self.header.tee_type,
+            mrtd: td_report.mrtd.to_vec(),
+            mrconfigid: td_report.mr_config_id.to_vec(),
+            mrowner: td_report.mr_owner.to_vec(),
+            mrownerconfig: td_report.mr_owner_config.to_vec(),
+            rtmrs,
+            td_attributes: td_report.td_attributes.to_le_bytes().to_vec(),
+            xfam: td_report.xfam.to_le_bytes().to_vec(),
+            cpu_svn: td_report.tcb_svn.to_vec(),
+            report_data: td_report.report_data.to_vec(),
+            signature_data: self.raw_signature_data.clone(),
+            debug_enabled,
+            security_version,
+        }
+    }
+
     /// Extract IEATS/RATS standardized claims from TDX quote
-    pub fn extract_standardized_claims(quote: &TdxQuote) -> crate::types::StandardizedClaims {
+    pub fn extract_standardized_claims(&self) -> crate::types::StandardizedClaims {
         use std::{
             collections::HashMap,
             time::{SystemTime, UNIX_EPOCH},
         };
 
-        let td_report = &quote.td_report;
+        let td_report = &self.td_report;
 
         // Map TDX measurements to standardized EAT claims
         let mut measurements = HashMap::new();
@@ -447,122 +406,6 @@ impl TdxParser {
         }
     }
 
-    /// Extract standardized attestation claims from parsed quote
-    pub fn extract_claims(quote: &TdxQuote) -> TdxAttestationClaims {
-        let td_report = &quote.td_report;
-
-        // Extract debug flag from TD attributes (bit 0)
-        let debug_enabled = (td_report.td_attributes & 0x1) != 0;
-
-        // Try to extract ephemeral key from report data (first 32 bytes)
-        let ephemeral_key = if td_report.report_data.iter().take(32).any(|&b| b != 0) {
-            Some(td_report.report_data[..32].to_vec())
-        } else {
-            None
-        };
-
-        // Check signature availability
-        let signature_present = !quote.raw_signature_data.is_empty();
-        let has_valid_signature = quote.signature.is_some();
-        let cert_chain_present = quote
-            .signature
-            .as_ref()
-            .map(|s| !s.cert_data.is_empty())
-            .unwrap_or(false);
-
-        TdxAttestationClaims {
-            // Core measurements
-            mrtd: td_report.mrtd.to_vec(),
-            rtmr0: td_report.rtmr[0].to_vec(),
-            rtmr1: td_report.rtmr[1].to_vec(),
-            rtmr2: td_report.rtmr[2].to_vec(),
-            rtmr3: td_report.rtmr[3].to_vec(),
-            mr_config_id: td_report.mr_config_id.to_vec(),
-            mr_owner: td_report.mr_owner.to_vec(),
-            mr_seam: td_report.mr_seam.to_vec(),
-
-            // Security attributes
-            debug_enabled,
-            td_attributes: td_report.td_attributes,
-            seam_attributes: td_report.seam_attributes,
-            tcb_svn: td_report.tcb_svn.to_vec(),
-
-            // User data and keys
-            report_data: td_report.report_data.to_vec(),
-            user_data: quote.header.user_data.to_vec(),
-            ephemeral_key,
-
-            // Quote metadata
-            quote_version: quote.header.version,
-            tee_type: quote.header.tee_type,
-            att_key_type: quote.header.att_key_type,
-
-            // Signature info
-            has_valid_signature,
-            signature_present,
-            cert_chain_present,
-        }
-    }
-
-    /// Extract claims into the serializable ParsedTdxQuote format
-    pub fn extract_parsed_quote(quote: &TdxQuote) -> ParsedTdxQuote {
-        let td_report = &quote.td_report;
-
-        let mut rtmrs = HashMap::new();
-        rtmrs.insert("rtmr0".to_string(), td_report.rtmr[0].to_vec());
-        rtmrs.insert("rtmr1".to_string(), td_report.rtmr[1].to_vec());
-        rtmrs.insert("rtmr2".to_string(), td_report.rtmr[2].to_vec());
-        rtmrs.insert("rtmr3".to_string(), td_report.rtmr[3].to_vec());
-
-        // Extract debug flag from attributes (bit 0)
-        let debug_enabled = (td_report.td_attributes & 0x01) != 0;
-
-        // Extract security version from TCB SVN
-        let security_version =
-            u64::from_le_bytes(td_report.tcb_svn[0..8].try_into().unwrap_or([0u8; 8]));
-
-        ParsedTdxQuote {
-            version: quote.header.version,
-            tee_type: quote.header.tee_type,
-            mrtd: td_report.mrtd.to_vec(),
-            mrconfigid: td_report.mr_config_id.to_vec(),
-            mrowner: td_report.mr_owner.to_vec(),
-            mrownerconfig: td_report.mr_owner_config.to_vec(),
-            rtmrs,
-            td_attributes: td_report.td_attributes.to_le_bytes().to_vec(),
-            xfam: td_report.xfam.to_le_bytes().to_vec(),
-            cpu_svn: td_report.tcb_svn.to_vec(),
-            report_data: td_report.report_data.to_vec(),
-            signature_data: quote.raw_signature_data.clone(),
-            debug_enabled,
-            security_version,
-        }
-    }
-
-    /// Verify quote structure and basic constraints (without upstream services)
-    pub fn verify_quote_structure(quote: &TdxQuote) -> Result<()> {
-        // Check header constraints
-        Self::validate_quote_header(&quote.header)?;
-
-        // Check that measurements are not all zeros
-        if quote.td_report.mrtd.iter().all(|&b| b == 0) {
-            return Err(anyhow!("MRTD measurement is all zeros"));
-        }
-
-        // With the new bound, these are always equal
-        let expected_total = 48 + 584 + 4 + quote.signature_len as usize;
-        let actual_total = 48 + 584 + 4 + quote.raw_signature_data.len();
-        if expected_total != actual_total {
-            return Err(anyhow!(
-                "Signature length mismatch: declared {}, got {}",
-                quote.signature_len,
-                quote.raw_signature_data.len()
-            ));
-        }
-
-        Ok(())
-    }
-
     /// Extract user message from report data (for testing)
     pub fn extract_user_message(report_data: &[u8]) -> String {
         // Find null-terminated string
@@ -572,58 +415,217 @@ impl TdxParser {
             .unwrap_or(report_data.len());
         String::from_utf8_lossy(&report_data[..end_pos]).to_string()
     }
+}
 
-    // Helper parsing functions
-
-    fn parse_u16_le(data: &[u8], offset: &mut usize) -> Result<u16> {
-        if data.len() < *offset + 2 {
-            return Err(anyhow!("Insufficient data for u16"));
+impl TdxQuoteHeader {
+    /// Parse quote header (48 bytes)
+    fn parse(data: &[u8], offset: &mut usize) -> Result<TdxQuoteHeader> {
+        if data.len() < *offset + 48 {
+            return Err(anyhow!("Insufficient data for quote header"));
         }
-        let value = u16::from_le_bytes([data[*offset], data[*offset + 1]]);
-        *offset += 2;
-        Ok(value)
+
+        let version = parse_u16_le(data, offset)?;
+        let att_key_type = parse_u16_le(data, offset)?;
+        let tee_type = parse_u32_le(data, offset)?;
+        let reserved = parse_u32_le(data, offset)?;
+        let vendor_id = parse_bytes(data, offset, 16)?;
+        let user_data = parse_bytes(data, offset, 20)?;
+
+        Ok(TdxQuoteHeader {
+            version,
+            att_key_type,
+            tee_type,
+            reserved,
+            vendor_id: vendor_id.try_into().unwrap(),
+            user_data: user_data.try_into().unwrap(),
+        })
     }
 
-    fn parse_u32_le(data: &[u8], offset: &mut usize) -> Result<u32> {
-        if data.len() < *offset + 4 {
-            return Err(anyhow!("Insufficient data for u32"));
+    /// Validate quote header constraints
+    fn validate(&self) -> Result<()> {
+        if self.version != QUOTE_VERSION_4 {
+            return Err(anyhow!("Unsupported quote version: {}", self.version));
         }
-        let value = u32::from_le_bytes([
-            data[*offset],
-            data[*offset + 1],
-            data[*offset + 2],
-            data[*offset + 3],
-        ]);
-        *offset += 4;
-        Ok(value)
-    }
 
-    fn parse_u64_le(data: &[u8], offset: &mut usize) -> Result<u64> {
-        if data.len() < *offset + 8 {
-            return Err(anyhow!("Insufficient data for u64"));
+        if self.tee_type != TEE_TYPE_TDX {
+            return Err(anyhow!(
+                "Invalid TEE type: expected TDX (0x{:x}), got 0x{:x}",
+                TEE_TYPE_TDX,
+                self.tee_type
+            ));
         }
-        let value = u64::from_le_bytes([
-            data[*offset],
-            data[*offset + 1],
-            data[*offset + 2],
-            data[*offset + 3],
-            data[*offset + 4],
-            data[*offset + 5],
-            data[*offset + 6],
-            data[*offset + 7],
-        ]);
-        *offset += 8;
-        Ok(value)
-    }
 
-    fn parse_bytes(data: &[u8], offset: &mut usize, len: usize) -> Result<Vec<u8>> {
-        if data.len() < *offset + len {
-            return Err(anyhow!("Insufficient data for {} bytes", len));
-        }
-        let bytes = data[*offset..*offset + len].to_vec();
-        *offset += len;
-        Ok(bytes)
+        Ok(())
     }
+}
+
+impl TdReport {
+    /// Parse TD Report (584 bytes)
+    fn parse(data: &[u8], offset: &mut usize) -> Result<TdReport> {
+        if data.len() < *offset + 584 {
+            return Err(anyhow!("Insufficient data for TD report"));
+        }
+
+        let tcb_svn = parse_bytes(data, offset, 16)?.try_into().unwrap();
+        let mr_seam = parse_bytes(data, offset, 48)?.try_into().unwrap();
+        let mr_signer_seam = parse_bytes(data, offset, 48)?.try_into().unwrap();
+        let seam_attributes = parse_u64_le(data, offset)?;
+        let td_attributes = parse_u64_le(data, offset)?;
+        let xfam = parse_u64_le(data, offset)?;
+        let mrtd = parse_bytes(data, offset, 48)?.try_into().unwrap();
+        let mr_config_id = parse_bytes(data, offset, 48)?.try_into().unwrap();
+        let mr_owner = parse_bytes(data, offset, 48)?.try_into().unwrap();
+        let mr_owner_config = parse_bytes(data, offset, 48)?.try_into().unwrap();
+
+        // Parse 4 RTMRs
+        let mut rtmr = [[0u8; 48]; 4];
+        for item in &mut rtmr {
+            *item = parse_bytes(data, offset, 48)?.try_into().unwrap();
+        }
+
+        let report_data = parse_bytes(data, offset, 64)?.try_into().unwrap();
+
+        Ok(TdReport {
+            tcb_svn,
+            mr_seam,
+            mr_signer_seam,
+            seam_attributes,
+            td_attributes,
+            xfam,
+            mrtd,
+            mr_config_id,
+            mr_owner,
+            mr_owner_config,
+            rtmr,
+            report_data,
+        })
+    }
+}
+
+impl QuoteSignature {
+    /// Parse signature structure from raw signature data
+    fn parse(sig: &[u8]) -> Result<QuoteSignature> {
+        let mut o = 0;
+
+        // Helper function to check bounds
+        let check_bounds = |offset: usize, len: usize| -> Result<()> {
+            if offset + len > sig.len() {
+                Err(anyhow!("Signature section truncated"))
+            } else {
+                Ok(())
+            }
+        };
+
+        check_bounds(o, 64)?;
+        let ecdsa_signature = sig[o..o + 64].try_into().unwrap();
+        o += 64;
+
+        check_bounds(o, 64)?;
+        let ecdsa_public_key = sig[o..o + 64].try_into().unwrap();
+        o += 64;
+
+        check_bounds(o, 2)?;
+        let cert_data_type = u16::from_le_bytes(sig[o..o + 2].try_into().unwrap());
+        o += 2;
+
+        check_bounds(o, 4)?;
+        let cert_data_size = u32::from_le_bytes(sig[o..o + 4].try_into().unwrap());
+        o += 4;
+
+        check_bounds(o, 384)?;
+        let qe_report = sig[o..o + 384].try_into().unwrap();
+        o += 384;
+
+        check_bounds(o, 64)?;
+        let qe_signature = sig[o..o + 64].try_into().unwrap();
+        o += 64;
+
+        check_bounds(o, 2)?;
+        let qe_auth_data_size = u16::from_le_bytes(sig[o..o + 2].try_into().unwrap());
+        o += 2;
+
+        check_bounds(o, qe_auth_data_size as usize)?;
+        let qe_auth_data = sig[o..o + qe_auth_data_size as usize].to_vec();
+        o += qe_auth_data_size as usize;
+
+        // Certificate blob (may be zero)
+        let (cert_type, cert_size, cert_data) = if o + 6 <= sig.len() {
+            let cert_type = u16::from_le_bytes(sig[o..o + 2].try_into().unwrap());
+            o += 2;
+            let cert_size = u32::from_le_bytes(sig[o..o + 4].try_into().unwrap());
+            o += 4;
+            check_bounds(o, cert_size as usize)?;
+            let cert_data = sig[o..o + cert_size as usize].to_vec();
+            (cert_type, cert_size, cert_data)
+        } else {
+            (0u16, 0u32, Vec::new())
+        };
+
+        Ok(QuoteSignature {
+            ecdsa_signature,
+            ecdsa_public_key,
+            cert_data_type,
+            cert_data_size,
+            qe_report,
+            qe_signature,
+            qe_auth_data_size,
+            qe_auth_data,
+            cert_type,
+            cert_size,
+            cert_data,
+        })
+    }
+}
+
+// Helper parsing functions
+fn parse_u16_le(data: &[u8], offset: &mut usize) -> Result<u16> {
+    if data.len() < *offset + 2 {
+        return Err(anyhow!("Insufficient data for u16"));
+    }
+    let value = u16::from_le_bytes([data[*offset], data[*offset + 1]]);
+    *offset += 2;
+    Ok(value)
+}
+
+fn parse_u32_le(data: &[u8], offset: &mut usize) -> Result<u32> {
+    if data.len() < *offset + 4 {
+        return Err(anyhow!("Insufficient data for u32"));
+    }
+    let value = u32::from_le_bytes([
+        data[*offset],
+        data[*offset + 1],
+        data[*offset + 2],
+        data[*offset + 3],
+    ]);
+    *offset += 4;
+    Ok(value)
+}
+
+fn parse_u64_le(data: &[u8], offset: &mut usize) -> Result<u64> {
+    if data.len() < *offset + 8 {
+        return Err(anyhow!("Insufficient data for u64"));
+    }
+    let value = u64::from_le_bytes([
+        data[*offset],
+        data[*offset + 1],
+        data[*offset + 2],
+        data[*offset + 3],
+        data[*offset + 4],
+        data[*offset + 5],
+        data[*offset + 6],
+        data[*offset + 7],
+    ]);
+    *offset += 8;
+    Ok(value)
+}
+
+fn parse_bytes(data: &[u8], offset: &mut usize, len: usize) -> Result<Vec<u8>> {
+    if data.len() < *offset + len {
+        return Err(anyhow!("Insufficient data for {} bytes", len));
+    }
+    let bytes = data[*offset..*offset + len].to_vec();
+    *offset += len;
+    Ok(bytes)
 }
 
 #[cfg(test)]
@@ -638,7 +640,7 @@ mod tests {
     #[test]
     fn test_parse_complete_quote() {
         let quote_bytes = get_test_quote();
-        let result = TdxParser::parse_quote(&quote_bytes);
+        let result = TdxQuote::parse(&quote_bytes);
         assert!(result.is_ok(), "Failed to parse quote: {:?}", result.err());
 
         let quote = result.unwrap();
@@ -649,14 +651,14 @@ mod tests {
         assert!(quote.signature.is_some()); // Real quote has parseable signature
 
         // Verify structure
-        assert!(TdxParser::verify_quote_structure(&quote).is_ok());
+        assert!(quote.verify_structure().is_ok());
     }
 
     #[test]
     fn test_extract_claims() {
         let quote_bytes = get_test_quote();
-        let quote = TdxParser::parse_quote(&quote_bytes).unwrap();
-        let claims = TdxParser::extract_claims(&quote);
+        let quote = TdxQuote::parse(&quote_bytes).unwrap();
+        let claims = quote.extract_claims();
 
         // Verify key claims
         assert!(
@@ -670,15 +672,15 @@ mod tests {
         assert!(claims.has_valid_signature); // Real quote has parseable signature
         assert!(claims.ephemeral_key.is_some());
 
-        let user_msg = TdxParser::extract_user_message(&claims.report_data);
+        let user_msg = TdxQuote::extract_user_message(&claims.report_data);
         assert_eq!(user_msg, "NXCC says: Hello from TDX!");
     }
 
     #[test]
     fn test_measurements_extraction() {
         let quote_bytes = get_test_quote();
-        let quote = TdxParser::parse_quote(&quote_bytes).unwrap();
-        let claims = TdxParser::extract_claims(&quote);
+        let quote = TdxQuote::parse(&quote_bytes).unwrap();
+        let claims = quote.extract_claims();
 
         // Verify all measurements are 48 bytes
         assert_eq!(claims.mrtd.len(), 48);
@@ -699,7 +701,7 @@ mod tests {
     #[test]
     fn test_signature_parsing() {
         let quote_bytes = get_test_quote();
-        let quote = TdxParser::parse_quote(&quote_bytes).unwrap();
+        let quote = TdxQuote::parse(&quote_bytes).unwrap();
 
         // Verify signature data properties
         assert_eq!(quote.signature_len, 4299);
@@ -716,8 +718,8 @@ mod tests {
         let simulator = TdxSimulator::new();
         let test_data = b"IEATS/RATS standardized claims test";
         let quote_bytes = simulator.generate_quote(test_data).unwrap();
-        let quote = TdxParser::parse_quote(&quote_bytes).unwrap();
-        let claims = TdxParser::extract_standardized_claims(&quote);
+        let quote = TdxQuote::parse(&quote_bytes).unwrap();
+        let claims = quote.extract_standardized_claims();
 
         // Verify EAT standard fields
         assert!(!claims.measurements.is_empty()); // Should have measurements
@@ -751,17 +753,17 @@ mod tests {
     #[test]
     fn test_complete_quote_verification() {
         let quote_bytes = get_test_quote();
-        let quote = TdxParser::parse_quote(&quote_bytes).unwrap();
+        let quote = TdxQuote::parse(&quote_bytes).unwrap();
 
         // Test structure verification - should pass despite signature length mismatch
-        let verification_result = TdxParser::verify_quote_structure(&quote);
+        let verification_result = quote.verify_structure();
         assert!(verification_result.is_ok());
 
         // Test claims extraction
-        let claims = TdxParser::extract_claims(&quote);
+        let claims = quote.extract_claims();
 
         // Test user message extraction
-        let user_msg = TdxParser::extract_user_message(&claims.report_data);
+        let user_msg = TdxQuote::extract_user_message(&claims.report_data);
         assert_eq!(user_msg, "NXCC says: Hello from TDX!");
 
         // Test measurement validation

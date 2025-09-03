@@ -14,7 +14,7 @@ mod tests {
         providers::tdx_qvl::TdxQvlProvider,
         tdx::{
             hardware::{TdxHardware, TdxInterface, TdxSimulator, TdxSimulatorConfig},
-            parser::TdxParser,
+            TdxQuote, TEE_TYPE_TDX,
         },
         types::*,
         user_data_binding::EnhancedUserDataBinding,
@@ -115,18 +115,18 @@ mod tests {
 
         // Parse and verify quote
         tracing::info!("Parsing freshly generated real TDX quote...");
-        let parsed_quote = TdxParser::parse_quote(&quote).unwrap();
+        let parsed_quote = TdxQuote::parse(&quote).unwrap();
         tracing::info!(
             "Successfully parsed quote: header version={}, tee_type={:#x}",
             parsed_quote.header.version,
             parsed_quote.header.tee_type
         );
 
-        assert!(TdxParser::verify_quote_structure(&parsed_quote).is_ok());
+        assert!(parsed_quote.verify_structure().is_ok());
 
         // Extract claims from real quote
         tracing::info!("Extracting claims from real TDX quote...");
-        let claims = TdxParser::extract_claims(&parsed_quote);
+        let claims = parsed_quote.extract_claims();
 
         tracing::info!("Claims extracted - MRTD: {:x?}", &claims.mrtd[..8]);
         tracing::info!(
@@ -143,7 +143,7 @@ mod tests {
         assert!(!claims.mrtd.iter().all(|&b| b == 0));
 
         // Verify user data was embedded in real quote
-        let user_msg = TdxParser::extract_user_message(&claims.report_data);
+        let user_msg = TdxQuote::extract_user_message(&claims.report_data);
         tracing::info!("Extracted user message from real quote: '{}'", user_msg);
         assert!(
             user_msg.starts_with("Complete attestation")
@@ -187,9 +187,9 @@ mod tests {
         }
 
         // Verify the quote parses correctly
-        let parsed = TdxParser::parse_quote(&quote).unwrap();
-        let claims = TdxParser::extract_claims(&parsed);
-        let extracted_msg = TdxParser::extract_user_message(&claims.report_data);
+        let parsed = TdxQuote::parse(&quote).unwrap();
+        let claims = parsed.extract_claims();
+        let extracted_msg = TdxQuote::extract_user_message(&claims.report_data);
 
         assert!(extracted_msg.contains("NXCC says: Hello from TDX!"));
         tracing::info!("Quote verification successful");
@@ -211,16 +211,16 @@ mod tests {
         tracing::info!("Generated quotes for mutual attestation test");
 
         // Parse both quotes
-        let parsed_1 = TdxParser::parse_quote(&quote_1).unwrap();
-        let parsed_2 = TdxParser::parse_quote(&quote_2).unwrap();
+        let parsed_1 = TdxQuote::parse(&quote_1).unwrap();
+        let parsed_2 = TdxQuote::parse(&quote_2).unwrap();
 
         // Verify both quote structures locally
-        assert!(TdxParser::verify_quote_structure(&parsed_1).is_ok());
-        assert!(TdxParser::verify_quote_structure(&parsed_2).is_ok());
+        assert!(parsed_1.verify_structure().is_ok());
+        assert!(parsed_2.verify_structure().is_ok());
 
         // Extract claims from both quotes
-        let claims_1 = TdxParser::extract_claims(&parsed_1);
-        let claims_2 = TdxParser::extract_claims(&parsed_2);
+        let claims_1 = parsed_1.extract_claims();
+        let claims_2 = parsed_2.extract_claims();
 
         tracing::info!("Local verification: Both quotes have valid structure");
 
@@ -240,8 +240,8 @@ mod tests {
             "Quotes should have different report data"
         );
 
-        let msg_1 = TdxParser::extract_user_message(&claims_1.report_data);
-        let msg_2 = TdxParser::extract_user_message(&claims_2.report_data);
+        let msg_1 = TdxQuote::extract_user_message(&claims_1.report_data);
+        let msg_2 = TdxQuote::extract_user_message(&claims_2.report_data);
 
         tracing::info!("Quote 1 user data: '{}'", msg_1);
         tracing::info!("Quote 2 user data: '{}'", msg_2);
@@ -278,10 +278,10 @@ mod tests {
         assert!(attestation.evidence.len() > 600);
 
         // Parse the generated quote
-        let parsed_quote = TdxParser::parse_quote(&attestation.evidence).unwrap();
-        let claims = TdxParser::extract_claims(&parsed_quote);
+        let parsed_quote = TdxQuote::parse(&attestation.evidence).unwrap();
+        let claims = parsed_quote.extract_claims();
 
-        let extracted_msg = TdxParser::extract_user_message(&claims.report_data);
+        let extracted_msg = TdxQuote::extract_user_message(&claims.report_data);
         assert!(extracted_msg.starts_with("QVL provider") || extracted_msg.contains("test"));
     }
 
@@ -372,12 +372,12 @@ mod tests {
             .unwrap();
 
         // Verify the quote contains our data
-        let parsed_quote = TdxParser::parse_quote(&quote).unwrap();
-        let claims = TdxParser::extract_claims(&parsed_quote);
+        let parsed_quote = TdxQuote::parse(&quote).unwrap();
+        let claims = parsed_quote.extract_claims();
 
         // Note: For hashed data, we can't directly extract the original message
         if !binding.was_hashed {
-            let extracted_msg = TdxParser::extract_user_message(&claims.report_data);
+            let extracted_msg = TdxQuote::extract_user_message(&claims.report_data);
             // First 32 bytes are ephemeral key, then user data
             assert!(extracted_msg.len() >= 32);
         }
@@ -408,8 +408,8 @@ mod tests {
         let quote = tdx_interface.generate_quote(&embedded_data).unwrap();
 
         // Verify quote parsing
-        let parsed_quote = TdxParser::parse_quote(&quote).unwrap();
-        assert!(TdxParser::verify_quote_structure(&parsed_quote).is_ok());
+        let parsed_quote = TdxQuote::parse(&quote).unwrap();
+        assert!(parsed_quote.verify_structure().is_ok());
     }
 
     #[tokio::test]
@@ -505,8 +505,8 @@ mod tests {
         let quote = simulator.generate_quote(b"custom measurements").unwrap();
 
         // Parse and verify custom measurements
-        let parsed_quote = TdxParser::parse_quote(&quote).unwrap();
-        let claims = TdxParser::extract_claims(&parsed_quote);
+        let parsed_quote = TdxQuote::parse(&quote).unwrap();
+        let claims = parsed_quote.extract_claims();
 
         // MRTD should contain our custom value (allowing for some simulator structure differences)
         assert!(!claims.mrtd.iter().all(|&b| b == 0));
@@ -561,21 +561,18 @@ mod tests {
         };
 
         // Should parse without errors
-        let parsed_quote = TdxParser::parse_quote(&quote_bytes).unwrap();
+        let parsed_quote = TdxQuote::parse(&quote_bytes).unwrap();
         assert_eq!(parsed_quote.header.version, 4);
-        assert_eq!(
-            parsed_quote.header.tee_type,
-            crate::tdx::parser::TEE_TYPE_TDX
-        );
+        assert_eq!(parsed_quote.header.tee_type, TEE_TYPE_TDX);
 
         // Should extract valid claims - real quotes have signatures
-        let claims = TdxParser::extract_claims(&parsed_quote);
+        let claims = parsed_quote.extract_claims();
         assert!(claims.signature_present);
         assert_eq!(claims.quote_version, 4);
-        assert_eq!(claims.tee_type, crate::tdx::parser::TEE_TYPE_TDX);
+        assert_eq!(claims.tee_type, TEE_TYPE_TDX);
 
         // Should be able to extract user message from real quote
-        let user_msg = TdxParser::extract_user_message(&claims.report_data);
+        let user_msg = TdxQuote::extract_user_message(&claims.report_data);
         assert!(!user_msg.is_empty());
     }
 
@@ -601,21 +598,18 @@ mod tests {
             .unwrap();
 
         // Should parse without errors
-        let parsed_quote = TdxParser::parse_quote(&quote).unwrap();
+        let parsed_quote = TdxQuote::parse(&quote).unwrap();
         assert_eq!(parsed_quote.header.version, 4);
-        assert_eq!(
-            parsed_quote.header.tee_type,
-            crate::tdx::parser::TEE_TYPE_TDX
-        );
+        assert_eq!(parsed_quote.header.tee_type, TEE_TYPE_TDX);
 
         // Hardware quotes should have signatures
-        let claims = TdxParser::extract_claims(&parsed_quote);
+        let claims = parsed_quote.extract_claims();
         assert!(claims.signature_present);
         assert_eq!(claims.quote_version, 4);
-        assert_eq!(claims.tee_type, crate::tdx::parser::TEE_TYPE_TDX);
+        assert_eq!(claims.tee_type, TEE_TYPE_TDX);
 
         // User message should be extractable
-        let user_msg = TdxParser::extract_user_message(&claims.report_data);
+        let user_msg = TdxQuote::extract_user_message(&claims.report_data);
         assert!(user_msg.starts_with("hardware quote parsing") || user_msg.contains("test"));
     }
 
@@ -628,22 +622,19 @@ mod tests {
             .unwrap();
 
         // Should parse without errors - validates simulator generates parseable quotes
-        let parsed_quote = TdxParser::parse_quote(&quote).unwrap();
+        let parsed_quote = TdxQuote::parse(&quote).unwrap();
         assert_eq!(parsed_quote.header.version, 4);
-        assert_eq!(
-            parsed_quote.header.tee_type,
-            crate::tdx::parser::TEE_TYPE_TDX
-        );
+        assert_eq!(parsed_quote.header.tee_type, TEE_TYPE_TDX);
 
-        let claims = TdxParser::extract_claims(&parsed_quote);
+        let claims = parsed_quote.extract_claims();
         assert_eq!(claims.quote_version, 4);
-        assert_eq!(claims.tee_type, crate::tdx::parser::TEE_TYPE_TDX);
+        assert_eq!(claims.tee_type, TEE_TYPE_TDX);
 
         // Note: Simulator quotes may not have signatures (this is expected)
         // The key validation is that the quote structure is parseable
 
         // User message should be extractable
-        let user_msg = TdxParser::extract_user_message(&claims.report_data);
+        let user_msg = TdxQuote::extract_user_message(&claims.report_data);
         assert!(user_msg.starts_with("simulator quote parsing") || user_msg.contains("test"));
     }
 

@@ -1,99 +1,22 @@
 use std::{
-    collections::HashMap,
     fs::OpenOptions,
     io::{Read, Write},
     os::unix::fs::OpenOptionsExt,
 };
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 
 pub mod hardware;
 pub mod parser;
 
-// Re-export commonly used items
-pub use parser::{TdxAttestationClaims, TdxParser, QUOTE_VERSION_4, TEE_TYPE_TDX};
+// Re-export commonly used items from parser
+pub use parser::{
+    ParsedTdxQuote, QuoteSignature, TdReport, TdxAttestationClaims, TdxQuote, TdxQuoteHeader,
+    QUOTE_VERSION_4, TEE_TYPE_TDX,
+};
 
 /// TDX Guest interface for quote generation
 pub struct TdxGuest;
-
-/// TDX quote structure based on Intel TDX specification
-#[derive(Debug, Clone)]
-pub struct TdxQuote {
-    /// Quote header
-    pub header: TdxQuoteHeader,
-    /// TDX report data
-    pub td_report: TdReport,
-    /// Quote signature data
-    pub signature_data: Vec<u8>,
-}
-
-#[derive(Debug, Clone)]
-pub struct TdxQuoteHeader {
-    /// Version of the quote
-    pub version: u16,
-    /// Attestation key type
-    pub ak_type: u16,
-    /// TEE type (4 for TDX)
-    pub tee_type: u32,
-    /// Quote signature data length
-    pub qe_svn: u16,
-    /// PCE security version number
-    pub pce_svn: u16,
-    /// QE vendor ID
-    pub qe_vendor_id: [u8; 16],
-    /// User data (first 20 bytes)
-    pub user_data: [u8; 20],
-}
-
-#[derive(Debug, Clone)]
-pub struct TdReport {
-    /// Report type
-    pub report_type: u8,
-    /// CPU security version number
-    pub cpu_svn: [u8; 16],
-    /// TEE TCB info
-    pub tee_tcb_info: [u8; 239],
-    /// TEE info
-    pub tee_info: [u8; 512],
-    /// Report data (contains user data)
-    pub report_data: [u8; 64],
-}
-
-/// TDX measurement register data
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TdxMeasurements {
-    /// Measurement of the initial contents of the TD (MRTD)
-    pub mrtd: Vec<u8>,
-    /// Runtime measurement registers (RTMRs)
-    pub rtmr0: Vec<u8>,
-    pub rtmr1: Vec<u8>,
-    pub rtmr2: Vec<u8>,
-    pub rtmr3: Vec<u8>,
-    /// Security version number
-    pub security_version: u64,
-    /// Debug flag
-    pub debug: bool,
-}
-
-/// Parsed and verified TDX quote data
-#[derive(Debug, Clone)]
-pub struct TdxQuoteData {
-    /// Software measurement (MRTD)
-    pub mrtd: Vec<u8>,
-    /// Runtime measurements (RTMRs)
-    pub rtmrs: HashMap<String, Vec<u8>>,
-    /// Security version number
-    pub security_version: u64,
-    /// Whether debug mode is disabled
-    pub debug_disabled: bool,
-    /// User data from quote
-    pub user_data: Vec<u8>,
-    /// Timestamp when quote was generated
-    pub timestamp: u64,
-    /// TEE TCB SVN
-    pub tcb_svn: Vec<u8>,
-}
 
 impl TdxGuest {
     /// Check if TDX is available on this system
@@ -132,133 +55,9 @@ impl TdxGuest {
         Ok(quote_buffer)
     }
 
-    /// Generate a TD report (used internally by quote generation)
-    pub fn get_td_report(report_data: &[u8; 64]) -> Result<TdReport> {
-        // In a real implementation, this would make an IOCTL call to get the TD report
-        // For now, we'll create a mock report structure
-
-        if !Self::is_available() {
-            anyhow::bail!("TDX guest device not available");
-        }
-
-        // Mock TD report - in practice this would come from the TDX module
-        Ok(TdReport {
-            report_type: 0x81,        // TDX report type
-            cpu_svn: [0u8; 16],       // Would contain actual CPU SVN
-            tee_tcb_info: [0u8; 239], // Would contain actual TCB info
-            tee_info: [0u8; 512],     // Would contain actual TEE info
-            report_data: *report_data,
-        })
-    }
-
     /// Parse a TDX quote and extract key information
     pub fn parse_quote(quote_bytes: &[u8]) -> Result<TdxQuote> {
-        use crate::tdx::parser::TdxParser;
-
-        // Use the proper quote parser
-        let parsed_quote = TdxParser::parse_quote(quote_bytes)?;
-        let claims = TdxParser::extract_claims(&parsed_quote);
-
-        // Convert to legacy format for compatibility
-        let header = TdxQuoteHeader {
-            version: claims.quote_version,
-            ak_type: claims.att_key_type,
-            tee_type: claims.tee_type,
-            qe_svn: 0,               // Not directly available in V4
-            pce_svn: 0,              // Not directly available in V4
-            qe_vendor_id: [0u8; 16], // Would need to extract from signature data
-            user_data: claims.user_data[..20.min(claims.user_data.len())]
-                .try_into()
-                .unwrap_or([0u8; 20]),
-        };
-
-        let td_report = TdReport {
-            report_type: 0x81, // TDX report type
-            cpu_svn: claims.tcb_svn[..16.min(claims.tcb_svn.len())]
-                .try_into()
-                .unwrap_or([0u8; 16]),
-            tee_tcb_info: [0u8; 239], // Would need proper parsing
-            tee_info: {
-                let mut tee_info = [0u8; 512];
-                // Pack MRTD and RTMRs into tee_info for legacy compatibility
-                if claims.mrtd.len() <= 48 {
-                    tee_info[0..claims.mrtd.len()].copy_from_slice(&claims.mrtd);
-                }
-                let mut offset = 48;
-                // Pack RTMRs in order
-                let rtmrs = [&claims.rtmr0, &claims.rtmr1, &claims.rtmr2, &claims.rtmr3];
-                for rtmr in rtmrs {
-                    if offset + rtmr.len() <= 512 {
-                        let end = offset + rtmr.len();
-                        tee_info[offset..end].copy_from_slice(rtmr);
-                        offset = end;
-                    }
-                }
-                tee_info
-            },
-            report_data: claims.report_data[..64.min(claims.report_data.len())]
-                .try_into()
-                .unwrap_or([0u8; 64]),
-        };
-
-        // Build legacy TdxQuote struct
-        Ok(TdxQuote {
-            header,
-            td_report,
-            signature_data: parsed_quote.raw_signature_data,
-        })
-    }
-
-    /// Extract measurements and claims from a TDX quote
-    pub fn extract_quote_data(quote: &TdxQuote) -> Result<TdxQuoteData> {
-        // Extract from the parsed TEE info structure
-        let tee_info = &quote.td_report.tee_info;
-
-        // MRTD is at offset 0 in TEE info (48 bytes)
-        let mrtd = if tee_info.len() >= 48 {
-            tee_info[0..48].to_vec()
-        } else {
-            vec![0u8; 48]
-        };
-
-        // RTMRs are at specific offsets (48 bytes each)
-        let mut rtmrs = HashMap::new();
-        if tee_info.len() >= 240 {
-            // 48 + 4*48
-            rtmrs.insert("rtmr0".to_string(), tee_info[48..96].to_vec());
-            rtmrs.insert("rtmr1".to_string(), tee_info[96..144].to_vec());
-            rtmrs.insert("rtmr2".to_string(), tee_info[144..192].to_vec());
-            rtmrs.insert("rtmr3".to_string(), tee_info[192..240].to_vec());
-        }
-
-        // Extract security version from CPU SVN
-        let security_version = if quote.td_report.cpu_svn.len() >= 8 {
-            u64::from_le_bytes(quote.td_report.cpu_svn[0..8].try_into().unwrap_or([0u8; 8]))
-        } else {
-            0
-        };
-
-        // Debug flag is inverted from the header version (we store debug_disabled)
-        let debug_disabled = quote.header.version >= 4; // Assume newer versions disable debug by default
-
-        // User data from report data
-        let user_data = quote.td_report.report_data.to_vec();
-
-        // TCB SVN from CPU SVN
-        let tcb_svn = quote.td_report.cpu_svn.to_vec();
-
-        Ok(TdxQuoteData {
-            mrtd,
-            rtmrs,
-            security_version,
-            debug_disabled,
-            user_data,
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-            tcb_svn,
-        })
+        TdxQuote::parse(quote_bytes)
     }
 
     /// Create report data from user data and ephemeral key
@@ -343,7 +142,7 @@ mod tests {
             quote[sig_len_offset..sig_len_offset + 4].copy_from_slice(&64u32.to_le_bytes());
         }
 
-        let result = TdxGuest::parse_quote(&quote);
+        let result = TdxQuote::parse(&quote);
         assert!(result.is_ok());
 
         let parsed_quote = result.unwrap();

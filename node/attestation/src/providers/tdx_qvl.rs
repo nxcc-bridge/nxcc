@@ -1,12 +1,10 @@
-use std::collections::HashMap;
-
 use anyhow::Result;
 use async_trait::async_trait;
 
 use crate::{
     tdx::{
         hardware::{TdxHardware, TdxInterface, TdxSimulator},
-        TdxQuoteData,
+        TdxAttestationClaims, TdxQuote,
     },
     types::Measurement,
     AttestationBundle, AttestationProvider, RawAttestation, StandardizedClaims, UserDataBinding,
@@ -62,7 +60,7 @@ impl TdxQvlProvider {
         Self { tdx_interface }
     }
 
-    async fn verify_with_dcap_qvl(&self, quote: &[u8]) -> Result<TdxQuoteData> {
+    async fn verify_with_dcap_qvl(&self, quote: &[u8]) -> Result<TdxAttestationClaims> {
         // Check if this is a simulator quote by trying to parse it first
         let is_simulator_quote = self.is_simulator_quote(quote);
 
@@ -99,32 +97,51 @@ impl TdxQvlProvider {
             _ => return Err(anyhow::anyhow!("Expected TDX report but got SGX report")),
         };
 
-        // Extract measurements and other data
-        let mut rtmrs = HashMap::new();
-        rtmrs.insert("rtmr0".to_string(), report.rt_mr0.to_vec());
-        rtmrs.insert("rtmr1".to_string(), report.rt_mr1.to_vec());
-        rtmrs.insert("rtmr2".to_string(), report.rt_mr2.to_vec());
-        rtmrs.insert("rtmr3".to_string(), report.rt_mr3.to_vec());
-
-        let quote_data = TdxQuoteData {
+        // Create TdxAttestationClaims from the verified report
+        let quote_data = TdxAttestationClaims {
+            // Core measurements
             mrtd: report.mr_td.to_vec(),
-            rtmrs,
-            security_version: u64::from_le_bytes(
-                report.tee_tcb_svn[..8].try_into().unwrap_or([0; 8]),
+            rtmr0: report.rt_mr0.to_vec(),
+            rtmr1: report.rt_mr1.to_vec(),
+            rtmr2: report.rt_mr2.to_vec(),
+            rtmr3: report.rt_mr3.to_vec(),
+            mr_config_id: report.mr_config_id.to_vec(),
+            mr_owner: report.mr_owner.to_vec(),
+            mr_seam: report.mr_seam.to_vec(),
+
+            // Security attributes
+            debug_enabled: report.td_attributes[0] & 0x01 != 0, // Debug flag is bit 0
+            td_attributes: u64::from_le_bytes(
+                report.td_attributes[..8].try_into().unwrap_or([0; 8]),
             ),
-            debug_disabled: verified_report.status != "UpToDate"
-                || !report.td_attributes[0] & 0x01 != 0, // Debug flag is bit 0
-            user_data: report.report_data.to_vec(),
-            timestamp: now,
+            seam_attributes: 0, // Not directly available from dcap-qvl report
             tcb_svn: report.tee_tcb_svn.to_vec(),
+
+            // User data and keys
+            report_data: report.report_data.to_vec(),
+            user_data: vec![], // Would need to extract from quote header
+            ephemeral_key: if report.report_data[..32].iter().any(|&b| b != 0) {
+                Some(report.report_data[..32].to_vec())
+            } else {
+                None
+            },
+
+            // Quote metadata (would need to parse quote header for these)
+            quote_version: 4, // Assume TDX v4
+            tee_type: 0x81,   // TDX TEE type
+            att_key_type: 2,  // ECDSA P-256
+
+            // Signature info
+            has_valid_signature: verified_report.status == "UpToDate",
+            signature_present: true, // dcap-qvl verified it
+            cert_chain_present: true,
         };
 
         tracing::info!(
-            "Successfully verified TDX quote using dcap-qvl: mrtd_len={}, rtmrs={}, \
-             debug_disabled={}, user_data_len={}, status={}",
+            "Successfully verified TDX quote using dcap-qvl: mrtd_len={}, debug_enabled={}, \
+             user_data_len={}, status={}",
             quote_data.mrtd.len(),
-            quote_data.rtmrs.len(),
-            quote_data.debug_disabled,
+            quote_data.debug_enabled,
             quote_data.user_data.len(),
             verified_report.status
         );
@@ -149,77 +166,54 @@ impl TdxQvlProvider {
     }
 
     /// Verify a simulator quote using local parsing only
-    async fn verify_simulator_quote(&self, quote: &[u8]) -> Result<TdxQuoteData> {
+    async fn verify_simulator_quote(&self, quote: &[u8]) -> Result<TdxAttestationClaims> {
         // Use our existing TDX parser for basic structural verification
-        use crate::tdx::parser::TdxParser;
-
-        let parsed_quote = TdxParser::parse_quote(quote)
+        let parsed_quote = TdxQuote::parse(quote)
             .map_err(|e| anyhow::anyhow!("Failed to parse simulator quote: {}", e))?;
 
         // Basic structure verification
-        TdxParser::verify_quote_structure(&parsed_quote)
+        parsed_quote
+            .verify_structure()
             .map_err(|e| anyhow::anyhow!("Simulator quote structure invalid: {}", e))?;
 
         // Extract claims
-        let claims = TdxParser::extract_claims(&parsed_quote);
-
-        // Convert to TdxQuoteData format
-        let mut rtmrs = HashMap::new();
-        rtmrs.insert("rtmr0".to_string(), claims.rtmr0);
-        rtmrs.insert("rtmr1".to_string(), claims.rtmr1);
-        rtmrs.insert("rtmr2".to_string(), claims.rtmr2);
-        rtmrs.insert("rtmr3".to_string(), claims.rtmr3);
-
-        let quote_data = TdxQuoteData {
-            mrtd: claims.mrtd,
-            rtmrs,
-            security_version: u64::from_le_bytes(claims.tcb_svn[..8].try_into().unwrap_or([0; 8])),
-            debug_disabled: !claims.debug_enabled,
-            user_data: claims.report_data,
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-            tcb_svn: claims.tcb_svn,
-        };
+        let claims = parsed_quote.extract_claims();
 
         tracing::info!(
-            "Successfully verified simulator TDX quote: mrtd_len={}, rtmrs={}, debug_disabled={}, \
+            "Successfully verified simulator TDX quote: mrtd_len={}, debug_enabled={}, \
              user_data_len={}",
-            quote_data.mrtd.len(),
-            quote_data.rtmrs.len(),
-            quote_data.debug_disabled,
-            quote_data.user_data.len()
+            claims.mrtd.len(),
+            claims.debug_enabled,
+            claims.user_data.len()
         );
 
-        Ok(quote_data)
+        Ok(claims)
     }
 
     fn extract_standardized_claims(
         &self,
-        quote_data: TdxQuoteData,
+        claims: TdxAttestationClaims,
         _bundle: &AttestationBundle,
     ) -> Result<StandardizedClaims> {
-        // Convert RTMR map to measurements map
+        // Convert to measurements HashMap
         let mut measurements = std::collections::HashMap::new();
-        for (key, value) in quote_data.rtmrs {
-            measurements.insert(key, value);
-        }
-
-        // Add additional measurements
-        measurements.insert("mrtd".to_string(), quote_data.mrtd.clone());
-        if !quote_data.tcb_svn.is_empty() {
-            measurements.insert("tcb_svn".to_string(), quote_data.tcb_svn.clone());
-        }
+        measurements.insert("rtmr0".to_string(), claims.rtmr0);
+        measurements.insert("rtmr1".to_string(), claims.rtmr1);
+        measurements.insert("rtmr2".to_string(), claims.rtmr2);
+        measurements.insert("rtmr3".to_string(), claims.rtmr3);
+        measurements.insert("mr_config_id".to_string(), claims.mr_config_id);
+        measurements.insert("mr_owner".to_string(), claims.mr_owner);
+        measurements.insert("mr_seam".to_string(), claims.mr_seam);
+        measurements.insert("tcb_svn".to_string(), claims.tcb_svn);
 
         // Determine hardware security level (1=debug, 3=production)
-        let hardware_security_level = if quote_data.debug_disabled { 3 } else { 1 };
+        let hardware_security_level = if claims.debug_enabled { 1 } else { 3 };
 
         // Use MRTD as unique entity ID (first 32 bytes)
-        let unique_entity_id = if quote_data.mrtd.len() >= 32 {
-            quote_data.mrtd[0..32].to_vec()
+        let unique_entity_id = if claims.mrtd.len() >= 32 {
+            claims.mrtd[0..32].to_vec()
         } else {
-            quote_data.mrtd.clone()
+            claims.mrtd.clone()
         };
 
         // Convert measurements HashMap to Vec<Measurement> using exact field names
@@ -236,7 +230,7 @@ impl TdxQvlProvider {
 
         // Add the primary software measurement (MRTD)
         let mut all_measurements = vec![Measurement {
-            val: quote_data.mrtd,
+            val: claims.mrtd,
             alg: "sha-384".to_string(),
             measurement_type: Some("application".to_string()), // Primary enclave measurement
             vendor: Some("intel".to_string()),
@@ -244,10 +238,15 @@ impl TdxQvlProvider {
         }];
         all_measurements.extend(rtmr_measurements);
 
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
         Ok(StandardizedClaims {
             // Core freshness and context
-            iat: quote_data.timestamp,
-            eat_nonce: Some(quote_data.user_data),
+            iat: timestamp,
+            eat_nonce: Some(claims.report_data),
 
             // Identity and provenance
             ueid: Some(unique_entity_id),
@@ -329,9 +328,9 @@ impl AttestationProvider for TdxQvlProvider {
             .verify_with_dcap_qvl(&bundle.raw_attestation.evidence)
             .await
         {
-            Ok(quote_data) => {
-                let claims = self.extract_standardized_claims(quote_data, bundle)?;
-                Ok(VerificationResult::Verified(Box::new(claims)))
+            Ok(claims) => {
+                let standardized_claims = self.extract_standardized_claims(claims, bundle)?;
+                Ok(VerificationResult::Verified(Box::new(standardized_claims)))
             }
             Err(e)
                 if e.to_string().contains("not available")
@@ -347,9 +346,10 @@ impl AttestationProvider for TdxQvlProvider {
                     .verify_simulator_quote(&bundle.raw_attestation.evidence)
                     .await
                 {
-                    Ok(quote_data) => {
-                        let claims = self.extract_standardized_claims(quote_data, bundle)?;
-                        Ok(VerificationResult::Verified(Box::new(claims)))
+                    Ok(claims) => {
+                        let standardized_claims =
+                            self.extract_standardized_claims(claims, bundle)?;
+                        Ok(VerificationResult::Verified(Box::new(standardized_claims)))
                     }
                     Err(sim_err) => {
                         tracing::warn!(

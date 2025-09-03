@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use nxcc_interface::types::attestation::{AttestationBundle, RawAttestation, UserDataBinding};
 
 use crate::{
-    tdx::parser::{TdxAttestationClaims, TdxParser},
+    tdx::{TdxAttestationClaims, TdxQuote},
     types::*,
     AttestationProvider,
 };
@@ -276,7 +276,7 @@ impl AttestationProvider for MockTdxProvider {
         }
 
         // Parse the TDX quote using our working parser
-        let quote = match TdxParser::parse_quote(&bundle.raw_attestation.evidence) {
+        let quote = match TdxQuote::parse(&bundle.raw_attestation.evidence) {
             Ok(quote) => quote,
             Err(e) => {
                 return Ok(VerificationResult::Failed(format!(
@@ -287,7 +287,7 @@ impl AttestationProvider for MockTdxProvider {
         };
 
         // Verify quote structure
-        if let Err(e) = TdxParser::verify_quote_structure(&quote) {
+        if let Err(e) = quote.verify_structure() {
             return Ok(VerificationResult::Failed(format!(
                 "Quote structure invalid: {}",
                 e
@@ -295,7 +295,7 @@ impl AttestationProvider for MockTdxProvider {
         }
 
         // Extract TDX-specific claims
-        let tdx_claims = TdxParser::extract_claims(&quote);
+        let tdx_claims = quote.extract_claims();
 
         // Convert to standardized claims
         match self.extract_standardized_claims(&tdx_claims, &bundle.user_data_binding) {
@@ -381,11 +381,11 @@ mod tests {
         assert!(quote.len() > 600); // Should be similar to real quote size
 
         // Parse the generated quote
-        let parsed_quote = TdxParser::parse_quote(&quote).unwrap();
-        let claims = TdxParser::extract_claims(&parsed_quote);
+        let parsed_quote = TdxQuote::parse(&quote).unwrap();
+        let claims = parsed_quote.extract_claims();
 
         // Verify user data was embedded
-        let extracted_msg = TdxParser::extract_user_message(&claims.report_data);
+        let extracted_msg = TdxQuote::extract_user_message(&claims.report_data);
         assert!(extracted_msg.starts_with("test message"));
     }
 
