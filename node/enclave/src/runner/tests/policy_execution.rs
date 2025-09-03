@@ -9,10 +9,10 @@ use nxcc_interface::{
         secrets::ConsumerInfo,
     },
 };
-use nxcc_vm_base::client::mock::MockExecutionBehavior;
+use nxcc_vm_base::client::{ClientError, mock::MockExecutionBehavior};
 
 use super::common::*;
-use crate::runner::{ClientError, RunnerError};
+use crate::runner::RunnerError;
 
 // Helper function to create a default ConsumerInfo for tests
 fn test_consumer_info() -> ConsumerInfo {

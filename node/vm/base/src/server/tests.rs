@@ -289,9 +289,11 @@ async fn test_vm_service_grpc_stop_invoke_attestation() {
     let response = service.get_attestation(request).await.unwrap().into_inner();
     assert!(response.bundle.is_some());
     let bundle = response.bundle.unwrap();
-    
+
     // Verify the detached userdata can be decoded
-    let userdata = nxcc_attestation::user_data_binding::UserData::from_cbor(&bundle.detached_userdata).unwrap();
+    let userdata =
+        nxcc_attestation::user_data_binding::UserData::from_cbor(&bundle.detached_userdata)
+            .unwrap();
     assert_eq!(userdata.ephemeral_public_key, vec![1, 2, 3, 4, 5]);
     assert_eq!(userdata.block_hashes.len(), 1);
     assert_eq!(userdata.block_hashes[0].chain_id, 1);

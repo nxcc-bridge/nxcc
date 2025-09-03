@@ -1,8 +1,8 @@
 use std::thread::sleep;
 
 use alloy_primitives::U256;
-use nxcc_attestation::user_data_binding;
 use chrono::Utc;
+use nxcc_attestation::user_data_binding;
 use nxcc_interface::types::{
     policy::{PolicyExecutionReport, PolicyExecutionRequest},
     secrets::{ChainIdentifier, ConsumerInfo},

@@ -1,8 +1,8 @@
 use nxcc_interface::proto::vm::WorkerStatus;
-use nxcc_vm_base::client::mock::MockExecutionBehavior;
+use nxcc_vm_base::client::{ClientError, mock::MockExecutionBehavior};
 
 use super::common::*;
-use crate::runner::{ClientError, RunnerError};
+use crate::runner::RunnerError;
 
 #[tokio::test]
 async fn test_run_worker_success() {
