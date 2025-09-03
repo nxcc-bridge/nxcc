@@ -24,7 +24,7 @@ use nxcc_interface::{
         Header as ProtoHeader, HttpRequest as ProtoHttpRequest, HttpResponse as ProtoHttpResponse,
         StreamWorkerLogsResponse, TrustedConfig, UntrustedConfig, WorkerStatus,
     },
-    types::{AttestationBundle, EventPayload},
+    types::{attestation::AttestationBundle, worker::events::EventPayload},
 };
 use nxcc_vm_base::{
     logging::{LogEntry, VmmLogManager},

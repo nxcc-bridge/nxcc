@@ -4,7 +4,10 @@ use aes_gcm_siv::{
     AeadCore as _, Aes256GcmSiv,
     aead::{Aead, KeyInit, OsRng, generic_array::GenericArray},
 };
-use nxcc_interface::types::{AttestationBundle, ChainIdentifier, SecretId, SecretsBox};
+use nxcc_interface::types::{
+    attestation::AttestationBundle,
+    secrets::{ChainIdentifier, SecretId, SecretsBox},
+};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use x25519_dalek::{PublicKey, SharedSecret, StaticSecret};
@@ -260,7 +263,7 @@ pub fn generate_attestation(ephemeral_kx_pk: &PublicKey, user_data: Vec<u8>) -> 
 
     // Fallback to dummy attestation
     tracing::debug!("Using dummy attestation fallback");
-    use nxcc_interface::types::{RawAttestation, UserDataBinding};
+    use nxcc_interface::types::attestation::{RawAttestation, UserDataBinding};
     AttestationBundle {
         raw_attestation: RawAttestation {
             platform_type: "dummy".to_string(),

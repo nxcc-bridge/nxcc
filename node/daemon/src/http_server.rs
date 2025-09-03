@@ -12,7 +12,7 @@ use axum::{
     response::{IntoResponse, Response, Sse, sse::Event},
     routing::{Router, any, get, post},
 };
-use nxcc_interface::types::DsseEnvelope;
+use nxcc_interface::types::worker::DsseEnvelope;
 use serde::Deserialize;
 use tokio::sync::RwLock;
 use tokio_stream::StreamExt;

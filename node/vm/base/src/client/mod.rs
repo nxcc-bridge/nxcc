@@ -15,7 +15,7 @@ use nxcc_interface::{
         StartWorkerRequest, StopWorkerRequest, StreamWorkerLogsRequest, StreamWorkerLogsResponse,
         TrustedConfig, UntrustedConfig, WorkerStatus,
     },
-    types::AttestationBundle,
+    types::attestation::AttestationBundle,
 };
 use thiserror::Error;
 #[cfg(feature = "uds")]

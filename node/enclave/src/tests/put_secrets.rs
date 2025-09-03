@@ -3,7 +3,7 @@ use nxcc_interface::{
         PutSecretsRequest as ProtoPutSecretsRequest, SecretsBundle, runner_server::Runner as _,
         secrets_server::Secrets as _,
     },
-    types::SecretsBox,
+    types::secrets::SecretsBox,
 };
 use tonic::Request;
 use tracing::info;

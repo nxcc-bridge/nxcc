@@ -1,5 +1,5 @@
 use alloy_primitives::{Address, B256};
-use nxcc_interface::types::{EventPayload, Web3Log};
+use nxcc_interface::types::worker::events::{EventPayload, Web3Log};
 use nxcc_vm_base::client::mock::MockExecutionBehavior;
 use tokio::time::{Duration, sleep};
 

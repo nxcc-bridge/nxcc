@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use ed25519_dalek::{Signer, Verifier};
-use nxcc_interface::types::RawAttestation;
+use nxcc_interface::types::attestation::RawAttestation;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 

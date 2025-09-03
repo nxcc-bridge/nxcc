@@ -534,7 +534,7 @@ async fn test_mock_client() {
             Header as ProtoHeader, HttpRequest as ProtoHttpRequest,
             HttpResponse as ProtoHttpResponse,
         },
-        types::{AttestationBundle, RawAttestation, UserDataBinding},
+        types::attestation::{AttestationBundle, RawAttestation, UserDataBinding},
     };
 
     use super::mock::{MockAttestationBehavior, MockVmServiceClient};

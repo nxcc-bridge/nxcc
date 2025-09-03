@@ -6,8 +6,11 @@ use std::{
 
 use alloy_primitives::hex;
 use nxcc_interface::types::{
-    DSSE_WORKER_BUNDLE_PAYLOAD_TYPE, DsseEnvelope, DsseSignatureEntry, FullPolicyPackage, SecretId,
-    WorkerBundle, WorkerBundlePayload, WorkerBundlePointer, WorkerManifest,
+    secrets::SecretId,
+    worker::{
+        DSSE_WORKER_BUNDLE_PAYLOAD_TYPE, DsseEnvelope, DsseSignatureEntry, FullPolicyPackage,
+        WorkerBundle, WorkerBundlePayload, WorkerBundlePointer, WorkerManifest,
+    },
 };
 use percent_encoding::percent_decode_str;
 use tracing::{debug, error, info, trace, warn};

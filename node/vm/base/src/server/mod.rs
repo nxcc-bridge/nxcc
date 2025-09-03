@@ -80,7 +80,7 @@ pub trait VmRuntime: Send + Sync + 'static {
     async fn get_attestation(
         &self,
         user_data: Vec<u8>,
-    ) -> Result<nxcc_interface::types::AttestationBundle, VmError>;
+    ) -> Result<nxcc_interface::types::attestation::AttestationBundle, VmError>;
 
     /// Retrieves the status of a specific worker instance.
     async fn get_worker_status(

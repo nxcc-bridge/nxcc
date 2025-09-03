@@ -10,7 +10,7 @@ use nxcc_interface::{
         },
         interface::SecretRequest,
     },
-    types::SecretsBox,
+    types::secrets::SecretsBox,
 };
 use tonic::Request;
 use tracing::info;

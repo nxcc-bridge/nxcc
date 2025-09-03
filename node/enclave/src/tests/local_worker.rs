@@ -1,9 +1,13 @@
 use nxcc_interface::{
     proto::enclave::{RunWorkerRequest, runner_server::Runner as _, secrets_server::Secrets as _},
     types::{
-        ConsumerInfo, DSSE_WORKER_BUNDLE_PAYLOAD_TYPE, DsseEnvelope, DsseSignatureEntry, EnvReport,
-        PolicyExecutionRequest, WorkerBundle, WorkerBundlePayload, WorkerBundlePointer,
-        WorkerManifest,
+        attestation::EnvReport,
+        policy::PolicyExecutionRequest,
+        secrets::ConsumerInfo,
+        worker::{
+            DSSE_WORKER_BUNDLE_PAYLOAD_TYPE, DsseEnvelope, DsseSignatureEntry, WorkerBundle,
+            WorkerBundlePayload, WorkerBundlePointer, WorkerManifest,
+        },
     },
 };
 use tonic::Request;

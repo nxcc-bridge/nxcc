@@ -7,10 +7,13 @@ use alloy_primitives::{Address, U256};
 use nxcc_interface::{
     proto::enclave::{runner_server::Runner as _, secrets_server::Secrets as _},
     types::{
-        AttestationBundle, ChainIdentifier, ConsumerInfo, DSSE_WORKER_BUNDLE_PAYLOAD_TYPE,
-        DsseEnvelope, DsseSignatureEntry, EnvReport, PolicyExecutionReport, PolicyExecutionRequest,
-        SecretId, SecretsBox, WorkerBundle, WorkerBundlePayload, WorkerBundlePointer,
-        WorkerManifest,
+        attestation::{AttestationBundle, EnvReport},
+        policy::{PolicyExecutionReport, PolicyExecutionRequest},
+        secrets::{ChainIdentifier, ConsumerInfo, SecretId, SecretsBox},
+        worker::{
+            DSSE_WORKER_BUNDLE_PAYLOAD_TYPE, DsseEnvelope, DsseSignatureEntry, WorkerBundle,
+            WorkerBundlePayload, WorkerBundlePointer, WorkerManifest,
+        },
     },
 };
 use nxcc_vm_base::client::mock::{MockExecutionBehavior, MockVmServiceClient};
@@ -47,12 +50,12 @@ pub fn test_env_report_for_client(
 ) -> EnvReport {
     EnvReport {
         attestation: AttestationBundle {
-            raw_attestation: nxcc_interface::types::RawAttestation {
+            raw_attestation: nxcc_interface::types::attestation::RawAttestation {
                 platform_type: "test".to_string(),
                 evidence: vec![0u8; 32], // Consistent measurement for tests
                 certificates: None,
             },
-            user_data_binding: nxcc_interface::types::UserDataBinding {
+            user_data_binding: nxcc_interface::types::attestation::UserDataBinding {
                 original_data: {
                     let mut data = client_kx_public_key.to_vec();
                     data.extend_from_slice(&user_data_for_attestation);

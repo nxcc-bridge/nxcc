@@ -16,8 +16,11 @@ use nxcc_interface::{
         interface, vm,
     },
     types::{
-        ConsumerInfo, EnvReport, EventPayload, PolicyExecutionRequest, SecretId, SecretRequest,
-        SecretsBox, VmAddress, WorkerBundle, WorkerManifest,
+        attestation::EnvReport,
+        policy::PolicyExecutionRequest,
+        secrets::{ConsumerInfo, SecretId, SecretRequest, SecretsBox},
+        vm::VmAddress,
+        worker::{WorkerBundle, WorkerManifest, events::EventPayload},
     },
 };
 use nxcc_vm_base::client::ClientError;

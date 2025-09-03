@@ -8,7 +8,7 @@ use nxcc_interface::{
         Header as ProtoHeader, HttpRequest as ProtoHttpRequest, HttpResponse as ProtoHttpResponse,
         TrustedConfig, UntrustedConfig, WorkerStatus,
     },
-    types::AttestationBundle,
+    types::attestation::AttestationBundle,
 };
 use tonic::Status;
 use tracing::{debug, info, warn};
@@ -492,7 +492,7 @@ impl VmClient for MockVmServiceClient {
     ) -> Result<AttestationBundle, ClientError> {
         use nxcc_interface::{
             gateway::BlockInfo,
-            types::{RawAttestation, UserDataBinding},
+            types::attestation::{RawAttestation, UserDataBinding},
         };
 
         self.check_failure()?;

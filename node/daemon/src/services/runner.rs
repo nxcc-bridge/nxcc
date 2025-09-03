@@ -4,8 +4,10 @@ use nxcc_interface::{
         TerminateWorkerRequest, runner_client::RunnerClient,
     },
     types::{
-        ConsumerInfo, EnvReport, FullPolicyPackage, PolicyExecutionRequest, SecretId, WorkerBundle,
-        WorkerManifest,
+        attestation::EnvReport,
+        policy::PolicyExecutionRequest,
+        secrets::{ConsumerInfo, SecretId},
+        worker::{FullPolicyPackage, WorkerBundle, WorkerManifest},
     },
 };
 use tonic::transport::Channel;

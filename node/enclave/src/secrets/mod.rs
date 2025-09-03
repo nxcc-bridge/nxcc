@@ -10,8 +10,9 @@ use std::{
 use chrono::Utc;
 use nxcc_attestation::AttestationService;
 use nxcc_interface::types::{
-    AttestationBundle, ConsumerInfo, EnvReport, PolicyExecutionReport, RawAttestation, SecretId,
-    SecretsBox, UserDataBinding,
+    attestation::{AttestationBundle, EnvReport, RawAttestation, UserDataBinding},
+    policy::PolicyExecutionReport,
+    secrets::{ConsumerInfo, SecretId, SecretsBox},
 };
 use once_cell::sync::Lazy;
 use sha2::{Digest, Sha256};

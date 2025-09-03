@@ -3,9 +3,13 @@ use std::sync::Arc;
 use nxcc_interface::{
     proto::vm::WorkerStatus,
     types::{
-        AttestationBundle, ChainIdentifier, ConsumerInfo, DSSE_WORKER_BUNDLE_PAYLOAD_TYPE,
-        DsseEnvelope, DsseSignatureEntry, EnvReport, PolicyExecutionRequest, SecretId,
-        WorkerBundle, WorkerBundlePayload, WorkerBundlePointer, WorkerManifest,
+        attestation::{AttestationBundle, EnvReport},
+        policy::PolicyExecutionRequest,
+        secrets::{ChainIdentifier, ConsumerInfo, SecretId},
+        worker::{
+            DSSE_WORKER_BUNDLE_PAYLOAD_TYPE, DsseEnvelope, DsseSignatureEntry, WorkerBundle,
+            WorkerBundlePayload, WorkerBundlePointer, WorkerManifest,
+        },
     },
 };
 use nxcc_vm_base::client::{
@@ -36,12 +40,12 @@ pub fn test_policy_request(secret_ids: Vec<SecretId>) -> PolicyExecutionRequest 
         },
         env_report: EnvReport {
             attestation: AttestationBundle {
-                raw_attestation: nxcc_interface::types::RawAttestation {
+                raw_attestation: nxcc_interface::types::attestation::RawAttestation {
                     platform_type: "test".to_string(),
                     evidence: vec![0u8; 32],
                     certificates: None,
                 },
-                user_data_binding: nxcc_interface::types::UserDataBinding {
+                user_data_binding: nxcc_interface::types::attestation::UserDataBinding {
                     original_data: {
                         let mut data = vec![3; 32]; // ephemeral key
                         data.extend_from_slice(&vec![8, 9]); // user data

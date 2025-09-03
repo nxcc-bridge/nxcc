@@ -5,7 +5,7 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use nxcc_interface::types::{CatchUp, RateMode, Schedule};
+use nxcc_interface::types::worker::events::{CatchUp, RateMode, Schedule};
 use tokio::{
     sync::{RwLock, mpsc},
     time::{MissedTickBehavior, interval_at, sleep},

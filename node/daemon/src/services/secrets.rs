@@ -12,8 +12,10 @@ use futures::channel::mpsc;
 use libp2p::PeerId; // Import PeerId
 use libp2p::identity::Keypair; // Import Keypair
 use nxcc_interface::types::{
-    AttestationBundle, ConsumerInfo, EnvReport, OperatorSignature, PolicyExecutionRequest,
-    SecretId, SecretRequest, SecretsBox, WorkerBundle, WorkerManifest,
+    attestation::{AttestationBundle, EnvReport, OperatorSignature},
+    policy::PolicyExecutionRequest,
+    secrets::{ConsumerInfo, SecretId, SecretRequest, SecretsBox},
+    worker::{WorkerBundle, WorkerManifest},
 };
 use sha2::Digest;
 use tokio::sync::{Mutex, RwLock, oneshot};
@@ -960,7 +962,7 @@ mod tests {
         std::fs::write(&key_path, test_key).unwrap();
 
         // Create test attestation bundle
-        use nxcc_interface::types::{RawAttestation, UserDataBinding};
+        use nxcc_interface::types::attestation::{RawAttestation, UserDataBinding};
         let attestation = AttestationBundle {
             raw_attestation: RawAttestation {
                 platform_type: "test".to_string(),

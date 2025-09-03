@@ -13,10 +13,17 @@ use nxcc_interface::{
         InvokeWorkerRequest as ProtoInvokeWorkerRequest, TrustedConfig, UntrustedConfig,
     },
     types::{
-        AttestationBundle, ConsumerInfo, EventPayload, InterfaceConfirmationMethod, InterfaceJwk,
-        InterfaceMeasurement, PolicyExecutionContextForWorker, PolicyExecutionReport,
-        PolicyExecutionRequest, StandardizedAttestationClaims, VmAddress, Web3Log, WorkerBundle,
-        WorkerManifest,
+        attestation::{
+            AttestationBundle, InterfaceConfirmationMethod, InterfaceJwk, InterfaceMeasurement,
+            StandardizedAttestationClaims,
+        },
+        policy::{PolicyExecutionContextForWorker, PolicyExecutionReport, PolicyExecutionRequest},
+        secrets::ConsumerInfo,
+        vm::VmAddress,
+        worker::{
+            WorkerBundle, WorkerManifest,
+            events::{EventPayload, Web3Log},
+        },
     },
 };
 #[cfg(test)]
@@ -726,7 +733,7 @@ impl RunnerService {
         bundle: &AttestationBundle,
         manager: &crate::attestation::PlatformAttestationManager,
     ) -> Result<StandardizedAttestationClaims, String> {
-        use nxcc_interface::types::StandardizedAttestationClaims;
+        use nxcc_interface::types::attestation::StandardizedAttestationClaims;
 
         // Verify using the attestation service
         match manager

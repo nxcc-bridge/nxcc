@@ -3,7 +3,8 @@ use std::thread::sleep;
 use alloy_primitives::U256;
 use chrono::Utc;
 use nxcc_interface::types::{
-    ChainIdentifier, ConsumerInfo, PolicyExecutionReport, PolicyExecutionRequest,
+    policy::{PolicyExecutionReport, PolicyExecutionRequest},
+    secrets::{ChainIdentifier, ConsumerInfo},
 };
 
 use super::*;
@@ -19,7 +20,7 @@ fn test_secret_id(id: u64) -> SecretId {
 
 // Helper to create a specific AttestationBundle
 fn test_attestation_bundle(ephemeral_pk: Vec<u8>, user_data: Vec<u8>) -> AttestationBundle {
-    use nxcc_interface::types::{RawAttestation, UserDataBinding};
+    use nxcc_interface::types::attestation::{RawAttestation, UserDataBinding};
     AttestationBundle {
         raw_attestation: RawAttestation {
             platform_type: "test".to_string(),

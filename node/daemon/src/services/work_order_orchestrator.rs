@@ -5,18 +5,12 @@ use base64::{
     engine::general_purpose::{STANDARD as BASE64_STANDARD, URL_SAFE_NO_PAD},
 };
 use nxcc_interface::types::{
-    ConsumerInfo,
-    DSSE_WORK_ORDER_PAYLOAD_TYPE,
-    DsseEnvelope,
-    Schedule,
-    SecretId,
-    SecretRequest,
-    Web3Log, // Added Web3Log for potential Launch event structure
-    WorkOrderPayload,
-    WorkerBundle,
-    WorkerEvent,
-    WorkerEventKind,
-    WorkerManifest,
+    secrets::{ConsumerInfo, SecretId, SecretRequest},
+    worker::{
+        DSSE_WORK_ORDER_PAYLOAD_TYPE, DsseEnvelope, WorkOrderPayload, WorkerBundle,
+        WorkerBundlePointer, WorkerManifest,
+        events::{RateMode, Schedule, Web3Log, WorkerEvent, WorkerEventKind},
+    },
 };
 use sha2::{Digest, Sha256};
 use tokio::sync::{RwLock, broadcast};

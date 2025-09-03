@@ -4,8 +4,9 @@ use nxcc_attestation::tdx::hardware::TdxInterface;
 use nxcc_interface::{
     proto::vm::WorkerStatus,
     types::{
-        AttestationBundle, ConsumerInfo, EnvReport, PolicyExecutionContextForWorker,
-        PolicyExecutionRequest, RawAttestation, UserDataBinding,
+        attestation::{AttestationBundle, EnvReport, RawAttestation, UserDataBinding},
+        policy::{PolicyExecutionContextForWorker, PolicyExecutionRequest},
+        secrets::ConsumerInfo,
     },
 };
 use nxcc_vm_base::client::mock::MockExecutionBehavior;
@@ -394,7 +395,7 @@ async fn test_execute_policy_vm_detached_consistency_issue() {
 
 #[tokio::test]
 async fn test_execute_policy_with_attestation_claims() {
-    use nxcc_interface::types::{
+    use nxcc_interface::types::attestation::{
         AttestationBundle, EnvReport, InterfaceMeasurement, RawAttestation,
         StandardizedAttestationClaims, UserDataBinding,
     };

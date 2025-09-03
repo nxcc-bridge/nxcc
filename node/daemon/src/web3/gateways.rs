@@ -5,7 +5,7 @@ use alloy_provider::{DynProvider, Provider, ProviderBuilder};
 use alloy_sol_types::sol;
 use alloy_transport_http::Http;
 use nxcc_chainlist::{RpcType, get_rpcs_for_chain};
-use nxcc_interface::types::ChainIdentifier;
+use nxcc_interface::types::secrets::ChainIdentifier;
 use tokio::sync::RwLock;
 use tracing::debug;
 use url::Url;

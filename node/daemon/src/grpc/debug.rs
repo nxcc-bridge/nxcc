@@ -5,7 +5,10 @@ use nxcc_interface::{
         AttachVmRequest, AttachVmResponse, CheckWorkerStatusRequest, CheckWorkerStatusResponse,
         debug_server::Debug,
     },
-    types::{EnvReport, SecretId, SecretsBox},
+    types::{
+        attestation::EnvReport,
+        secrets::{SecretId, SecretsBox},
+    },
 };
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, info};

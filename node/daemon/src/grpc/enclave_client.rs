@@ -12,7 +12,10 @@ use nxcc_interface::{
         StreamWorkerLogsRequest, TerminateWorkerRequest, VmAddress as ProtoVmAddress,
         runner_client::RunnerClient, secrets_client::SecretsClient,
     },
-    types::{AttestationBundle, ConsumerInfo, EnvReport, SecretId, SecretsBox},
+    types::{
+        attestation::{AttestationBundle, EnvReport},
+        secrets::{ConsumerInfo, SecretId, SecretsBox},
+    },
 };
 use tokio::net::UnixStream;
 use tonic::{
@@ -235,8 +238,8 @@ impl EnclaveClient {
     pub async fn execute_policy(
         &self,
         worker_id: String,
-        contexts: Vec<nxcc_interface::types::PolicyExecutionRequest>,
-    ) -> Result<Vec<nxcc_interface::types::PolicyExecutionRequest>, String> {
+        contexts: Vec<nxcc_interface::types::policy::PolicyExecutionRequest>,
+    ) -> Result<Vec<nxcc_interface::types::policy::PolicyExecutionRequest>, String> {
         let proto_contexts = contexts.iter().cloned().map(Into::into).collect();
         let req = ProtoExecutePolicyRequest {
             worker_id,
@@ -252,7 +255,7 @@ impl EnclaveClient {
             .satisfied_contexts
             .into_iter()
             .map(|p| {
-                nxcc_interface::types::PolicyExecutionRequest::try_from(p)
+                nxcc_interface::types::policy::PolicyExecutionRequest::try_from(p)
                     .map_err(|e| format!("Invalid PolicyExecutionRequest from enclave: {}", e))
             })
             .collect::<Result<_, _>>()?;

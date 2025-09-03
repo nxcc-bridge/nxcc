@@ -91,8 +91,8 @@ impl VmRuntime for MockVmRuntime {
     async fn get_attestation(
         &self,
         user_data: Vec<u8>,
-    ) -> Result<nxcc_interface::types::AttestationBundle, VmError> {
-        use nxcc_interface::types::{RawAttestation, UserDataBinding};
+    ) -> Result<nxcc_interface::types::attestation::AttestationBundle, VmError> {
+        use nxcc_interface::types::attestation::{RawAttestation, UserDataBinding};
 
         if self.force_attestation_error.load(Ordering::SeqCst) {
             return Err(VmError::new("Forced attestation error"));
@@ -102,7 +102,7 @@ impl VmRuntime for MockVmRuntime {
         let mut data = ephemeral_key.clone();
         data.extend_from_slice(&user_data);
 
-        Ok(nxcc_interface::types::AttestationBundle {
+        Ok(nxcc_interface::types::attestation::AttestationBundle {
             raw_attestation: RawAttestation {
                 platform_type: "test".to_string(),
                 evidence: vec![0u8; 32],
