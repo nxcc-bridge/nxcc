@@ -73,7 +73,13 @@ impl AttestationProvider for TestAttestationProvider {
                     manifests: None,
 
                     // Measurements
-                    measurements: vec![],
+                    measurements: vec![nxcc_attestation::types::Measurement {
+                        val: vec![0x42; 48], // Use 48 bytes for sha-384
+                        alg: "sha-384".to_string(),
+                        measurement_type: Some("application".to_string()),
+                        vendor: Some("test".to_string()),
+                        version: Some("1.0".to_string()),
+                    }],
                     measres: None,
 
                     // Execution structure

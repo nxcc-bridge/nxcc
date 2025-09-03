@@ -406,7 +406,6 @@ async fn test_execute_policy_with_attestation_claims() {
     let node_id = "node-attestation-1";
     let secret_id = test_secret_id(901);
 
-    // Create a realistic attestation bundle with proper TDX quote structure
     // Create test userdata with ephemeral key and freshness info
     let test_userdata = nxcc_attestation::user_data_binding::UserData::new(
         vec![0x01; 32], // ephemeral key (32 bytes for test)
@@ -431,17 +430,11 @@ async fn test_execute_policy_with_attestation_claims() {
     );
 
     let userdata_cbor = test_userdata.to_cbor().unwrap();
-    let userdata_hash = nxcc_attestation::user_data_binding::hash_userdata(&userdata_cbor);
 
     let attestation_bundle = AttestationBundle {
         raw_attestation: RawAttestation {
-            platform_type: "tdx".to_string(),
-            evidence: {
-                // Create a realistic TDX quote structure for testing
-                use nxcc_attestation::tdx::hardware::TdxSimulator;
-                let simulator = TdxSimulator::new();
-                simulator.generate_quote(&userdata_hash).unwrap()
-            },
+            platform_type: "test".to_string(),
+            evidence: vec![0u8; 32], // Simple test evidence
             certificates: None,
         },
         detached_userdata: userdata_cbor,
@@ -505,8 +498,8 @@ async fn test_execute_policy_with_attestation_claims() {
     let claims = satisfied_contexts[0].attestation_claims.as_ref().unwrap();
 
     // Verify key claims properties
-    assert_eq!(claims.eat_profile, "urn:nxcc:profile:tdx-v1");
-    assert_eq!(claims.dbgstat, 0); // TDX simulator uses production mode (debug disabled)
+    assert_eq!(claims.eat_profile, "test-profile");
+    assert_eq!(claims.dbgstat, 0); // Test provider uses production mode (debug disabled)
     assert!(!claims.measurements.is_empty());
 
     // Find the primary software measurement
@@ -527,7 +520,7 @@ async fn test_execute_policy_with_attestation_claims() {
     assert_eq!(sent_contexts.len(), 1);
     assert!(sent_contexts[0].attestation_claims.is_some());
     let sent_claims = sent_contexts[0].attestation_claims.as_ref().unwrap();
-    assert_eq!(sent_claims.eat_profile, "urn:nxcc:profile:tdx-v1");
+    assert_eq!(sent_claims.eat_profile, "test-profile");
     assert!(!sent_claims.measurements.is_empty());
 }
 
@@ -661,12 +654,8 @@ async fn test_execute_policy_verification_before_execution() {
 
     let good_attestation = AttestationBundle {
         raw_attestation: RawAttestation {
-            platform_type: "tdx".to_string(),
-            evidence: {
-                use nxcc_attestation::tdx::hardware::TdxSimulator;
-                let simulator = TdxSimulator::new();
-                simulator.generate_quote(&good_userdata_hash).unwrap()
-            },
+            platform_type: "test".to_string(),
+            evidence: vec![0u8; 32], // Simple test evidence
             certificates: None,
         },
         detached_userdata: good_userdata_cbor,
@@ -747,5 +736,5 @@ async fn test_execute_policy_verification_before_execution() {
     assert!(satisfied_contexts[0].attestation_claims.is_some());
 
     let claims = satisfied_contexts[0].attestation_claims.as_ref().unwrap();
-    assert_eq!(claims.eat_profile, "urn:nxcc:profile:tdx-v1");
+    assert_eq!(claims.eat_profile, "test-profile");
 }

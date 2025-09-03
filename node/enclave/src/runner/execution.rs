@@ -30,10 +30,8 @@ impl RunnerService {
         for context in &mut contexts {
             // Try to verify the attestation and extract standardized claims
             match self
-                .verify_attestation_and_extract_claims(
-                    &context.env_report.attestation,
-                    &self.attestation_manager,
-                )
+                .attestation_manager
+                .verify_and_extract_claims(&context.env_report.attestation)
                 .await
             {
                 Ok(claims) => {
@@ -41,7 +39,9 @@ impl RunnerService {
                         "Successfully verified attestation with platform {}",
                         claims.eat_profile
                     );
-                    context.attestation_claims = Some(claims);
+                    // Convert from attestation StandardizedClaims to interface StandardizedAttestationClaims
+                    let interface_claims = self.convert_claims_to_interface(*claims);
+                    context.attestation_claims = Some(interface_claims);
                 }
                 Err(e) => {
                     warn!(
@@ -141,79 +141,63 @@ impl RunnerService {
         Ok(satisfied_contexts)
     }
 
-    /// Helper method to verify attestation and extract standardized claims
-    async fn verify_attestation_and_extract_claims(
+    /// Helper method to convert attestation StandardizedClaims to interface StandardizedAttestationClaims
+    fn convert_claims_to_interface(
         &self,
-        bundle: &AttestationBundle,
-        manager: &crate::attestation::PlatformAttestationManager,
-    ) -> Result<StandardizedAttestationClaims, String> {
+        claims: nxcc_attestation::StandardizedClaims,
+    ) -> StandardizedAttestationClaims {
         use nxcc_interface::types::attestation::StandardizedAttestationClaims;
 
-        // Verify using the attestation service
-        match manager
-            .attestation_service()
-            .verify_attestation(bundle)
-            .await
-        {
-            Ok(claims) => {
-                // Convert attestation Measurement to interface InterfaceMeasurement
-                let interface_measurements: Vec<InterfaceMeasurement> = claims
-                    .measurements
-                    .into_iter()
-                    .map(|m| InterfaceMeasurement {
-                        val: m.val,
-                        alg: m.alg,
-                        measurement_type: m.measurement_type,
-                        vendor: m.vendor,
-                        version: m.version,
-                    })
-                    .collect();
+        // Convert attestation Measurement to interface InterfaceMeasurement
+        let interface_measurements: Vec<InterfaceMeasurement> = claims
+            .measurements
+            .into_iter()
+            .map(|m| InterfaceMeasurement {
+                val: m.val,
+                alg: m.alg,
+                measurement_type: m.measurement_type,
+                vendor: m.vendor,
+                version: m.version,
+            })
+            .collect();
 
-                // Convert confirmation method if present
-                let cnf = claims.cnf.map(|cm| match cm {
-                    nxcc_attestation::types::ConfirmationMethod::Jwk { jwk } => {
-                        InterfaceConfirmationMethod::Jwk {
-                            jwk: InterfaceJwk {
-                                kty: jwk.kty,
-                                crv: jwk.crv,
-                                x: jwk.x,
-                                y: jwk.y,
-                            },
-                        }
-                    }
-                    nxcc_attestation::types::ConfirmationMethod::CoseKey { cose_key } => {
-                        InterfaceConfirmationMethod::CoseKey { cose_key }
-                    }
-                });
-
-                // Clone fields that will be used multiple times
-                let eat_profile = claims.eat_profile.clone();
-                let eat_nonce = claims.eat_nonce.clone();
-                let iat = claims.iat;
-
-                // Convert EAT StandardizedClaims to interface StandardizedAttestationClaims
-                Ok(StandardizedAttestationClaims {
-                    // EAT-compliant fields (using exact claim names)
-                    iat,
-                    eat_nonce: eat_nonce.clone(),
-                    ueid: claims.ueid,
-                    oemid: claims.oemid,
-                    hwmodel: claims.hwmodel,
-                    hwversion: claims.hwversion,
-                    dbgstat: claims.dbgstat,
-                    oemboot: claims.oemboot,
-                    swname: claims.swname,
-                    swversion: claims.swversion,
-                    measurements: interface_measurements.clone(),
-                    cnf,
-                    intuse: claims.intuse,
-                    uptime: claims.uptime,
-                    bootcount: claims.bootcount,
-                    bootseed: claims.bootseed,
-                    eat_profile: eat_profile.clone(),
-                })
+        // Convert confirmation method if present
+        let cnf = claims.cnf.map(|cm| match cm {
+            nxcc_attestation::types::ConfirmationMethod::Jwk { jwk } => {
+                InterfaceConfirmationMethod::Jwk {
+                    jwk: InterfaceJwk {
+                        kty: jwk.kty,
+                        crv: jwk.crv,
+                        x: jwk.x,
+                        y: jwk.y,
+                    },
+                }
             }
-            Err(e) => Err(format!("Attestation verification failed: {}", e)),
+            nxcc_attestation::types::ConfirmationMethod::CoseKey { cose_key } => {
+                InterfaceConfirmationMethod::CoseKey { cose_key }
+            }
+        });
+
+        // Convert EAT StandardizedClaims to interface StandardizedAttestationClaims
+        StandardizedAttestationClaims {
+            // EAT-compliant fields (using exact claim names)
+            iat: claims.iat,
+            eat_nonce: claims.eat_nonce,
+            ueid: claims.ueid,
+            oemid: claims.oemid,
+            hwmodel: claims.hwmodel,
+            hwversion: claims.hwversion,
+            dbgstat: claims.dbgstat,
+            oemboot: claims.oemboot,
+            swname: claims.swname,
+            swversion: claims.swversion,
+            measurements: interface_measurements,
+            cnf,
+            intuse: claims.intuse,
+            uptime: claims.uptime,
+            bootcount: claims.bootcount,
+            bootseed: claims.bootseed,
+            eat_profile: claims.eat_profile,
         }
     }
 

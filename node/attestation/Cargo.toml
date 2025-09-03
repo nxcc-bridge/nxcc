@@ -27,3 +27,6 @@ scopeguard = "1.2"
 tracing = "0.1"
 tracing-test = "0.2"
 ed25519-dalek = { version = "2.0", features = ["serde"] }
+
+[features]
+test = []

@@ -40,5 +40,6 @@ vsock = ["tokio-vsock", "nxcc-vm-base/vsock"]
 alloy-primitives = { version = "1.0.0", features = ["rand"] }
 base64 = "0.22.1"
 nxcc-vm-base = { path = "../vm/base", features = ["test"] }
+nxcc-attestation = { path = "../attestation", features = ["test"] }
 tempfile = "3.19.1"
 tracing-test = "0.2.5"

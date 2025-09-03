@@ -94,7 +94,7 @@ impl AttestationService {
         // Define platform priority. Real TEEs should come first.
         #[allow(unused_mut)]
         let mut platform_priority = std::iter::once("tdx");
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test"))]
         let mut platform_priority = platform_priority.chain(std::iter::once("test"));
 
         let provider = platform_priority.find_map(|platform_type| {
@@ -126,7 +126,7 @@ impl AttestationService {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test"))]
     pub async fn generate_attestation_for_platform(
         &self,
         ephemeral_key: &[u8],
