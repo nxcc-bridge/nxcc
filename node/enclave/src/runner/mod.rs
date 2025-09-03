@@ -623,12 +623,11 @@ impl RunnerService {
                         context.attestation_claims = Some(claims);
                     }
                     Err(e) => {
-                        warn!(
-                            "Failed to verify attestation: {}. Policy will run without verified \
-                             claims.",
+                        error!("Attestation verification failed: {}", e);
+                        return Err(RunnerError::Internal(format!(
+                            "Attestation verification failed: {}",
                             e
-                        );
-                        // Continue without claims - policy can decide whether to allow this
+                        )));
                     }
                 }
             } else {

@@ -466,7 +466,7 @@ fn test_put_secrets_unauthorized_with_attestation() {
         ConsumerInfo::default(),
     )]);
     assert!(result.is_ok());
-    assert!(!result.unwrap()); // Should be false due to no auth
+    assert!(!result.unwrap()); // Should fail due to no authorization
     assert!(
         !secrets
             .secrets_storage

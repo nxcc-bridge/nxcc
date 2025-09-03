@@ -98,15 +98,7 @@ fn verify_attestation(bundle: &AttestationBundle) -> Result<Vec<u8>, String> {
                 );
                 Ok(user_data)
             }
-            Err(e) => {
-                warn!(
-                    "Attestation verification failed: {}, falling back to bundle user data",
-                    e
-                );
-                // For integration tests with simulated attestations, fall back gracefully
-                // This ensures the secret sharing flow continues to work
-                Ok(bundle.user_data_binding.extract_user_data())
-            }
+            Err(e) => Err(format!("Attestation verification failed: {}", e)),
         }
     } else {
         error!(
@@ -205,8 +197,8 @@ impl Secrets {
             let verified_user_data = match verify_attestation(&env_report.attestation) {
                 Ok(data) => data,
                 Err(e) => {
-                    warn!("Skipping bundle: Attestation verification failed: {}", e);
-                    continue;
+                    error!("Attestation verification failed for bundle: {}", e);
+                    continue; // Skip this bundle entirely - no partial processing
                 }
             };
             debug!("Attestation verified");
@@ -216,22 +208,22 @@ impl Secrets {
             // 2. Verify SecretsBox Binding using the hash from user_data
             let expected_hash_slice = verified_user_data.as_slice();
             if expected_hash_slice.len() != 32 {
-                warn!(
-                    "Skipping bundle: Invalid hash length ({}) in verified attestation user_data",
+                error!(
+                    "Invalid hash length ({}) in attestation user_data for bundle",
                     expected_hash_slice.len()
                 );
-                continue;
+                continue; // Skip this bundle entirely - no partial processing
             }
             let expected_hash: [u8; 32] = expected_hash_slice.try_into().unwrap(); // Safe due to length check
             let calculated_hash = secrets_box.calculate_binding_hash();
 
             if expected_hash != calculated_hash {
-                warn!(
-                    "Skipping bundle: SecretsBox hash mismatch. Expected {}, calculated {}",
+                error!(
+                    "SecretsBox hash mismatch for bundle. Expected {}, calculated {}",
                     hex::encode(expected_hash),
                     hex::encode(calculated_hash)
                 );
-                continue;
+                continue; // Skip this bundle entirely - no partial processing
             }
             debug!("SecretsBox binding verified");
 
@@ -245,9 +237,8 @@ impl Secrets {
                     secret_id,
                     &local_consumer_info,
                 ) {
-                    warn!(
-                        "Skipping bundle: Not authorized locally to receive secret {:?} for \
-                         consumer bundle_hash {:?}",
+                    error!(
+                        "Not authorized to receive secret {:?} for consumer bundle_hash {:?}",
                         secret_id, local_consumer_info.bundle_hash
                     );
                     all_secrets_authorized = false;
@@ -256,7 +247,7 @@ impl Secrets {
             }
 
             if !all_secrets_authorized {
-                continue;
+                continue; // Skip this bundle entirely - no partial processing
             }
             debug!("Local authorization check passed for all secrets in the box");
 
