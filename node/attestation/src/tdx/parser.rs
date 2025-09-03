@@ -15,7 +15,8 @@ pub struct TdxQuoteHeader {
     pub tee_type: u32,
     pub reserved: u32,
     pub vendor_id: [u8; 16],
-    pub user_data: [u8; 20],
+    /// Intel QE/platform-controlled userdata. Not for application use.
+    user_data: [u8; 20],
 }
 
 /// SGX Report 2 / TD Report (584 bytes)
@@ -247,7 +248,7 @@ impl TdxQuote {
 
             // User data and keys
             report_data: td_report.report_data.to_vec(),
-            user_data: self.header.user_data.to_vec(),
+            user_data: self.header.platform_user_data().to_vec(),
             ephemeral_key,
 
             // Quote metadata
@@ -418,6 +419,12 @@ impl TdxQuote {
 }
 
 impl TdxQuoteHeader {
+    /// Get the platform-controlled user data (for internal use only)
+    /// WARNING: This is NOT the application userdata - use report_data instead
+    pub(crate) fn platform_user_data(&self) -> &[u8; 20] {
+        &self.user_data
+    }
+
     /// Parse quote header (48 bytes)
     fn parse(data: &[u8], offset: &mut usize) -> Result<TdxQuoteHeader> {
         if data.len() < *offset + 48 {

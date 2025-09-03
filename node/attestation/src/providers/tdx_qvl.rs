@@ -336,8 +336,8 @@ impl AttestationProvider for TdxQvlProvider {
                 let received_userdata_hash =
                     user_data_binding::hash_userdata(&bundle.detached_userdata);
 
-                if quote_data.user_data.len() < 32
-                    || quote_data.user_data[..32] != received_userdata_hash
+                if quote_data.report_data.len() < 32
+                    || quote_data.report_data[..32] != received_userdata_hash
                 {
                     return Ok(VerificationResult::Failed(
                         "Userdata hash mismatch".to_string(),
@@ -365,8 +365,8 @@ impl AttestationProvider for TdxQvlProvider {
                         let received_userdata_hash =
                             user_data_binding::hash_userdata(&bundle.detached_userdata);
 
-                        if quote_data.user_data.len() < 32
-                            || quote_data.user_data[..32] != received_userdata_hash
+                        if quote_data.report_data.len() < 32
+                            || quote_data.report_data[..32] != received_userdata_hash
                         {
                             return Ok(VerificationResult::Failed(
                                 "Userdata hash mismatch".to_string(),

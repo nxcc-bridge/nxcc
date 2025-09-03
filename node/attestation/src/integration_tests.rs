@@ -358,6 +358,7 @@ mod tests {
         assert!(parsed_quote.verify_structure().is_ok());
     }
 
+    #[tracing_test::traced_test]
     #[tokio::test]
     async fn test_multi_provider_attestation_service() {
         let gateway_provider = Arc::new(MockGatewayProvider);
