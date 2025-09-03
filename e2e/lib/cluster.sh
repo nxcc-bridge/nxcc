@@ -5,79 +5,8 @@
 
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-# Source infra common.sh for KIND_CLUSTER_NAME and other constants
+# Source infra common.sh for constants
 source "$(dirname "${BASH_SOURCE[0]}")/../../infra/lib/common.sh"
-
-# Setup local kind cluster
-setup_local_cluster() {
-	local project_root="$1"
-	local skip_setup="${2:-false}"
-
-	if [[ "$skip_setup" == "true" ]]; then
-		log "Skipping local cluster setup as requested"
-		return 0
-	fi
-
-	log "Setting up local kind cluster..."
-
-	# Handle Docker image preparation based on CI mode
-	if [[ "${E2E_CI_MODE:-false}" == "true" && -n "${E2E_PREBUILT_IMAGE:-}" ]]; then
-		verbose_log "Using pre-built Docker image from CI: $E2E_PREBUILT_IMAGE"
-
-		# Pull and retag the pre-built image for local use
-		verbose_log "Pulling pre-built image..."
-		if ! docker pull "$E2E_PREBUILT_IMAGE"; then
-			error "Failed to pull pre-built image: $E2E_PREBUILT_IMAGE"
-		fi
-
-		# Retag to our standard naming scheme
-		local local_image="nxcc-node:${E2E_BUILD_MODE:-debug}"
-		verbose_log "Retagging to local image name: $local_image"
-		if ! docker tag "$E2E_PREBUILT_IMAGE" "$local_image"; then
-			error "Failed to retag image to: $local_image"
-		fi
-
-		success "Pre-built Docker image prepared for local deployment"
-	else
-		# Build local image first with timeout (existing behavior)
-		verbose_log "Building local Docker image..."
-		local build_timeout="${E2E_DOCKER_BUILD_TIMEOUT:-900}"
-
-		local build_mode="--${E2E_BUILD_MODE:-debug}"
-		if ! (cd "$project_root" && timeout "$build_timeout" ./infra/infra.sh image build "$build_mode"); then
-			if [[ $? -eq 124 ]]; then
-				error "Docker build timed out after ${build_timeout} seconds"
-			else
-				error "Docker build failed"
-			fi
-		fi
-	fi
-
-	# Create kind cluster
-	verbose_log "Creating kind cluster..."
-	(cd "$project_root" && ./infra/infra.sh cluster create kind)
-
-	# Push image to KinD cluster
-	verbose_log "Loading Docker image into KinD cluster..."
-	local source_tag="${E2E_BUILD_MODE:-debug}"
-	(cd "$project_root" && ./infra/infra.sh image push kind --source="$source_tag")
-
-	# Deploy to debug environment using Terraform
-	verbose_log "Deploying NXCC to debug environment..."
-	# Use local image for deployment
-	export IMAGE_REPO_OVERRIDE="nxcc-node-local"
-	export IMAGE_TAG_OVERRIDE="latest"
-	(cd "$project_root" && ./infra/infra.sh deploy create e2e-debug)
-
-	# Note: Node variations testing will be handled through Terraform deployment configurations
-	verbose_log "Node variations will be configured via Terraform..."
-
-	# Give deployment time to complete
-	verbose_log "Giving deployment 30 seconds to complete..."
-	sleep 30
-
-	success "Local cluster setup complete"
-}
 
 # Setup staging deployment using Terraform
 setup_staging_cluster() {
@@ -113,8 +42,11 @@ setup_staging_cluster() {
 	verbose_log "Deploying NXCC to staging environment..."
 	(cd "$project_root" && ./infra/infra.sh deploy create staging)
 
-	# Wait for deployment to be ready
-	sleep 60
+	# Wait for deployment to be ready using terraform readiness check
+	verbose_log "Waiting for staging deployment to be ready..."
+	if ! wait_for_deployment_ready "staging" 300 "$project_root"; then
+		error "Staging deployment failed to become ready"
+	fi
 
 	success "Staging deployment setup complete"
 }
@@ -158,8 +90,11 @@ setup_prod_cluster() {
 	verbose_log "Deploying NXCC to production environment..."
 	(cd "$project_root" && ./infra/infra.sh deploy create production)
 
-	# Wait for deployment to be ready
-	sleep 60
+	# Wait for deployment to be ready using terraform readiness check
+	verbose_log "Waiting for production deployment to be ready..."
+	if ! wait_for_deployment_ready "production" 300 "$project_root"; then
+		error "Production deployment failed to become ready"
+	fi
 
 	success "Production deployment setup complete"
 }
@@ -189,26 +124,14 @@ test_connectivity() {
 	success "Connectivity test completed for $env environment"
 }
 
-# Wait for deployment to be ready (replaced kubectl-based waiting)
+# Wait for deployment to be ready using terraform outputs and HTTP health checks
 wait_for_deployment_ready() {
 	local env="$1"
 	local timeout="${2:-300}"
+	local project_root="${3:-$E2E_PROJECT_ROOT}"
 
-	log "Waiting for deployment in environment '$env' to be ready..."
-
-	# Use deployment status check instead of kubectl
-	local elapsed=0
-	while [[ $elapsed -lt $timeout ]]; do
-		if (cd "$project_root" && ./infra/infra.sh deploy status "$env" >/dev/null 2>&1); then
-			success "Deployment in environment '$env' is ready"
-			return 0
-		fi
-		sleep 10
-		elapsed=$((elapsed + 10))
-	done
-
-	warn "Deployment readiness check timed out after ${timeout}s"
-	return 1
+	# Use the enhanced terraform readiness check from common.sh
+	test_terraform_deployment_ready "$env" "$timeout" "$project_root"
 }
 
 # List deployed variants and their URLs
@@ -267,10 +190,6 @@ cleanup_cluster() {
 	log "Cleaning up $env cluster..."
 
 	case "$env" in
-	local)
-		(cd "$project_root" && ./infra/infra.sh deploy destroy e2e-debug --auto-approve)
-		(cd "$project_root" && ./infra/infra.sh cluster destroy kind)
-		;;
 	staging)
 		(cd "$project_root" && ./infra/infra.sh deploy destroy staging --auto-approve)
 		;;

@@ -3,12 +3,12 @@
 # End-to-End Test Script for NXCC
 #
 # This script tests the complete NXCC workflow:
-# 1. Deploys NXCC nodes using infra.sh (2 TDX workers + 1 non-TDX worker)
+# 1. Deploys NXCC nodes using terraform (staging/production environments)
 # 2. Uses the CLI to init a new project in a temp dir
 # 3. Modifies the project to have an HTTP handler that echoes text
 # 4. Builds and deploys the project to the nodes
 # 5. Tests TEE policy validation workflow
-# 6. Gets logs and makes HTTP requests to verify functionality
+# 6. Makes HTTP requests to verify functionality
 #
 # Usage:
 #   ./e2e/e2e_test.sh [options]
@@ -55,11 +55,11 @@ source "$E2E_LIB_DIR/worker.sh"
 source "$E2E_LIB_DIR/policy.sh"
 
 # Default configuration
-ENVIRONMENT="local"
+ENVIRONMENT="staging"
 SKIP_CLUSTER_SETUP="false"
 SKIP_CLEANUP="false"
 FORCE_CLEANUP="false"
-TEST_STAGING="false"
+TEST_PRODUCTION="false"
 # Debug builds are now handled via explicit --debug flag in image commands
 TEMP_PROJECT_DIR=""
 
@@ -84,10 +84,10 @@ This script tests the complete NXCC workflow from cluster setup to worker deploy
 Usage: $0 [options]
 
 Options:
-    --env local|staging|prod    Environment to test (default: local)
+    --env staging|prod          Environment to test (default: staging)
     --skip-cluster-setup        Skip cluster creation (assumes cluster exists)
     --skip-cleanup              Skip cleanup at the end
-    --test-staging              Also test staging deployment after local
+    --test-production           Also test production deployment after staging
     --verbose                   Enable verbose logging
     --force-cleanup             Force cleanup of cluster resources
     --debug                     Use debug builds for faster development (default)
@@ -96,23 +96,20 @@ Options:
     --help                      Show this help message
 
 Examples:
-    # Run complete local test with debug builds (default)
+    # Run complete staging test with debug builds (default)
     $0
 
     # Run with release builds for performance testing
     $0 --release
 
-    # Use upstream cache for faster builds
-    $0 --cache-from ghcr.io/my-org/node:latest
-
-    # Test existing local cluster without setup/cleanup
+    # Test existing staging cluster without setup/cleanup
     $0 --skip-cluster-setup --skip-cleanup
 
-    # Test local then staging
-    $0 --test-staging
+    # Test staging then production
+    $0 --test-production
 
-    # Test only staging environment
-    $0 --env staging --skip-cluster-setup
+    # Test only production environment
+    $0 --env prod
 
     # Force cleanup after test
     $0 --force-cleanup
@@ -143,8 +140,8 @@ parse_args() {
 			FORCE_CLEANUP="true"
 			shift
 			;;
-		--test-staging)
-			TEST_STAGING="true"
+		--test-production)
+			TEST_PRODUCTION="true"
 			shift
 			;;
 		--verbose)
@@ -177,9 +174,9 @@ parse_args() {
 
 	# Validate environment
 	case "$ENVIRONMENT" in
-	local | staging | prod) ;;
+	staging | prod) ;;
 	*)
-		error "Invalid environment: $ENVIRONMENT. Must be one of: local, staging, prod"
+		error "Invalid environment: $ENVIRONMENT. Must be one of: staging, prod"
 		;;
 	esac
 }
@@ -195,9 +192,6 @@ setup_environment_cluster() {
 	local env="$1"
 
 	case "$env" in
-	local)
-		setup_local_cluster "$PROJECT_ROOT" "$SKIP_CLUSTER_SETUP"
-		;;
 	staging)
 		setup_staging_cluster "$PROJECT_ROOT" "$SKIP_CLUSTER_SETUP"
 		;;
@@ -205,7 +199,7 @@ setup_environment_cluster() {
 		setup_prod_cluster "$PROJECT_ROOT" "$SKIP_CLUSTER_SETUP"
 		;;
 	*)
-		error "Unknown environment: $env"
+		error "Unknown environment: $env. Only staging and prod are supported."
 		;;
 	esac
 }
@@ -255,8 +249,10 @@ test_environment() {
 		error "Failed to setup $env environment cluster"
 	fi
 
-	# Wait for deployment to be ready
-	sleep 10
+	# Wait for deployment to be ready using terraform readiness check
+	if ! wait_for_deployment_ready "$env" 300 "$PROJECT_ROOT"; then
+		error "Deployment failed to become ready for $env environment"
+	fi
 
 	# Test basic connectivity first
 	if ! test_connectivity "$env" "$PROJECT_ROOT"; then
@@ -271,12 +267,7 @@ test_environment() {
 		warn "Variant routing test failed for $env environment"
 	fi
 
-	# Setup port forwarding for remote environments
-	if [[ "$env" != "local" ]]; then
-		if ! setup_port_forward "$env"; then
-			error "Failed to setup port forwarding for $env environment"
-		fi
-	fi
+	# All environments now use direct HTTP URLs from terraform outputs
 
 	# Test worker functionality (deploy, logs, HTTP tests) - can be skipped if problematic
 	local test_result=0
@@ -305,10 +296,7 @@ test_environment() {
 		warn "Policy validation test failed for $env environment"
 	fi
 
-	# Cleanup port forwarding for this environment
-	if [[ "$env" != "local" ]]; then
-		cleanup_port_forward "$env"
-	fi
+	# No cleanup needed - using direct terraform URLs
 
 	if [[ $test_result -eq 0 ]]; then
 		success "E2E test completed successfully for $env environment"
@@ -330,10 +318,10 @@ main() {
 	# Test specified environment
 	test_environment "$ENVIRONMENT"
 
-	# Test staging if requested
-	if [[ "$TEST_STAGING" == "true" && "$ENVIRONMENT" == "local" ]]; then
-		log "Also testing staging environment as requested..."
-		test_environment "staging"
+	# Test production if requested
+	if [[ "$TEST_PRODUCTION" == "true" && "$ENVIRONMENT" == "staging" ]]; then
+		log "Also testing production environment as requested..."
+		test_environment "prod"
 	fi
 
 	success "All E2E tests completed successfully!"

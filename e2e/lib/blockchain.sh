@@ -16,8 +16,8 @@ deploy_identity_contract() {
 
 	# Get project root dynamically
 	local script_dir
-	script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 	local project_root
+	script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 	project_root="$(cd "$script_dir/../.." && pwd)"
 
 	cd "$project_root/contracts/evm" || error "Failed to change to contracts directory"
@@ -79,9 +79,12 @@ create_identity_with_policy() {
 	# Create identity by minting NFT with policy URL
 	log "Minting new identity NFT with policy URL..." >&2
 	local mint_output
-	if ! mint_output=$(cast send "$contract_address" "mint(string)" "$policy_url" \
+	local mint_output
+	mint_output=$(cast send "$contract_address" "mint(string)" "$policy_url" \
 		--rpc-url "$anvil_rpc_url" \
-		--private-key "$signer_private_key" 2>&1); then
+		--private-key "$signer_private_key" 2>&1)
+
+	if ! echo "$mint_output" | grep -q "transactionHash"; then
 		error "Failed to mint identity NFT: $mint_output"
 	fi
 
@@ -220,8 +223,8 @@ bundle_policy() {
 
 	# Get project root dynamically
 	local script_dir
-	script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 	local project_root
+	script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 	project_root="$(cd "$script_dir/../.." && pwd)"
 
 	cd "$project_root" || error "Failed to change to project root"
@@ -248,8 +251,8 @@ get_blockchain_endpoint() {
 
 	# Get project root dynamically
 	local script_dir
-	script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 	local project_root
+	script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 	project_root="$(cd "$script_dir/../.." && pwd)"
 
 	cd "$project_root/infra/environments/e2e" || error "Failed to change to e2e environment"
@@ -305,8 +308,8 @@ setup_blockchain_environment() {
 	log "Building policies..."
 	# Get project root dynamically
 	local script_dir
-	script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 	local project_root
+	script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 	project_root="$(cd "$script_dir/../.." && pwd)"
 
 	if ! (cd "$project_root/e2e/policies" && pnpm install && pnpm build); then

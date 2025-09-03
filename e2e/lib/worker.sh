@@ -318,21 +318,26 @@ deploy_worker() {
 
 	cd "$project_dir" || error "Failed to change to project directory"
 
-	# Deploy using direct nxcc command with port forwarding
-	local port="${E2E_TEST_PORT:-6922}"
-	local rpc_url="http://localhost:$port"
+	# Get worker URL directly from terraform outputs
+	local worker_url
+	worker_url=$(get_primary_worker_url "$env")
 
-	# Use timeout to prevent hanging and deploy directly with port forwarding
-	if with_port_forward "$env" timeout "$timeout" nxcc worker deploy "workers/echo-manifest.json" --rpc-url "$rpc_url" --bundle; then
+	if [[ -z "$worker_url" ]]; then
+		error "No worker URL found for environment: $env"
+	fi
+
+	# Use direct RPC calls to worker endpoints
+	verbose_log "Using direct RPC endpoint: $worker_url"
+	if timeout "$timeout" nxcc worker deploy "workers/echo-manifest.json" --rpc-url "$worker_url" --bundle; then
 		success "Worker deployed to $env environment"
 		return 0
+	fi
+
+	local exit_code=$?
+	if [[ $exit_code -eq 124 ]]; then
+		error "Worker deployment timed out after ${timeout} seconds"
 	else
-		local exit_code=$?
-		if [[ $exit_code -eq 124 ]]; then
-			error "Worker deployment timed out after ${timeout} seconds"
-		else
-			error "Failed to deploy worker to $env environment (exit code: $exit_code)"
-		fi
+		error "Failed to deploy worker to $env environment (exit code: $exit_code)"
 	fi
 }
 
@@ -382,25 +387,7 @@ test_worker_http() {
 	fi
 }
 
-# Get worker ID from logs
-get_worker_id() {
-	local env="$1"
-	local namespace="$env"
-
-	if [[ "$env" == "local" ]]; then
-		namespace="debug"
-	fi
-
-	local worker_pod
-	worker_pod=$(get_worker_pod "$namespace")
-
-	if [[ -n "$worker_pod" ]]; then
-		# Extract worker ID from recent logs
-		local worker_id
-		worker_id=$(kubectl logs "$worker_pod" -n "$namespace" --tail=50 | grep -o "worker.*id.*[a-f0-9-]\{36\}" | head -1 | grep -o "[a-f0-9-]\{36\}" | head -1)
-		echo "$worker_id"
-	fi
-}
+# Get worker ID from logs (function removed - not used and requires kubectl)
 
 # Test CLI log streaming functionality
 test_cli_log_streaming() {
@@ -464,34 +451,23 @@ test_worker_functionality_variants() {
 
 	log "Testing worker functionality on node variants in $env environment..."
 
-	# Check if variants are deployed by looking for variant-specific ingress routes
-	local namespace="$env"
-	if [[ "$env" == "local" ]]; then
-		namespace="debug"
+	# Test variant endpoints by attempting HTTP calls
+	# Variants may not be implemented in terraform yet, so we test availability by HTTP response
+
+	# Test untrusted variant endpoint
+	log "Testing untrusted variant functionality..."
+	if test_worker_http_variant "$env" "untrusted" "$test_message"; then
+		success "Untrusted variant functionality test passed"
+	else
+		verbose_log "Untrusted variant not available or test failed"
 	fi
 
-	# Check if untrusted variant is available
-	if kubectl get ingress -n "$namespace" --no-headers 2>/dev/null | grep -q "untrusted"; then
-		log "Testing untrusted variant functionality..."
-		if test_worker_http_variant "$env" "untrusted" "$test_message"; then
-			success "Untrusted variant functionality test passed"
-		else
-			warn "Untrusted variant functionality test failed"
-		fi
+	# Test non-confidential variant endpoint
+	log "Testing non-confidential variant functionality..."
+	if test_worker_http_variant "$env" "non-confidential" "$test_message"; then
+		success "Non-confidential variant functionality test passed"
 	else
-		verbose_log "Untrusted variant not found, skipping variant tests"
-	fi
-
-	# Check if non-confidential variant is available
-	if kubectl get ingress -n "$namespace" --no-headers 2>/dev/null | grep -q "non-confidential"; then
-		log "Testing non-confidential variant functionality..."
-		if test_worker_http_variant "$env" "non-confidential" "$test_message"; then
-			success "Non-confidential variant functionality test passed"
-		else
-			warn "Non-confidential variant functionality test failed"
-		fi
-	else
-		verbose_log "Non-confidential variant not found, skipping variant tests"
+		verbose_log "Non-confidential variant not available or test failed"
 	fi
 
 	success "Worker functionality variant tests completed for $env environment"

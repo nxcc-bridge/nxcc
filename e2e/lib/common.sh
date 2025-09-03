@@ -57,14 +57,15 @@ command_exists() {
 	fi
 }
 
-# Check dependencies
+# Check dependencies for terraform-based deployments
 check_dependencies() {
 	log "Checking dependencies..."
 
 	local missing_deps=()
+	local required_deps=("curl" "jq" "node" "pnpm")
 
 	# Check for required tools
-	for dep in docker kind kubectl curl jq node pnpm; do
+	for dep in "${required_deps[@]}"; do
 		if ! command_exists "$dep"; then
 			missing_deps+=("$dep")
 		fi
@@ -198,88 +199,6 @@ ensure_nxcc_cli() {
 	fi
 }
 
-# Wait for pods to be ready
-wait_for_pods() {
-	local namespace="$1"
-	local timeout="${2:-300}" # 5 minutes default
-	local label="${3:-app.kubernetes.io/component=worker}"
-
-	log "Waiting for pods in namespace '$namespace' to be ready..."
-
-	if ! kubectl wait --for=condition=ready pod -l "$label" -n "$namespace" --timeout="${timeout}s"; then
-		error "Pods in namespace '$namespace' did not become ready within ${timeout} seconds"
-	fi
-
-	success "Pods in namespace '$namespace' are ready"
-}
-
-# Get worker pod name
-get_worker_pod() {
-	local namespace="$1"
-	local pod_name
-	if ! pod_name=$(kubectl get pods -n "$namespace" -l app.kubernetes.io/component=worker -o jsonpath='{.items[0].metadata.name}' 2>&1); then
-		verbose_log "Failed to get worker pod in namespace $namespace: $pod_name"
-		echo ""
-		return 1
-	fi
-	echo "$pod_name"
-}
-
-# Setup port forwarding
-setup_port_forward() {
-	local env="$1"
-	local test_port="${2:-8080}"
-	local daemon_port="${3:-6922}"
-	local namespace="$env"
-
-	if [[ "$env" == "local" ]]; then
-		# For local, map debug namespace
-		namespace="debug"
-	fi
-
-	local worker_pod
-	worker_pod=$(get_worker_pod "$namespace")
-
-	if [[ -z "$worker_pod" ]]; then
-		error "No worker pods found in $namespace namespace"
-	fi
-
-	log "Setting up port-forward for $env environment..."
-	verbose_log "Port-forwarding $worker_pod:$daemon_port -> localhost:$test_port"
-
-	# Start port-forward in background
-	verbose_log "Starting port-forward: kubectl port-forward -n $namespace pod/$worker_pod $test_port:$daemon_port"
-	kubectl port-forward -n "$namespace" pod/"$worker_pod" "$test_port:$daemon_port" &
-	local pf_pid=$!
-
-	# Store PID for cleanup
-	local pid_file="/tmp/e2e_port_forward_$env.pid"
-	echo "$pf_pid" >"$pid_file"
-
-	# Wait for port-forward to be ready
-	sleep 3
-
-	verbose_log "Port-forward established (PID: $pf_pid)"
-	return 0
-}
-
-# Cleanup port forwarding
-cleanup_port_forward() {
-	local env="$1"
-	local pid_file="/tmp/e2e_port_forward_$env.pid"
-
-	if [[ -f "$pid_file" ]]; then
-		local pf_pid
-		pf_pid=$(cat "$pid_file")
-		if kill -0 "$pf_pid" 2>/dev/null; then
-			verbose_log "Stopping port-forward for $env (PID: $pf_pid)..."
-			kill "$pf_pid"
-			wait "$pf_pid" || verbose_log "Port-forward process $pf_pid already exited"
-		fi
-		rm -f "$pid_file"
-	fi
-}
-
 # Test HTTP endpoint with retries
 test_http_endpoint() {
 	local url="$1"
@@ -342,52 +261,6 @@ test_http_endpoint() {
 	return 1
 }
 
-# Execute a command with port forwarding, automatically cleaning up
-# Usage: with_port_forward <env> <command>
-with_port_forward() {
-	local env="$1"
-	shift
-	local namespace="$env"
-
-	if [[ "$env" == "local" ]]; then
-		namespace="debug"
-	fi
-
-	local worker_pod
-	worker_pod=$(get_worker_pod "$namespace")
-
-	if [[ -z "$worker_pod" ]]; then
-		error "No worker pods found in $namespace namespace"
-	fi
-
-	local port="${E2E_TEST_PORT:-6922}"
-	verbose_log "Setting up port-forward for command execution..."
-	verbose_log "Port-forwarding $worker_pod:6922 -> localhost:$port"
-
-	# Start port-forward in background
-	verbose_log "Starting port-forward: kubectl port-forward -n $namespace pod/$worker_pod $port:6922"
-	kubectl port-forward -n "$namespace" pod/"$worker_pod" "$port:6922" &
-	local pf_pid=$!
-
-	# Wait for port-forward to be ready
-	sleep 3
-
-	# Execute the command
-	local exit_code=0
-	if ! "$@"; then
-		exit_code=$?
-	fi
-
-	# Cleanup port-forward
-	if kill -0 "$pf_pid" 2>/dev/null; then
-		verbose_log "Stopping port-forward (PID: $pf_pid)..."
-		kill "$pf_pid"
-		wait "$pf_pid" || verbose_log "Port-forward process $pf_pid already exited"
-	fi
-
-	return $exit_code
-}
-
 # Quick test HTTP endpoint with proper environment routing
 quick_http_test() {
 	local env="$1"
@@ -396,91 +269,18 @@ quick_http_test() {
 	local method="${4:-GET}"
 	local data="${5:-}"
 
-	case "$env" in
-	local | debug)
-		# Use port-forwarding for local development
-		local port="${E2E_TEST_PORT:-6922}"
-		local url="http://localhost:$port$endpoint"
-		with_port_forward "$env" test_http_endpoint "$url" "$expected_pattern" "$method" "$data"
-		;;
-	staging)
-		# For staging, check if this is a variant endpoint
-		if [[ "$endpoint" =~ ^/variant/ ]]; then
-			# Use ingress for variant routing
-			local ingress_ip
-			local ingress_output
-			if ! ingress_output=$(kubectl get ingress -n staging -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}' 2>&1); then
-				verbose_log "Failed to get ingress IP: $ingress_output"
-				ingress_ip=""
-			else
-				ingress_ip="$ingress_output"
-			fi
-			if [[ -z "$ingress_ip" ]]; then
-				verbose_log "Ingress IP not ready, waiting 10 seconds..."
-				sleep 10
-				if ! ingress_output=$(kubectl get ingress -n staging -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}' 2>&1); then
-					verbose_log "Failed to get ingress IP on retry: $ingress_output"
-					ingress_ip=""
-				else
-					ingress_ip="$ingress_output"
-				fi
-			fi
-			if [[ -n "$ingress_ip" ]]; then
-				verbose_log "Using ingress IP for variant routing: $ingress_ip"
-				local url="http://$ingress_ip$endpoint"
-				test_http_endpoint "$url" "$expected_pattern" "$method" "$data"
-			else
-				warn "No ingress IP found for variant routing, test may fail"
-				return 1
-			fi
-		else
-			# Use port-forward for non-variant endpoints (worker deployment, etc.)
-			local port="${E2E_TEST_PORT:-6922}"
-			local url="http://localhost:$port$endpoint"
-			with_port_forward "$env" test_http_endpoint "$url" "$expected_pattern" "$method" "$data"
-		fi
-		;;
-	prod)
-		# For prod, check if this is a variant endpoint
-		if [[ "$endpoint" =~ ^/variant/ ]]; then
-			# Use ingress for variant routing
-			local ingress_ip
-			local ingress_output
-			if ! ingress_output=$(kubectl get ingress -n prod -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}' 2>&1); then
-				verbose_log "Failed to get ingress IP: $ingress_output"
-				ingress_ip=""
-			else
-				ingress_ip="$ingress_output"
-			fi
-			if [[ -z "$ingress_ip" ]]; then
-				verbose_log "Ingress IP not ready, waiting 10 seconds..."
-				sleep 10
-				if ! ingress_output=$(kubectl get ingress -n prod -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}' 2>&1); then
-					verbose_log "Failed to get ingress IP on retry: $ingress_output"
-					ingress_ip=""
-				else
-					ingress_ip="$ingress_output"
-				fi
-			fi
-			if [[ -n "$ingress_ip" ]]; then
-				verbose_log "Using ingress IP for variant routing: $ingress_ip"
-				local url="http://$ingress_ip$endpoint"
-				test_http_endpoint "$url" "$expected_pattern" "$method" "$data"
-			else
-				warn "No ingress IP found for variant routing, test may fail"
-				return 1
-			fi
-		else
-			# Use port-forward for non-variant endpoints (worker deployment, etc.)
-			local port="${E2E_TEST_PORT:-6922}"
-			local url="http://localhost:$port$endpoint"
-			with_port_forward "$env" test_http_endpoint "$url" "$expected_pattern" "$method" "$data"
-		fi
-		;;
-	*)
-		error "Unknown environment: $env"
-		;;
-	esac
+	# Get worker URL directly from terraform outputs
+	local worker_url
+	worker_url=$(get_primary_worker_url "$env")
+
+	if [[ -z "$worker_url" ]]; then
+		error "No worker URL found for environment: $env"
+	fi
+
+	# Use direct HTTP calls to worker endpoints
+	local url="$worker_url$endpoint"
+	verbose_log "Testing direct HTTP endpoint: $url"
+	test_http_endpoint "$url" "$expected_pattern" "$method" "$data"
 }
 
 # Quick worker deployment test
@@ -491,33 +291,107 @@ quick_worker_deploy() {
 
 	cd "$project_dir" || error "Failed to change to project directory"
 
-	case "$env" in
-	local | debug)
-		# Use port-forwarding for local development
-		local port="${E2E_TEST_PORT:-6922}"
-		local rpc_url="http://localhost:$port"
-		with_port_forward "$env" nxcc worker deploy "$manifest_file" --rpc-url "$rpc_url" --bundle
-		;;
-	staging | prod)
-		# For remote environments, always use port-forward for deployment since the RPC endpoint isn't exposed via ingress
-		local port="${E2E_TEST_PORT:-6922}"
-		local rpc_url="http://localhost:$port"
-		with_port_forward "$env" nxcc worker deploy "$manifest_file" --rpc-url "$rpc_url" --bundle
-		;;
-	*)
-		error "Unknown environment: $env"
-		;;
-	esac
+	# Get worker URL directly from terraform outputs
+	local worker_url
+	worker_url=$(get_primary_worker_url "$env")
+
+	if [[ -z "$worker_url" ]]; then
+		error "No worker URL found for environment: $env"
+	fi
+
+	# Use direct RPC calls to worker endpoints
+	verbose_log "Using direct RPC endpoint: $worker_url"
+	nxcc worker deploy "$manifest_file" --rpc-url "$worker_url" --bundle
+}
+
+# Get worker endpoint URLs from terraform outputs
+get_worker_endpoints() {
+	local env="$1"
+	local project_root="${2:-$E2E_PROJECT_ROOT}"
+
+	cd "$project_root" || error "Failed to change to project root"
+
+	# Get worker endpoints from terraform output
+	./infra/infra.sh deploy status "$env" >/dev/null 2>&1 || return 1
+
+	# Navigate to the terraform environment directory to run tofu commands
+	local env_dir="infra/environments"
+	local target_dir=""
+
+	if [[ "$env" == "staging" ]]; then
+		target_dir="$env_dir/staging"
+	elif [[ "$env" == "production" ]]; then
+		target_dir="$env_dir/production"
+	elif [[ "$env" =~ ^dev-.+ ]]; then
+		target_dir="$env_dir/dev"
+	elif [[ "$env" =~ ^e2e-.+ ]]; then
+		target_dir="$env_dir/e2e"
+	else
+		error "Unknown environment type: $env"
+	fi
+
+	cd "$target_dir" || error "Failed to change to terraform directory: $target_dir"
+
+	# Extract worker endpoints as JSON
+	tofu output -json worker_endpoints 2>/dev/null || echo "{}"
+}
+
+# Get first available worker URL from terraform outputs
+get_primary_worker_url() {
+	local env="$1"
+	local project_root="${2:-$E2E_PROJECT_ROOT}"
+
+	local endpoints_json
+	endpoints_json=$(get_worker_endpoints "$env" "$project_root")
+
+	# Return the first worker's HTTP URL
+	echo "$endpoints_json" | jq -r 'to_entries[0].value.http_url // empty' 2>/dev/null
+}
+
+# Get all worker URLs from terraform outputs
+get_all_worker_urls() {
+	local env="$1"
+	local project_root="${2:-$E2E_PROJECT_ROOT}"
+
+	local endpoints_json
+	endpoints_json=$(get_worker_endpoints "$env" "$project_root")
+
+	# Return all worker HTTP URLs, one per line
+	echo "$endpoints_json" | jq -r 'to_entries[].value.http_url // empty' 2>/dev/null
+}
+
+# Test if terraform deployment is ready by checking worker endpoint availability
+test_terraform_deployment_ready() {
+	local env="$1"
+	local timeout="${2:-300}"
+	local project_root="${3:-$E2E_PROJECT_ROOT}"
+
+	log "Waiting for terraform deployment in environment '$env' to be ready..."
+
+	local elapsed=0
+	while [[ $elapsed -lt $timeout ]]; do
+		local worker_url
+		worker_url=$(get_primary_worker_url "$env" "$project_root")
+
+		if [[ -n "$worker_url" ]]; then
+			# Test if the worker is actually responding
+			if curl -s --max-time 5 "$worker_url/w/health" >/dev/null 2>&1; then
+				success "Terraform deployment in environment '$env' is ready"
+				return 0
+			fi
+		fi
+
+		sleep 10
+		elapsed=$((elapsed + 10))
+	done
+
+	warn "Terraform deployment readiness check timed out after ${timeout}s"
+	return 1
 }
 
 # Cleanup function for temp directories and processes
 cleanup_temp_resources() {
 	local temp_dir="$1"
-
-	# Cleanup port forwards
-	cleanup_port_forward "local"
-	cleanup_port_forward "staging"
-	cleanup_port_forward "prod"
 
 	# Remove temp directory if provided
 	if [[ -n "$temp_dir" && -d "$temp_dir" ]]; then
