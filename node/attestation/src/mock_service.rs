@@ -9,8 +9,7 @@ use nxcc_interface::types::attestation::{AttestationBundle, RawAttestation};
 
 use crate::{
     tdx::{TdxAttestationClaims, TdxQuote},
-    types::*,
-    user_data_binding, AttestationProvider,
+    user_data_binding, AttestationProvider, Measurement, StandardizedClaims, VerificationResult,
 };
 
 /// Mock TDX provider that uses local parsing for testing

@@ -396,8 +396,7 @@ async fn test_execute_policy_vm_detached_consistency_issue() {
 #[tokio::test]
 async fn test_execute_policy_with_attestation_claims() {
     use nxcc_interface::types::attestation::{
-        AttestationBundle, EnvReport, InterfaceMeasurement, RawAttestation,
-        StandardizedAttestationClaims,
+        AttestationBundle, EnvReport, Measurement, RawAttestation, StandardizedClaims,
     };
 
     let (secrets, runner_service, mock_client) = setup();

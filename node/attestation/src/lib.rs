@@ -20,8 +20,10 @@ pub use error::AttestationError;
 // Re-export gateway types from interface crate
 pub use nxcc_interface::gateway::{BlockInfo, GatewayConfig, GatewayProvider};
 // Re-export attestation types from interface crate
-pub use nxcc_interface::types::attestation::{AttestationBundle, RawAttestation};
-pub use types::*;
+pub use nxcc_interface::types::attestation::{
+    AttestationBundle, ConfirmationMethod, Jwk, Manifest, Measurement, MeasurementResult,
+    OperatorSignature, RawAttestation, StandardizedClaims, VerificationResult,
+};
 
 /// Platform-specific attestation provider
 #[async_trait]

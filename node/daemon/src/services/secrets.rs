@@ -880,58 +880,12 @@ impl SecretsService {
             .try_into()
             .map_err(|_| "Failed to convert key bytes to array")?;
 
-        // Create hash of attestation data to sign
-        // Parse the detached userdata to extract ephemeral key
-        let userdata = nxcc_attestation::user_data_binding::UserData::from_cbor(
-            &attestation.detached_userdata,
+        // Use the OperatorSignature::new method from the interface
+        OperatorSignature::new(&signing_key, &attestation.raw_attestation).map_err(
+            |e| -> Box<dyn std::error::Error + Send + Sync> {
+                format!("Failed to create operator signature: {}", e).into()
+            },
         )
-        .map_err(|e| format!("Failed to parse detached userdata: {}", e))?;
-        let ephemeral_key = userdata.ephemeral_public_key;
-        let attestation_data = [
-            ephemeral_key,
-            attestation.raw_attestation.evidence.clone(),
-            attestation.detached_userdata.clone(),
-        ]
-        .concat();
-
-        // Hash the attestation data
-        let mut hasher = sha2::Sha256::new();
-        hasher.update(&attestation_data);
-        let evidence_hash = hasher.finalize();
-
-        // Create operator signature using Ed25519
-        let signing_key_array: [u8; 32] = signing_key
-            .try_into()
-            .map_err(|_| "Signing key must be exactly 32 bytes")?;
-        let signing_key = ed25519_dalek::SigningKey::from_bytes(&signing_key_array);
-        let public_key = signing_key.verifying_key();
-        let signature = signing_key.sign(&attestation_data);
-
-        // Create a simple CBOR structure with signature info (can be upgraded to full COSE later)
-        let signature_data = std::collections::BTreeMap::from([
-            (
-                "alg".to_string(),
-                ciborium::Value::Text("EdDSA".to_string()),
-            ),
-            (
-                "sig".to_string(),
-                ciborium::Value::Bytes(signature.to_bytes().to_vec()),
-            ),
-            (
-                "key".to_string(),
-                ciborium::Value::Bytes(public_key.to_bytes().to_vec()),
-            ),
-        ]);
-
-        // Serialize to CBOR
-        let mut cose_bytes = Vec::new();
-        ciborium::into_writer(&signature_data, &mut cose_bytes)
-            .map_err(|e| format!("Failed to serialize signature data: {}", e))?;
-
-        // Convert to interface type
-        Ok(OperatorSignature {
-            cose_sign1: cose_bytes,
-        })
     }
 }
 
@@ -994,56 +948,19 @@ mod tests {
             detached_userdata,
         };
 
-        // Test the signature creation logic directly (without the full SecretsService)
+        // Test the signature creation logic using the new OperatorSignature::new method
         let key_bytes = std::fs::read(&key_path).unwrap();
-        let signing_key_array: [u8; 32] = key_bytes.try_into().unwrap();
 
-        // Parse the detached userdata to extract ephemeral key
-        let userdata = nxcc_attestation::user_data_binding::UserData::from_cbor(
-            &attestation.detached_userdata,
-        )
-        .unwrap();
-        let ephemeral_key = userdata.ephemeral_public_key;
-        let attestation_data = [
-            ephemeral_key,
-            attestation.raw_attestation.evidence.clone(),
-            attestation.detached_userdata.clone(),
-        ]
-        .concat();
-
-        // Create signature using Ed25519
-        let signing_key = ed25519_dalek::SigningKey::from_bytes(&signing_key_array);
-        let public_key = signing_key.verifying_key();
-        let signature = signing_key.sign(&attestation_data);
-
-        // Create a simple CBOR structure with signature info (can be upgraded to full COSE later)
-        let signature_data = std::collections::BTreeMap::from([
-            (
-                "alg".to_string(),
-                ciborium::Value::Text("EdDSA".to_string()),
-            ),
-            (
-                "sig".to_string(),
-                ciborium::Value::Bytes(signature.to_bytes().to_vec()),
-            ),
-            (
-                "key".to_string(),
-                ciborium::Value::Bytes(public_key.to_bytes().to_vec()),
-            ),
-        ]);
-
-        // Serialize to CBOR
-        let mut cose_bytes = Vec::new();
-        ciborium::into_writer(&signature_data, &mut cose_bytes).unwrap();
-
-        // Create the interface type
-        let operator_sig = OperatorSignature {
-            cose_sign1: cose_bytes,
-        };
+        // Create operator signature using the new method
+        let operator_sig =
+            OperatorSignature::new(&key_bytes, &attestation.raw_attestation).unwrap();
 
         // Verify the basic properties
         assert!(!operator_sig.cose_sign1.is_empty());
         assert!(operator_sig.cose_sign1.len() > 50); // Should be a reasonable size for COSE_Sign1
+
+        // Test verification
+        assert!(operator_sig.verify(&attestation.raw_attestation).is_ok());
 
         // Clean up
         std::fs::remove_file(key_path).ok();

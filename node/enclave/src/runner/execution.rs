@@ -1,10 +1,7 @@
 use nxcc_interface::{
     proto::vm::{HttpRequest as ProtoHttpRequest, HttpResponse as ProtoHttpResponse},
     types::{
-        attestation::{
-            AttestationBundle, InterfaceConfirmationMethod, InterfaceJwk, InterfaceMeasurement,
-            StandardizedAttestationClaims,
-        },
+        attestation::{AttestationBundle, StandardizedClaims},
         policy::{PolicyExecutionContextForWorker, PolicyExecutionReport, PolicyExecutionRequest},
         worker::events::EventPayload,
     },
@@ -39,9 +36,7 @@ impl RunnerService {
                         "Successfully verified attestation with platform {}",
                         claims.eat_profile
                     );
-                    // Convert from attestation StandardizedClaims to interface StandardizedAttestationClaims
-                    let interface_claims = self.convert_claims_to_interface(*claims);
-                    context.attestation_claims = Some(interface_claims);
+                    context.attestation_claims = Some(*claims);
                 }
                 Err(e) => {
                     warn!(
@@ -139,66 +134,6 @@ impl RunnerService {
             results.len()
         );
         Ok(satisfied_contexts)
-    }
-
-    /// Helper method to convert attestation StandardizedClaims to interface StandardizedAttestationClaims
-    fn convert_claims_to_interface(
-        &self,
-        claims: nxcc_attestation::StandardizedClaims,
-    ) -> StandardizedAttestationClaims {
-        use nxcc_interface::types::attestation::StandardizedAttestationClaims;
-
-        // Convert attestation Measurement to interface InterfaceMeasurement
-        let interface_measurements: Vec<InterfaceMeasurement> = claims
-            .measurements
-            .into_iter()
-            .map(|m| InterfaceMeasurement {
-                val: m.val,
-                alg: m.alg,
-                measurement_type: m.measurement_type,
-                vendor: m.vendor,
-                version: m.version,
-            })
-            .collect();
-
-        // Convert confirmation method if present
-        let cnf = claims.cnf.map(|cm| match cm {
-            nxcc_attestation::types::ConfirmationMethod::Jwk { jwk } => {
-                InterfaceConfirmationMethod::Jwk {
-                    jwk: InterfaceJwk {
-                        kty: jwk.kty,
-                        crv: jwk.crv,
-                        x: jwk.x,
-                        y: jwk.y,
-                    },
-                }
-            }
-            nxcc_attestation::types::ConfirmationMethod::CoseKey { cose_key } => {
-                InterfaceConfirmationMethod::CoseKey { cose_key }
-            }
-        });
-
-        // Convert EAT StandardizedClaims to interface StandardizedAttestationClaims
-        StandardizedAttestationClaims {
-            // EAT-compliant fields (using exact claim names)
-            iat: claims.iat,
-            eat_nonce: claims.eat_nonce,
-            ueid: claims.ueid,
-            oemid: claims.oemid,
-            hwmodel: claims.hwmodel,
-            hwversion: claims.hwversion,
-            dbgstat: claims.dbgstat,
-            oemboot: claims.oemboot,
-            swname: claims.swname,
-            swversion: claims.swversion,
-            measurements: interface_measurements,
-            cnf,
-            intuse: claims.intuse,
-            uptime: claims.uptime,
-            bootcount: claims.bootcount,
-            bootseed: claims.bootseed,
-            eat_profile: claims.eat_profile,
-        }
     }
 
     /// Delivers a batch of asynchronous events to appropriate workers.

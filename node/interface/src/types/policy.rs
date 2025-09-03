@@ -2,8 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     attestation::{
-        AttestationBundle, EnvReport, OperatorSignature, RawAttestation,
-        StandardizedAttestationClaims,
+        AttestationBundle, EnvReport, OperatorSignature, RawAttestation, StandardizedClaims,
     },
     error::ConversionError,
     secrets::{ConsumerInfo, SecretId},
@@ -68,7 +67,7 @@ pub struct PolicyExecutionRequest {
     pub env_report: EnvReport, // The EnvReport of the entity being evaluated
     /// Standardized attestation claims extracted from the verified env_report
     /// These are available when the attestation system successfully verifies the report
-    pub attestation_claims: Option<StandardizedAttestationClaims>,
+    pub attestation_claims: Option<StandardizedClaims>,
 }
 
 impl PolicyExecutionRequest {
@@ -94,7 +93,7 @@ pub struct PolicyExecutionContextForWorker {
     pub consumer: ConsumerInfo,
     pub env_report: PolicyEnvReport, // Sanitized EnvReport without system userdata
     /// Standardized attestation claims extracted from the verified env_report
-    pub attestation_claims: Option<StandardizedAttestationClaims>,
+    pub attestation_claims: Option<StandardizedClaims>,
 }
 
 impl TryFrom<interface::PolicyExecutionRequest> for PolicyExecutionRequest {

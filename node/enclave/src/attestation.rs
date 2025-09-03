@@ -3,10 +3,15 @@ use std::{collections::HashMap, sync::Arc};
 use anyhow::Result;
 use async_trait::async_trait;
 use nxcc_attestation::{
-    AttestationBundle, AttestationProvider, AttestationService, GatewayProvider, RawAttestation,
-    StandardizedClaims, VerificationResult, providers::TdxQvlProvider, user_data_binding,
+    AttestationProvider, AttestationService, GatewayProvider, providers::TdxQvlProvider,
+    user_data_binding,
 };
-use nxcc_interface::gateway::{BlockInfo, GatewayConfig};
+use nxcc_interface::{
+    gateway::{BlockInfo, GatewayConfig},
+    types::attestation::{
+        AttestationBundle, RawAttestation, StandardizedClaims, VerificationResult,
+    },
+};
 
 use crate::crypto::KeyExchangeKeyPair;
 
@@ -73,7 +78,7 @@ impl AttestationProvider for TestAttestationProvider {
                     manifests: None,
 
                     // Measurements
-                    measurements: vec![nxcc_attestation::types::Measurement {
+                    measurements: vec![nxcc_interface::types::attestation::Measurement {
                         val: vec![0x42; 48], // Use 48 bytes for sha-384
                         alg: "sha-384".to_string(),
                         measurement_type: Some("application".to_string()),

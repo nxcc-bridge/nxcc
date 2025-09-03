@@ -6,9 +6,8 @@ use crate::{
         hardware::{TdxHardware, TdxInterface},
         TdxAttestationClaims,
     },
-    types::Measurement,
-    user_data_binding, AttestationBundle, AttestationProvider, RawAttestation, StandardizedClaims,
-    VerificationResult,
+    user_data_binding, AttestationBundle, AttestationProvider, Measurement, RawAttestation,
+    StandardizedClaims, VerificationResult,
 };
 
 /// TDX attestation provider using dcap-qvl for local verification

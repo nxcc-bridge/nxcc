@@ -1,0 +1,23 @@
+TODO:
+
+- make the tdx work in docker container
+- make e2e test set up policy infra
+
+Fix this
+- 2025-09-02T19:26:24.187657Z ERROR nxcc_daemon::http_server: API Error: 500 Internal Server Error - Internal error: Non-streaming logs not implemented yet. Use follow=true for streaming.
+SUCCESS (Log Streaming Test 1): Non-streaming correctly returns 500 (not implemented).
+
+
+
+
+* expose peer id from status endpoint
+
+* why isn't userdata binding the epk and other stuff? is that just because of attestationreport?
+* is the userdata detached hash ever compared to the userdata field in the quote?
+
+
+* make mock quote non-deterministic
+* // TODO (important!): verify that env report is bound to the attestation (node_id is used but untrusted)
+
+* use the dev vm again to ensure that tdx works
+* use the dev vm with run.sh to ensure that two nodes can communicate (or run the e2e I guess)

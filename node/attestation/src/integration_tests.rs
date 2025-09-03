@@ -16,7 +16,6 @@ mod tests {
             hardware::{TdxHardware, TdxInterface, TdxSimulator, TdxSimulatorConfig},
             TdxQuote, TEE_TYPE_TDX,
         },
-        types::*,
         user_data_binding, *,
     };
 

@@ -4318,6 +4318,7 @@ dependencies = [
  "base64",
  "chrono",
  "ciborium",
+ "ed25519-dalek",
  "prost",
  "serde",
  "serde_json",

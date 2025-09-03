@@ -299,7 +299,7 @@ impl TdxQuote {
     }
 
     /// Extract IEATS/RATS standardized claims from TDX quote
-    pub fn extract_standardized_claims(&self) -> crate::types::StandardizedClaims {
+    pub fn extract_standardized_claims(&self) -> crate::StandardizedClaims {
         use std::{
             collections::HashMap,
             time::{SystemTime, UNIX_EPOCH},
@@ -341,9 +341,9 @@ impl TdxQuote {
             .as_secs();
 
         // Convert measurements HashMap to Vec<Measurement> using exact field names
-        let rtmr_measurements: Vec<crate::types::Measurement> = measurements
+        let rtmr_measurements: Vec<crate::Measurement> = measurements
             .into_iter()
-            .map(|(key, value)| crate::types::Measurement {
+            .map(|(key, value)| crate::Measurement {
                 val: value,
                 alg: "sha-384".to_string(), // Use exact algorithm name from spec
                 measurement_type: Some(key),
@@ -353,7 +353,7 @@ impl TdxQuote {
             .collect();
 
         // Add the primary software measurement (MRTD)
-        let mut all_measurements = vec![crate::types::Measurement {
+        let mut all_measurements = vec![crate::Measurement {
             val: td_report.mrtd.to_vec(),
             alg: "sha-384".to_string(),
             measurement_type: Some("application".to_string()), // Primary enclave measurement
@@ -362,7 +362,7 @@ impl TdxQuote {
         }];
         all_measurements.extend(rtmr_measurements);
 
-        crate::types::StandardizedClaims {
+        crate::StandardizedClaims {
             // Core freshness and context
             iat: issued_at,
             eat_nonce: Some(nonce),
