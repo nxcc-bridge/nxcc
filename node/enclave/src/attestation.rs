@@ -3,9 +3,8 @@ use std::{collections::HashMap, sync::Arc};
 use anyhow::Result;
 use async_trait::async_trait;
 use nxcc_attestation::{
-    AttestationBundle, AttestationService, AttestationProvider, GatewayProvider, 
-    StandardizedClaims, VerificationResult, RawAttestation, user_data_binding,
-    providers::TdxQvlProvider,
+    AttestationBundle, AttestationProvider, AttestationService, GatewayProvider, RawAttestation,
+    StandardizedClaims, VerificationResult, providers::TdxQvlProvider, user_data_binding,
 };
 use nxcc_interface::gateway::{BlockInfo, GatewayConfig};
 
@@ -52,50 +51,50 @@ impl AttestationProvider for TestAttestationProvider {
                         .unwrap()
                         .as_secs(),
                     eat_nonce: None,
-                    
+
                     // Identity and provenance
                     ueid: Some(vec![0x42; 32]), // Test UUID
                     sueids: None,
                     oemid: Some("test".to_string()),
                     hwmodel: Some("test-model".to_string()),
                     hwversion: Some("1.0".to_string()),
-                    
+
                     // Debug and boot status
                     dbgstat: 0, // Production (debug disabled)
                     oemboot: None,
-                    
+
                     // Software identity
                     swname: None,
                     swversion: None,
                     manifests: None,
-                    
+
                     // Measurements
                     measurements: vec![],
                     measres: None,
-                    
+
                     // Execution structure
                     submods: None,
-                    
+
                     // Key binding
                     cnf: None,
                     intuse: None,
-                    
+
                     // Lifecycle freshness
                     uptime: None,
                     bootcount: None,
                     bootseed: None,
-                    
+
                     // Profile selection
                     eat_profile: "test-profile".to_string(),
-                    
+
                     // Assurance artifacts
                     dloas: None,
                 });
                 Ok(VerificationResult::Verified(claims))
             }
-            Err(_) => {
-                Ok(VerificationResult::Failed("Failed to parse requester userdata".to_string()))
-            }
+            Err(_) => Ok(VerificationResult::Failed(
+                "Failed to parse requester userdata".to_string(),
+            )),
         }
     }
 }

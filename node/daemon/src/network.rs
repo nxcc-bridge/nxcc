@@ -22,7 +22,7 @@ use tracing::{debug, error, info, trace, warn};
 
 use crate::{
     config::Config, error::AppError, grpc::enclave_client::EnclaveClient,
-    services::secrets::SecretsService,
+    http_server::PeerRegistry, services::secrets::SecretsService,
 };
 
 #[derive(Debug, Clone)]
@@ -118,6 +118,7 @@ pub struct NetworkManager {
     config: Config,
     secrets_receiver: mpsc::Receiver<SecretsMessage>,
     secrets_service: Arc<SecretsService>,
+    peer_registry: PeerRegistry,
 }
 
 impl NetworkManager {
@@ -126,12 +127,14 @@ impl NetworkManager {
         config: Config,
         secrets_service: Arc<SecretsService>,
         secrets_receiver: mpsc::Receiver<SecretsMessage>,
+        peer_registry: PeerRegistry,
     ) -> Result<Self, AppError> {
         Ok(Self {
             local_key,
             config,
             secrets_receiver,
             secrets_service,
+            peer_registry,
         })
     }
 
@@ -160,13 +163,22 @@ impl NetworkManager {
 
         let secrets_service = Arc::clone(&self.secrets_service);
         let secrets_rx = std::mem::replace(&mut self.secrets_receiver, mpsc::channel(1).1);
+        let peer_registry = self.peer_registry.clone();
 
         // Subscribe to a global "secrets" topic for gossip
         let secrets_topic = gossipsub::IdentTopic::new("secrets");
 
         // Run swarm in a background task
         tokio::spawn(async move {
-            run_network_loop(swarm, secrets_rx, secrets_service, secrets_topic, shutdown).await;
+            run_network_loop(
+                swarm,
+                secrets_rx,
+                secrets_service,
+                secrets_topic,
+                peer_registry,
+                shutdown,
+            )
+            .await;
         });
 
         Ok(())
@@ -281,12 +293,13 @@ async fn run_network_loop(
     mut secrets_rx: mpsc::Receiver<SecretsMessage>,
     secrets_service: Arc<SecretsService>,
     topic: gossipsub::IdentTopic,
+    peer_registry: PeerRegistry,
     mut shutdown: tokio::sync::broadcast::Receiver<()>,
 ) {
     loop {
         tokio::select! {
             event = swarm.select_next_some() => {
-                handle_swarm_event(event, &mut swarm, &topic, &secrets_service).await;
+                handle_swarm_event(event, &mut swarm, &topic, &secrets_service, &peer_registry).await;
             },
 
             msg = secrets_rx.next() => {
@@ -310,6 +323,7 @@ async fn handle_swarm_event(
     swarm: &mut Swarm<AppBehaviour>,
     topic: &gossipsub::IdentTopic,
     secrets_service: &Arc<SecretsService>,
+    peer_registry: &PeerRegistry,
 ) {
     match event {
         SwarmEvent::Behaviour(app_event) => match app_event {
@@ -324,11 +338,23 @@ async fn handle_swarm_event(
         SwarmEvent::NewListenAddr { address, .. } => {
             info!("New listener on {address}");
         }
-        SwarmEvent::ConnectionEstablished { peer_id, .. } => {
+        SwarmEvent::ConnectionEstablished {
+            peer_id, endpoint, ..
+        } => {
             info!("Connection established with {peer_id}");
+            // Add peer to registry with its multiaddr
+            let multiaddr = format!("{}/p2p/{}", endpoint.get_remote_address(), peer_id);
+            peer_registry.add_peer(peer_id.to_string(), multiaddr).await;
         }
-        SwarmEvent::ConnectionClosed { peer_id, .. } => {
+        SwarmEvent::ConnectionClosed {
+            peer_id, endpoint, ..
+        } => {
             info!("Connection closed with {peer_id}");
+            // Remove the specific address for this peer
+            let multiaddr = format!("{}/p2p/{}", endpoint.get_remote_address(), peer_id);
+            peer_registry
+                .remove_peer_addr(&peer_id.to_string(), &multiaddr)
+                .await;
         }
         _ => {}
     }

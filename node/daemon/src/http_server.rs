@@ -33,6 +33,53 @@ pub struct VmRegistry {
     attached_vms: Arc<RwLock<HashSet<String>>>,
 }
 
+/// Registry for tracking connected peers
+#[derive(Debug, Clone, Default)]
+pub struct PeerRegistry {
+    /// Map of connected peer IDs to their set of multiaddrs
+    connected_peers: Arc<RwLock<HashMap<String, HashSet<String>>>>,
+}
+
+impl PeerRegistry {
+    pub fn new() -> Self {
+        Self {
+            connected_peers: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    /// Add a connected peer with its multiaddr
+    pub async fn add_peer(&self, peer_id: String, multiaddr: String) {
+        let mut peers = self.connected_peers.write().await;
+        peers
+            .entry(peer_id)
+            .or_insert_with(HashSet::new)
+            .insert(multiaddr);
+    }
+
+    /// Remove a specific multiaddr for a peer
+    pub async fn remove_peer_addr(&self, peer_id: &str, multiaddr: &str) {
+        let mut peers = self.connected_peers.write().await;
+        if let Some(addrs) = peers.get_mut(peer_id) {
+            addrs.remove(multiaddr);
+            if addrs.is_empty() {
+                peers.remove(peer_id);
+            }
+        }
+    }
+
+    /// Remove all addresses for a peer
+    pub async fn remove_peer(&self, peer_id: &str) {
+        let mut peers = self.connected_peers.write().await;
+        peers.remove(peer_id);
+    }
+
+    /// Get a map of all connected peers and their multiaddrs
+    pub async fn get_connected_peers(&self) -> HashMap<String, HashSet<String>> {
+        let peers = self.connected_peers.read().await;
+        peers.clone()
+    }
+}
+
 impl VmRegistry {
     pub fn new() -> Self {
         Self {
@@ -70,6 +117,8 @@ struct AppState {
     local_key: libp2p::identity::Keypair,
     /// Registry of attached VMs
     vm_registry: VmRegistry,
+    /// Registry of connected peers
+    peer_registry: PeerRegistry,
     /// Secrets service for env report generation
     secrets_service: Arc<SecretsService>,
 }
@@ -89,7 +138,7 @@ struct SubmitWorkOrderSuccessResponse {
 struct StatusResponse {
     health: String,
     peer_id: String,
-    connected_peers: Vec<String>,
+    connected_peers: HashMap<String, HashSet<String>>,
     vm_ids: Vec<String>,
 }
 
@@ -294,9 +343,8 @@ async fn status_handler(State(state): State<Arc<AppState>>) -> Result<impl IntoR
     // Get VM list from local registry
     let vm_ids = state.vm_registry.list_vms().await;
 
-    // For now, we'll return a placeholder for connected peers
-    // In a full implementation, we'd need access to the swarm's connection state
-    let connected_peers = Vec::<String>::new(); // TODO: Implement peer list retrieval
+    // Get connected peers from peer registry
+    let connected_peers = state.peer_registry.get_connected_peers().await;
 
     Ok(Json(StatusResponse {
         health: "ok".to_string(),
@@ -416,6 +464,7 @@ pub async fn start_http_server(
     work_order_orchestrator: Arc<WorkOrderOrchestrator>,
     local_key: libp2p::identity::Keypair,
     vm_registry: VmRegistry,
+    peer_registry: PeerRegistry,
     secrets_service: Arc<SecretsService>,
     shutdown_signal: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), anyhow::Error> {
@@ -430,6 +479,7 @@ pub async fn start_http_server(
         work_order_orchestrator,
         local_key,
         vm_registry,
+        peer_registry,
         secrets_service,
     });
 

@@ -21,7 +21,7 @@ use tracing_subscriber::{EnvFilter, FmtSubscriber as Subscriber, fmt::format::Fm
 
 use crate::{
     config::{Config, EnclaveConfig},
-    http_server::{VmRegistry, start_http_server},
+    http_server::{PeerRegistry, VmRegistry, start_http_server},
     identity::{create_ephemeral_identity, get_or_create_identity},
     network::NetworkManager,
     policy::PolicyManager,
@@ -109,6 +109,9 @@ async fn main() -> anyhow::Result<()> {
     // Create VM registry for tracking attached VMs
     let vm_registry = VmRegistry::new();
 
+    // Create peer registry for tracking connected peers
+    let peer_registry = PeerRegistry::new();
+
     // Instantiate services
     let runner_service = Arc::new(RunnerService::new(
         enclave_client.runner(),
@@ -141,6 +144,7 @@ async fn main() -> anyhow::Result<()> {
         config.clone(),
         secrets_service.clone(),
         secrets_rx,
+        peer_registry.clone(),
     )
     .await?;
 
@@ -191,6 +195,7 @@ async fn main() -> anyhow::Result<()> {
     let work_order_orchestrator_for_http = work_order_orchestrator.clone();
     let local_key_for_http = local_key.clone();
     let vm_registry_for_http = vm_registry.clone();
+    let peer_registry_for_http = peer_registry.clone();
     let secrets_service_for_http = secrets_service.clone();
 
     tokio::spawn(async move {
@@ -201,6 +206,7 @@ async fn main() -> anyhow::Result<()> {
             work_order_orchestrator_for_http,
             local_key_for_http,
             vm_registry_for_http,
+            peer_registry_for_http,
             secrets_service_for_http,
             async move {
                 shutdown_rx_for_http.recv().await.ok();
