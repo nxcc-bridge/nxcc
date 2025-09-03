@@ -12,7 +12,7 @@ use nxcc_interface::{
         StreamWorkerLogsRequest, TerminateWorkerRequest, VmAddress as ProtoVmAddress,
         runner_client::RunnerClient, secrets_client::SecretsClient,
     },
-    types::{AttestationReport, ConsumerInfo, EnvReport, SecretId, SecretsBox},
+    types::{AttestationBundle, ConsumerInfo, EnvReport, SecretId, SecretsBox},
 };
 use tokio::net::UnixStream;
 use tonic::{
@@ -68,11 +68,11 @@ impl EnclaveClient {
 
     // Secrets interface calls
 
-    pub async fn get_report(&self, user_data: Vec<u8>) -> Result<AttestationReport, String> {
+    pub async fn get_report(&self, user_data: Vec<u8>) -> Result<AttestationBundle, String> {
         let mut client = self.secrets();
         let req = GetReportRequest { user_data };
         let resp = client.get_report(req).await.map_err(|e| e.to_string())?;
-        Ok(AttestationReport::from(resp.into_inner()))
+        Ok(AttestationBundle::from(resp.into_inner()))
     }
 
     pub async fn put_secrets(

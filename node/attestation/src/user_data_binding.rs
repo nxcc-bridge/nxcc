@@ -2,9 +2,10 @@
 // Handles ephemeral keys, large data hashing, and freshness proofs
 
 use anyhow::{anyhow, Result};
+use nxcc_interface::types::UserDataBinding;
 use sha2::{Digest, Sha256};
 
-use crate::{types::UserDataBinding, BlockInfo};
+use crate::BlockInfo;
 
 /// Enhanced user data binding that handles ephemeral keys and freshness
 pub struct EnhancedUserDataBinding {

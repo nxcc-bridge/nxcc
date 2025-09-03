@@ -70,12 +70,36 @@ impl VmRuntime for E2EMockVmRuntime {
     async fn get_attestation(
         &self,
         user_data: Vec<u8>,
-    ) -> Result<nxcc_interface::types::AttestationReport, VmError> {
-        Ok(nxcc_interface::types::AttestationReport {
-            measurement: vec![0u8; 32],
-            ephemeral_public_key: vec![0, 1, 2, 3],
-            block_hashes: vec![vec![4, 5, 6, 7]],
-            user_data,
+    ) -> Result<nxcc_interface::types::AttestationBundle, VmError> {
+        use nxcc_interface::{
+            gateway::BlockInfo,
+            types::{RawAttestation, UserDataBinding},
+        };
+
+        let ephemeral_key = vec![0, 1, 2, 3];
+        let mut data = ephemeral_key.clone();
+        data.extend_from_slice(&user_data);
+
+        Ok(nxcc_interface::types::AttestationBundle {
+            raw_attestation: RawAttestation {
+                platform_type: "test".to_string(),
+                evidence: vec![0u8; 32],
+                certificates: None,
+            },
+            user_data_binding: UserDataBinding {
+                original_data: data.clone(),
+                embedded_hash: data,
+                was_hashed: false,
+                ephemeral_key_len: ephemeral_key.len(),
+            },
+            block_hashes: vec![BlockInfo {
+                block_hash: vec![4, 5, 6, 7],
+                block_number: 0,
+                timestamp: 0,
+                chain_id: 1,
+                chain_name: "test".to_string(),
+                fetched_at: 0,
+            }],
         })
     }
 

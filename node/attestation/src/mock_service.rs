@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use nxcc_interface::types::{AttestationBundle, RawAttestation, UserDataBinding};
 
 use crate::{
     tdx::parser::{TdxAttestationClaims, TdxParser},

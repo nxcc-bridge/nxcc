@@ -9,8 +9,8 @@ import "vm.proto"; // For vm.HttpRequest and vm.HttpResponse
 
 // The main secrets service inside the TEE (EnclaveSecrets).
 service Secrets {
-  // get_report returns a fresh attestation report containing ephemeral pubkey, etc.
-  rpc GetReport(GetReportRequest) returns (interface.AttestationReport);
+  // get_report returns a fresh attestation bundle containing ephemeral pubkey, etc.
+  rpc GetReport(GetReportRequest) returns (interface.AttestationBundle);
 
   // put_secrets stores secrets boxes from peers into this enclave.
   rpc PutSecrets(PutSecretsRequest) returns (PutSecretsResponse);

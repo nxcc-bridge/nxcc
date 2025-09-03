@@ -27,7 +27,8 @@ async fn test_put_secrets_mismatched_binding_hash() {
     let enclave_pk_bytes = secrets_service
         .get_report(vec![])
         .unwrap()
-        .ephemeral_public_key;
+        .user_data_binding
+        .extract_ephemeral_key();
     let enclave_pk =
         x25519_dalek::PublicKey::from(<[u8; 32]>::try_from(enclave_pk_bytes.as_slice()).unwrap());
     let secrets_to_send = vec![(secret_id.clone(), b"data".to_vec(), 0, 1)];

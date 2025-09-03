@@ -15,7 +15,7 @@ use nxcc_interface::{
         StartWorkerRequest, StopWorkerRequest, StreamWorkerLogsRequest, StreamWorkerLogsResponse,
         TrustedConfig, UntrustedConfig, WorkerStatus,
     },
-    types::AttestationReport,
+    types::AttestationBundle,
 };
 use thiserror::Error;
 #[cfg(feature = "uds")]
@@ -85,7 +85,7 @@ pub trait VmClient {
     fn get_attestation(
         &mut self,
         user_data: Vec<u8>,
-    ) -> impl Future<Output = Result<AttestationReport, ClientError>>;
+    ) -> impl Future<Output = Result<AttestationBundle, ClientError>>;
 
     /// Get the status of a worker instance
     fn get_worker_status(
@@ -295,15 +295,15 @@ impl VmClient for VmServiceClient {
     async fn get_attestation(
         &mut self,
         user_data: Vec<u8>,
-    ) -> Result<AttestationReport, ClientError> {
+    ) -> Result<AttestationBundle, ClientError> {
         let request = GetAttestationRequest { user_data };
 
         let response = self.inner.get_attestation(request).await?.into_inner();
 
-        match response.report {
-            Some(report) => Ok(AttestationReport::from(report)),
+        match response.bundle {
+            Some(bundle) => Ok(AttestationBundle::from(bundle)),
             None => Err(ClientError::Grpc(Status::internal(
-                "No attestation report received",
+                "No attestation bundle received",
             ))),
         }
     }

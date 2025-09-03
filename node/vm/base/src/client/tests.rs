@@ -173,11 +173,34 @@ impl nxcc_interface::proto::vm::vm_server::Vm for MockVmService {
 
         Ok(Response::new(
             nxcc_interface::proto::vm::GetAttestationResponse {
-                report: Some(nxcc_interface::proto::interface::AttestationReport {
-                    ephemeral_public_key: vec![1, 2, 3, 4],
-                    measurement: vec![0u8; 32],
-                    block_hashes: vec![vec![5, 6, 7, 8]],
-                    user_data: req.user_data,
+                bundle: Some(nxcc_interface::proto::interface::AttestationBundle {
+                    raw_attestation: Some(nxcc_interface::proto::interface::RawAttestation {
+                        platform_type: "test".to_string(),
+                        evidence: vec![0u8; 32],
+                        certificates: vec![],
+                    }),
+                    user_data_binding: Some(nxcc_interface::proto::interface::UserDataBinding {
+                        original_data: {
+                            let mut data = vec![1, 2, 3, 4]; // ephemeral key
+                            data.extend_from_slice(&req.user_data);
+                            data
+                        },
+                        embedded_hash: {
+                            let mut data = vec![1, 2, 3, 4]; // ephemeral key
+                            data.extend_from_slice(&req.user_data);
+                            data
+                        },
+                        was_hashed: false,
+                        ephemeral_key_len: 4,
+                    }),
+                    block_hashes: vec![nxcc_interface::proto::interface::BlockInfo {
+                        block_hash: vec![5, 6, 7, 8],
+                        block_number: 0,
+                        timestamp: 0,
+                        chain_id: 1,
+                        chain_name: "test".to_string(),
+                        fetched_at: 0,
+                    }],
                 }),
             },
         ))
@@ -378,8 +401,11 @@ async fn test_client_operations() -> Result<(), Box<dyn Error>> {
     // Get attestation
     let user_data = vec![10, 11, 12];
     let attestation = client.get_attestation(user_data.clone()).await?;
-    assert_eq!(attestation.user_data, user_data);
-    assert_eq!(attestation.ephemeral_public_key, vec![1, 2, 3, 4]); // Mock data
+    assert_eq!(attestation.user_data_binding.extract_user_data(), user_data);
+    assert_eq!(
+        attestation.user_data_binding.extract_ephemeral_key(),
+        vec![1, 2, 3, 4]
+    ); // Mock data
 
     // Stop worker
     client.stop_worker(worker_id).await?;
@@ -502,8 +528,13 @@ async fn test_client_error_handling() {
 #[cfg(feature = "test")]
 #[tokio::test]
 async fn test_mock_client() {
-    use nxcc_interface::proto::vm::{
-        Header as ProtoHeader, HttpRequest as ProtoHttpRequest, HttpResponse as ProtoHttpResponse,
+    use nxcc_interface::{
+        gateway::BlockInfo,
+        proto::vm::{
+            Header as ProtoHeader, HttpRequest as ProtoHttpRequest,
+            HttpResponse as ProtoHttpResponse,
+        },
+        types::{AttestationBundle, RawAttestation, UserDataBinding},
     };
 
     use super::mock::{MockAttestationBehavior, MockVmServiceClient};
@@ -595,22 +626,53 @@ async fn test_mock_client() {
     // Test attestation with standard behavior
     let user_data = vec![10, 11, 12];
     let attestation = client.get_attestation(user_data.clone()).await.unwrap();
-    assert_eq!(attestation.user_data, user_data);
-    assert_eq!(attestation.ephemeral_public_key, vec![1, 2, 3, 4, 5]);
+    assert_eq!(attestation.user_data_binding.extract_user_data(), user_data);
+    assert_eq!(
+        attestation.user_data_binding.extract_ephemeral_key(),
+        vec![1, 2, 3, 4, 5]
+    );
 
     // Test attestation with custom behavior
-    client.set_attestation_behavior(MockAttestationBehavior::Custom(AttestationReport {
-        user_data: vec![],
-        measurement: vec![0u8; 32],
-        ephemeral_public_key: vec![9, 8, 7],
-        block_hashes: vec![vec![1, 1, 1]],
+    client.set_attestation_behavior(MockAttestationBehavior::Custom(AttestationBundle {
+        raw_attestation: RawAttestation {
+            platform_type: "test".to_string(),
+            evidence: vec![0u8; 32],
+            certificates: None,
+        },
+        user_data_binding: UserDataBinding {
+            original_data: vec![9, 8, 7], // Just ephemeral key, user data will be added
+            embedded_hash: vec![9, 8, 7],
+            was_hashed: false,
+            ephemeral_key_len: 3,
+        },
+        block_hashes: vec![BlockInfo {
+            block_hash: vec![1, 1, 1],
+            block_number: 0,
+            timestamp: 0,
+            chain_id: 1,
+            chain_name: "test".to_string(),
+            fetched_at: 0,
+        }],
     }));
 
     let user_data2 = vec![20, 21, 22];
     let attestation = client.get_attestation(user_data2.clone()).await.unwrap();
-    assert_eq!(attestation.user_data, user_data2); // User data gets replaced
-    assert_eq!(attestation.ephemeral_public_key, vec![9, 8, 7]); // From custom attestation
-    assert_eq!(attestation.block_hashes, vec![vec![1, 1, 1]]); // From custom attestation
+    assert_eq!(
+        attestation.user_data_binding.extract_user_data(),
+        user_data2
+    ); // User data gets replaced
+    assert_eq!(
+        attestation.user_data_binding.extract_ephemeral_key(),
+        vec![9, 8, 7]
+    ); // From custom attestation
+    assert_eq!(
+        attestation
+            .block_hashes
+            .iter()
+            .map(|b| b.block_hash.clone())
+            .collect::<Vec<_>>(),
+        vec![vec![1, 1, 1]]
+    ); // From custom attestation
 
     // Test probe_worker
     let (probe_status, probe_message) = client.probe_worker(worker_id.clone()).await.unwrap();

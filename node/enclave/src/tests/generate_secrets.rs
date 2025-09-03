@@ -80,7 +80,8 @@ async fn test_generate_secrets_workflow() {
     let enclave_pk_bytes = secrets_service
         .get_report(vec![])
         .unwrap()
-        .ephemeral_public_key;
+        .user_data_binding
+        .extract_ephemeral_key();
     let enclave_pk =
         x25519_dalek::PublicKey::from(<[u8; 32]>::try_from(enclave_pk_bytes.as_slice()).unwrap());
     let secrets_to_send_put = vec![(secret_id_gen.clone(), b"overwrite attempt".to_vec(), 0, 1)];

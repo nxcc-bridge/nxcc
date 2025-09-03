@@ -12,7 +12,7 @@ use futures::channel::mpsc;
 use libp2p::PeerId; // Import PeerId
 use libp2p::identity::Keypair; // Import Keypair
 use nxcc_interface::types::{
-    AttestationReport, ConsumerInfo, EnvReport, OperatorSignature, PolicyExecutionRequest,
+    AttestationBundle, ConsumerInfo, EnvReport, OperatorSignature, PolicyExecutionRequest,
     SecretId, SecretRequest, SecretsBox, WorkerBundle, WorkerManifest,
 };
 use sha2::Digest;
@@ -862,7 +862,7 @@ impl SecretsService {
     async fn create_operator_signature(
         &self,
         key_path: &std::path::Path,
-        attestation: &AttestationReport,
+        attestation: &AttestationBundle,
     ) -> Result<OperatorSignature, Box<dyn std::error::Error + Send + Sync>> {
         // Read the signing key from file
         let key_bytes = std::fs::read(key_path).map_err(|e| {
@@ -886,10 +886,12 @@ impl SecretsService {
             .map_err(|_| "Failed to convert key bytes to array")?;
 
         // Create hash of attestation data to sign
+        let ephemeral_key = attestation.user_data_binding.extract_ephemeral_key();
+        let user_data = attestation.user_data_binding.extract_user_data();
         let attestation_data = [
-            attestation.ephemeral_public_key.clone(),
-            attestation.measurement.clone(),
-            attestation.user_data.clone(),
+            ephemeral_key,
+            attestation.raw_attestation.evidence.clone(),
+            user_data,
         ]
         .concat();
 
@@ -957,12 +959,46 @@ mod tests {
         let test_key = [1u8; 32];
         std::fs::write(&key_path, test_key).unwrap();
 
-        // Create test attestation report
-        let attestation = AttestationReport {
-            ephemeral_public_key: vec![1, 2, 3, 4],
-            measurement: vec![5, 6, 7, 8],
-            user_data: vec![9, 10, 11, 12],
-            block_hashes: vec![vec![1, 2, 3], vec![4, 5, 6]], // Add required block hashes
+        // Create test attestation bundle
+        use nxcc_interface::types::{RawAttestation, UserDataBinding};
+        let attestation = AttestationBundle {
+            raw_attestation: RawAttestation {
+                platform_type: "test".to_string(),
+                evidence: vec![5, 6, 7, 8],
+                certificates: None,
+            },
+            user_data_binding: UserDataBinding {
+                original_data: {
+                    let mut data = vec![1, 2, 3, 4]; // ephemeral key
+                    data.extend_from_slice(&vec![9, 10, 11, 12]); // user data
+                    data
+                },
+                embedded_hash: {
+                    let mut data = vec![1, 2, 3, 4]; // ephemeral key
+                    data.extend_from_slice(&vec![9, 10, 11, 12]); // user data
+                    data
+                },
+                was_hashed: false,
+                ephemeral_key_len: 4,
+            },
+            block_hashes: vec![
+                nxcc_interface::gateway::BlockInfo {
+                    chain_id: 1,
+                    chain_name: "test1".to_string(),
+                    block_number: 1,
+                    block_hash: vec![1, 2, 3],
+                    timestamp: 0,
+                    fetched_at: 0,
+                },
+                nxcc_interface::gateway::BlockInfo {
+                    chain_id: 2,
+                    chain_name: "test2".to_string(),
+                    block_number: 2,
+                    block_hash: vec![4, 5, 6],
+                    timestamp: 0,
+                    fetched_at: 0,
+                },
+            ],
         };
 
         // Test the signature creation logic directly (without the full SecretsService)
@@ -971,10 +1007,12 @@ mod tests {
         let key_bytes = std::fs::read(&key_path).unwrap();
         let signing_key_array: [u8; 32] = key_bytes.try_into().unwrap();
 
+        let ephemeral_key = attestation.user_data_binding.extract_ephemeral_key();
+        let user_data = attestation.user_data_binding.extract_user_data();
         let attestation_data = [
-            attestation.ephemeral_public_key.clone(),
-            attestation.measurement.clone(),
-            attestation.user_data.clone(),
+            ephemeral_key,
+            attestation.raw_attestation.evidence.clone(),
+            user_data,
         ]
         .concat();
 

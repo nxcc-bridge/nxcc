@@ -5,10 +5,14 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::Digest;
 use thiserror::Error;
 use url::Url;
 
-use crate::proto::{enclave, interface};
+use crate::{
+    gateway,
+    proto::{enclave, interface},
+};
 
 /// EAT-compliant measurement entry for interface
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -123,44 +127,269 @@ pub enum ConversionError {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AttestationReport {
-    pub ephemeral_public_key: Vec<u8>,
-    /// PCR0 or MRENCLAVE
-    pub measurement: Vec<u8>,
-    pub block_hashes: Vec<Vec<u8>>,
-    pub user_data: Vec<u8>,
+/// User data that exceeds platform limits gets hashed
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserDataBinding {
+    /// The actual user data (may be large)
+    pub original_data: Vec<u8>,
+    /// Hash that was embedded in the attestation
+    pub embedded_hash: Vec<u8>,
+    /// Whether the data was hashed due to size constraints
+    pub was_hashed: bool,
+    /// Ephemeral public key length (used for extraction)
+    pub ephemeral_key_len: usize,
 }
 
-impl From<interface::AttestationReport> for AttestationReport {
-    fn from(p: interface::AttestationReport) -> Self {
+impl UserDataBinding {
+    /// Create binding with ephemeral key, hashing if necessary for platform constraints
+    pub fn new_with_ephemeral_key(
+        ephemeral_key: Vec<u8>,
+        user_data: Vec<u8>,
+        max_size: usize,
+    ) -> Self {
+        let mut combined_data = ephemeral_key.clone();
+        combined_data.extend_from_slice(&user_data);
+
+        if combined_data.len() <= max_size {
+            Self {
+                embedded_hash: combined_data,
+                original_data: user_data,
+                was_hashed: false,
+                ephemeral_key_len: ephemeral_key.len(),
+            }
+        } else {
+            let mut hasher = sha2::Sha256::new();
+            hasher.update(&combined_data);
+            let hash = hasher.finalize().to_vec();
+
+            Self {
+                embedded_hash: hash,
+                original_data: user_data,
+                was_hashed: true,
+                ephemeral_key_len: ephemeral_key.len(),
+            }
+        }
+    }
+
+    /// Create binding, hashing if necessary for platform constraints
+    pub fn new(data: Vec<u8>, max_size: usize) -> Self {
+        if data.len() <= max_size {
+            Self {
+                embedded_hash: data.clone(),
+                original_data: data,
+                was_hashed: false,
+                ephemeral_key_len: 0, // No ephemeral key separation when data fits
+            }
+        } else {
+            let mut hasher = sha2::Sha256::new();
+            hasher.update(&data);
+            let hash = hasher.finalize().to_vec();
+
+            Self {
+                embedded_hash: hash,
+                original_data: data,
+                was_hashed: true,
+                ephemeral_key_len: 0,
+            }
+        }
+    }
+
+    /// Verify that the embedded hash matches the original data
+    pub fn verify_binding(&self) -> bool {
+        if !self.was_hashed {
+            // Direct data comparison
+            self.embedded_hash == self.original_data
+        } else {
+            // Hash verification
+            let mut hasher = sha2::Sha256::new();
+            hasher.update(&self.original_data);
+            let computed_hash = hasher.finalize().to_vec();
+            computed_hash == self.embedded_hash
+        }
+    }
+
+    /// Extract ephemeral key from the binding
+    pub fn extract_ephemeral_key(&self) -> Vec<u8> {
+        if self.ephemeral_key_len == 0 {
+            return Vec::new();
+        }
+
+        if !self.was_hashed && self.embedded_hash.len() >= self.ephemeral_key_len {
+            // When not hashed, embedded_hash contains the combined ephemeral_key + user_data
+            self.embedded_hash[..self.ephemeral_key_len].to_vec()
+        } else {
+            // If data was hashed, we can't extract the original ephemeral key
+            Vec::new()
+        }
+    }
+
+    /// Extract user data from the binding
+    pub fn extract_user_data(&self) -> Vec<u8> {
+        if self.ephemeral_key_len == 0 {
+            return if self.was_hashed {
+                self.original_data.clone()
+            } else {
+                self.embedded_hash.clone()
+            };
+        }
+
+        if !self.was_hashed && self.embedded_hash.len() > self.ephemeral_key_len {
+            // When not hashed, embedded_hash contains ephemeral_key + user_data
+            self.embedded_hash[self.ephemeral_key_len..].to_vec()
+        } else if self.was_hashed {
+            // If data was hashed, return original user data (stored separately)
+            self.original_data.clone()
+        } else {
+            // Fallback case
+            Vec::new()
+        }
+    }
+
+    /// Verify that extracted ephemeral key and user data match the binding
+    pub fn verify_extraction(&self, ephemeral_key: &[u8], user_data: &[u8]) -> bool {
+        let expected_ephemeral = self.extract_ephemeral_key();
+        let expected_user_data = self.extract_user_data();
+
+        ephemeral_key == expected_ephemeral && user_data == expected_user_data
+    }
+}
+
+/// Platform-specific raw attestation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RawAttestation {
+    pub platform_type: String,              // "tdx", "sgx", "nitro"
+    pub evidence: Vec<u8>,                  // Quote, report, or evidence blob
+    pub certificates: Option<Vec<Vec<u8>>>, // Certificate chain for verification
+}
+
+/// Complete attestation bundle with all verification data
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttestationBundle {
+    pub raw_attestation: RawAttestation,
+    pub user_data_binding: UserDataBinding,
+    pub block_hashes: Vec<gateway::BlockInfo>,
+}
+
+impl From<interface::RawAttestation> for RawAttestation {
+    fn from(p: interface::RawAttestation) -> Self {
         Self {
-            ephemeral_public_key: p.ephemeral_public_key,
-            measurement: p.measurement,
-            block_hashes: p.block_hashes,
-            user_data: p.user_data,
+            platform_type: p.platform_type,
+            evidence: p.evidence,
+            certificates: if p.certificates.is_empty() {
+                None
+            } else {
+                Some(p.certificates)
+            },
         }
     }
 }
 
-impl From<AttestationReport> for interface::AttestationReport {
-    fn from(value: AttestationReport) -> Self {
+impl From<RawAttestation> for interface::RawAttestation {
+    fn from(value: RawAttestation) -> Self {
         Self {
-            ephemeral_public_key: value.ephemeral_public_key,
-            measurement: value.measurement,
-            block_hashes: value.block_hashes,
-            user_data: value.user_data,
+            platform_type: value.platform_type,
+            evidence: value.evidence,
+            certificates: value.certificates.unwrap_or_default(),
         }
     }
 }
 
-impl From<&AttestationReport> for interface::AttestationReport {
-    fn from(value: &AttestationReport) -> Self {
-        interface::AttestationReport {
-            ephemeral_public_key: value.ephemeral_public_key.clone(),
-            measurement: value.measurement.clone(),
-            block_hashes: value.block_hashes.clone(),
-            user_data: value.user_data.clone(),
+impl From<interface::UserDataBinding> for UserDataBinding {
+    fn from(p: interface::UserDataBinding) -> Self {
+        Self {
+            original_data: p.original_data,
+            embedded_hash: p.embedded_hash,
+            was_hashed: p.was_hashed,
+            ephemeral_key_len: p.ephemeral_key_len as usize,
+        }
+    }
+}
+
+impl From<UserDataBinding> for interface::UserDataBinding {
+    fn from(value: UserDataBinding) -> Self {
+        Self {
+            original_data: value.original_data,
+            embedded_hash: value.embedded_hash,
+            was_hashed: value.was_hashed,
+            ephemeral_key_len: value.ephemeral_key_len as u32,
+        }
+    }
+}
+
+impl From<interface::AttestationBundle> for AttestationBundle {
+    fn from(p: interface::AttestationBundle) -> Self {
+        Self {
+            raw_attestation: p
+                .raw_attestation
+                .map(RawAttestation::from)
+                .unwrap_or_else(|| RawAttestation {
+                    platform_type: String::new(),
+                    evidence: Vec::new(),
+                    certificates: None,
+                }),
+            user_data_binding: p
+                .user_data_binding
+                .map(UserDataBinding::from)
+                .unwrap_or_else(|| UserDataBinding {
+                    original_data: Vec::new(),
+                    embedded_hash: Vec::new(),
+                    was_hashed: false,
+                    ephemeral_key_len: 0,
+                }),
+            block_hashes: p
+                .block_hashes
+                .into_iter()
+                .map(|b| gateway::BlockInfo {
+                    chain_id: b.chain_id,
+                    chain_name: b.chain_name,
+                    block_number: b.block_number,
+                    block_hash: b.block_hash,
+                    timestamp: b.timestamp,
+                    fetched_at: b.fetched_at,
+                })
+                .collect(),
+        }
+    }
+}
+
+impl From<AttestationBundle> for interface::AttestationBundle {
+    fn from(value: AttestationBundle) -> Self {
+        Self {
+            raw_attestation: Some(value.raw_attestation.into()),
+            user_data_binding: Some(value.user_data_binding.into()),
+            block_hashes: value
+                .block_hashes
+                .into_iter()
+                .map(|b| interface::BlockInfo {
+                    chain_id: b.chain_id,
+                    chain_name: b.chain_name,
+                    block_number: b.block_number,
+                    block_hash: b.block_hash,
+                    timestamp: b.timestamp,
+                    fetched_at: b.fetched_at,
+                })
+                .collect(),
+        }
+    }
+}
+
+impl From<&AttestationBundle> for interface::AttestationBundle {
+    fn from(value: &AttestationBundle) -> Self {
+        Self {
+            raw_attestation: Some(value.raw_attestation.clone().into()),
+            user_data_binding: Some(value.user_data_binding.clone().into()),
+            block_hashes: value
+                .block_hashes
+                .iter()
+                .map(|b| interface::BlockInfo {
+                    chain_id: b.chain_id,
+                    chain_name: b.chain_name.clone(),
+                    block_number: b.block_number,
+                    block_hash: b.block_hash.clone(),
+                    timestamp: b.timestamp,
+                    fetched_at: b.fetched_at,
+                })
+                .collect(),
         }
     }
 }
@@ -379,7 +608,7 @@ pub struct OperatorSignature {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnvReport {
-    pub attestation: AttestationReport,
+    pub attestation: AttestationBundle,
     pub operator_signature: Option<OperatorSignature>,
 }
 
@@ -405,7 +634,7 @@ impl TryFrom<interface::EnvReport> for EnvReport {
         Ok(Self {
             attestation: p
                 .attestation
-                .map(AttestationReport::from)
+                .map(AttestationBundle::from)
                 .ok_or(ConversionError::MissingField("attestation".to_string()))?,
             operator_signature: p.operator_signature.map(OperatorSignature::from),
         })
@@ -511,11 +740,13 @@ impl From<&SecretsBox> for interface::SecretsBox {
     }
 }
 
-/// Sanitized attestation report for policy workers, excluding system userdata
+/// Sanitized attestation bundle for policy workers, excluding system userdata
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PolicyAttestationReport {
-    /// Platform measurement (MRENCLAVE/PCR0) - trusted
-    pub measurement: Vec<u8>,
+pub struct PolicyAttestationBundle {
+    /// Platform type for the attestation
+    pub platform_type: String,
+    /// Raw attestation evidence
+    pub evidence: Vec<u8>,
     /// User-provided data only (no ephemeral keys, no block hashes)
     pub user_data: Vec<u8>,
 }
@@ -523,7 +754,7 @@ pub struct PolicyAttestationReport {
 /// Sanitized environment report for policy workers
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PolicyEnvReport {
-    pub attestation: PolicyAttestationReport,
+    pub attestation: PolicyAttestationBundle,
     pub operator_signature: Option<OperatorSignature>,
 }
 
@@ -533,8 +764,9 @@ impl PolicyEnvReport {
     /// user data and platform measurements for policy decisions
     pub fn from_env_report(env_report: &EnvReport, user_provided_data: Vec<u8>) -> Self {
         Self {
-            attestation: PolicyAttestationReport {
-                measurement: env_report.attestation.measurement.clone(),
+            attestation: PolicyAttestationBundle {
+                platform_type: env_report.attestation.raw_attestation.platform_type.clone(),
+                evidence: env_report.attestation.raw_attestation.evidence.clone(),
                 user_data: user_provided_data,
             },
             operator_signature: env_report.operator_signature.clone(),
@@ -545,11 +777,19 @@ impl PolicyEnvReport {
     /// Note: This reconstructs minimal system fields for compatibility
     pub fn to_env_report(&self) -> EnvReport {
         EnvReport {
-            attestation: AttestationReport {
-                ephemeral_public_key: Vec::new(), // Empty - system data removed
-                measurement: self.attestation.measurement.clone(),
+            attestation: AttestationBundle {
+                raw_attestation: RawAttestation {
+                    platform_type: self.attestation.platform_type.clone(),
+                    evidence: self.attestation.evidence.clone(),
+                    certificates: None, // Empty - system data removed
+                },
+                user_data_binding: UserDataBinding {
+                    original_data: self.attestation.user_data.clone(),
+                    embedded_hash: self.attestation.user_data.clone(),
+                    was_hashed: false,
+                    ephemeral_key_len: 0, // Empty - system data removed
+                },
                 block_hashes: Vec::new(), // Empty - system data removed
-                user_data: self.attestation.user_data.clone(),
             },
             operator_signature: self.operator_signature.clone(),
         }

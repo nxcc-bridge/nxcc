@@ -47,7 +47,7 @@ impl SecretsServerTrait for SecretsGrpcService {
     async fn get_report(
         &self,
         request: Request<GetReportRequest>,
-    ) -> Result<Response<interface::AttestationReport>, Status> {
+    ) -> Result<Response<interface::AttestationBundle>, Status> {
         let user_data = request.into_inner().user_data;
         debug!(
             "gRPC GetReport request with user_data size {}",

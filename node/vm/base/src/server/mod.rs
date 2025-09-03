@@ -80,7 +80,7 @@ pub trait VmRuntime: Send + Sync + 'static {
     async fn get_attestation(
         &self,
         user_data: Vec<u8>,
-    ) -> Result<nxcc_interface::types::AttestationReport, VmError>;
+    ) -> Result<nxcc_interface::types::AttestationBundle, VmError>;
 
     /// Retrieves the status of a specific worker instance.
     async fn get_worker_status(
@@ -281,12 +281,12 @@ impl<T: VmRuntime> Vm for VmServiceGrpc<T> {
         );
 
         match self.runtime.get_attestation(req.user_data).await {
-            Ok(report) => {
-                debug!("Successfully retrieved attestation report");
-                let proto_report: nxcc_interface::proto::interface::AttestationReport =
-                    report.into();
+            Ok(bundle) => {
+                debug!("Successfully retrieved attestation bundle");
+                let proto_bundle: nxcc_interface::proto::interface::AttestationBundle =
+                    bundle.into();
                 Ok(Response::new(GetAttestationResponse {
-                    report: Some(proto_report),
+                    bundle: Some(proto_bundle),
                 }))
             }
             Err(e) => {

@@ -36,7 +36,8 @@ async fn test_get_secrets_unauthorized_node() {
     let enclave_pk_bytes = secrets_service
         .get_report(vec![])
         .unwrap()
-        .ephemeral_public_key;
+        .user_data_binding
+        .extract_ephemeral_key();
     let enclave_pk =
         x25519_dalek::PublicKey::from(<[u8; 32]>::try_from(enclave_pk_bytes.as_slice()).unwrap());
     let secrets_to_send = vec![(secret_id.clone(), secret_data.clone(), 0, 1)];
@@ -140,7 +141,10 @@ async fn test_get_secrets_invalid_requester_report() {
         .attestation
         .as_mut()
         .unwrap()
-        .ephemeral_public_key = vec![0; 31]; // Invalid key length
+        .user_data_binding
+        .as_mut()
+        .unwrap()
+        .original_data = vec![0; 31]; // Invalid data that will cause ephemeral key extraction to fail
 
     let get_secrets_req = Request::new(ProtoGetSecretsRequest {
         requests: vec![SecretRequest {

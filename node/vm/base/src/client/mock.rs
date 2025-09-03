@@ -8,7 +8,7 @@ use nxcc_interface::{
         Header as ProtoHeader, HttpRequest as ProtoHttpRequest, HttpResponse as ProtoHttpResponse,
         TrustedConfig, UntrustedConfig, WorkerStatus,
     },
-    types::AttestationReport,
+    types::AttestationBundle,
 };
 use tonic::Status;
 use tracing::{debug, info, warn};
@@ -45,7 +45,7 @@ pub enum MockAttestationBehavior {
     /// Return a standard attestation report
     Standard,
     /// Return a custom attestation report
-    Custom(AttestationReport),
+    Custom(AttestationBundle),
     /// Return an error with the specified message
     Error(String),
 }
@@ -489,7 +489,12 @@ impl VmClient for MockVmServiceClient {
     async fn get_attestation(
         &mut self,
         user_data: Vec<u8>,
-    ) -> Result<AttestationReport, ClientError> {
+    ) -> Result<AttestationBundle, ClientError> {
+        use nxcc_interface::{
+            gateway::BlockInfo,
+            types::{RawAttestation, UserDataBinding},
+        };
+
         self.check_failure()?;
 
         debug!("MockVmServiceClient: Getting attestation report");
@@ -497,17 +502,51 @@ impl VmClient for MockVmServiceClient {
         match &*self.attestation_behavior.lock().unwrap() {
             MockAttestationBehavior::Standard => {
                 // Create a standardized attestation for testing
-                Ok(AttestationReport {
-                    user_data,
-                    ephemeral_public_key: vec![1, 2, 3, 4, 5],
-                    measurement: vec![0u8; 32],
-                    block_hashes: vec![vec![10, 11, 12], vec![13, 14, 15]],
+                let ephemeral_key = vec![1, 2, 3, 4, 5];
+                let mut data = ephemeral_key.clone();
+                data.extend_from_slice(&user_data);
+
+                Ok(AttestationBundle {
+                    raw_attestation: RawAttestation {
+                        platform_type: "test".to_string(),
+                        evidence: vec![0u8; 32],
+                        certificates: None,
+                    },
+                    user_data_binding: UserDataBinding {
+                        original_data: data.clone(),
+                        embedded_hash: data,
+                        was_hashed: false,
+                        ephemeral_key_len: ephemeral_key.len(),
+                    },
+                    block_hashes: vec![
+                        BlockInfo {
+                            block_hash: vec![10, 11, 12],
+                            block_number: 0,
+                            timestamp: 0,
+                            chain_id: 1,
+                            chain_name: "test".to_string(),
+                            fetched_at: 0,
+                        },
+                        BlockInfo {
+                            block_hash: vec![13, 14, 15],
+                            block_number: 1,
+                            timestamp: 0,
+                            chain_id: 1,
+                            chain_name: "test".to_string(),
+                            fetched_at: 0,
+                        },
+                    ],
                 })
             }
             MockAttestationBehavior::Custom(report) => {
                 // Return the custom report but replace user_data with the input
                 let mut custom_report = report.clone();
-                custom_report.user_data = user_data;
+                // Update user data in the binding
+                let ephemeral_key = custom_report.user_data_binding.extract_ephemeral_key();
+                let mut data = ephemeral_key.clone();
+                data.extend_from_slice(&user_data);
+                custom_report.user_data_binding.original_data = data.clone();
+                custom_report.user_data_binding.embedded_hash = data;
                 Ok(custom_report)
             }
             MockAttestationBehavior::Error(message) => {

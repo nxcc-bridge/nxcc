@@ -44,7 +44,13 @@ async fn test_enclave_workflow() {
     let putter_kx = KeyExchangeKeyPair::generate();
     let enclave_report_for_putter = secrets_service.get_report(vec![]).unwrap(); // Putter gets enclave's pubkey
     let enclave_pk_for_putter = x25519_dalek::PublicKey::from(
-        <[u8; 32]>::try_from(enclave_report_for_putter.ephemeral_public_key.as_slice()).unwrap(),
+        <[u8; 32]>::try_from(
+            enclave_report_for_putter
+                .user_data_binding
+                .extract_ephemeral_key()
+                .as_slice(),
+        )
+        .unwrap(),
     );
     let secrets_to_send = vec![(secret_id.clone(), secret_data.clone(), secret_expiry, 1)];
     let secrets_box_for_put =

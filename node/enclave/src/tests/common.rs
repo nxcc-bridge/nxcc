@@ -7,7 +7,7 @@ use alloy_primitives::{Address, U256};
 use nxcc_interface::{
     proto::enclave::{runner_server::Runner as _, secrets_server::Secrets as _},
     types::{
-        AttestationReport, ChainIdentifier, ConsumerInfo, DSSE_WORKER_BUNDLE_PAYLOAD_TYPE,
+        AttestationBundle, ChainIdentifier, ConsumerInfo, DSSE_WORKER_BUNDLE_PAYLOAD_TYPE,
         DsseEnvelope, DsseSignatureEntry, EnvReport, PolicyExecutionReport, PolicyExecutionRequest,
         SecretId, SecretsBox, WorkerBundle, WorkerBundlePayload, WorkerBundlePointer,
         WorkerManifest,
@@ -46,11 +46,34 @@ pub fn test_env_report_for_client(
     user_data_for_attestation: Vec<u8>, // For PutSecrets, this is the binding hash. For GetSecrets, can be anything.
 ) -> EnvReport {
     EnvReport {
-        attestation: AttestationReport {
-            measurement: vec![0u8; 32], // Consistent measurement for tests
-            ephemeral_public_key: client_kx_public_key.to_vec(),
-            block_hashes: vec![vec![1, 2]], // Consistent block_hashes
-            user_data: user_data_for_attestation,
+        attestation: AttestationBundle {
+            raw_attestation: nxcc_interface::types::RawAttestation {
+                platform_type: "test".to_string(),
+                evidence: vec![0u8; 32], // Consistent measurement for tests
+                certificates: None,
+            },
+            user_data_binding: nxcc_interface::types::UserDataBinding {
+                original_data: {
+                    let mut data = client_kx_public_key.to_vec();
+                    data.extend_from_slice(&user_data_for_attestation);
+                    data
+                },
+                embedded_hash: {
+                    let mut data = client_kx_public_key.to_vec();
+                    data.extend_from_slice(&user_data_for_attestation);
+                    data
+                },
+                was_hashed: false,
+                ephemeral_key_len: client_kx_public_key.len(),
+            },
+            block_hashes: vec![nxcc_interface::gateway::BlockInfo {
+                chain_id: 1,
+                chain_name: "test".to_string(),
+                block_number: 1,
+                block_hash: vec![1, 2],
+                timestamp: 0,
+                fetched_at: 0,
+            }],
         },
         operator_signature: None, // Consistent operator_signature
     }

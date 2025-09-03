@@ -17,18 +17,42 @@ fn test_secret_id(id: u64) -> SecretId {
     }
 }
 
-// Helper to create a specific AttestationReport
-fn test_attestation_report(ephemeral_pk: Vec<u8>, user_data: Vec<u8>) -> AttestationReport {
-    AttestationReport {
-        measurement: vec![0u8; 32], // Consistent measurement for tests
-        ephemeral_public_key: ephemeral_pk,
-        block_hashes: vec![vec![1, 2, 3]], // Consistent block_hashes
-        user_data,
+// Helper to create a specific AttestationBundle
+fn test_attestation_bundle(ephemeral_pk: Vec<u8>, user_data: Vec<u8>) -> AttestationBundle {
+    use nxcc_interface::types::{RawAttestation, UserDataBinding};
+    AttestationBundle {
+        raw_attestation: RawAttestation {
+            platform_type: "test".to_string(),
+            evidence: vec![0u8; 32], // Consistent measurement for tests
+            certificates: None,
+        },
+        user_data_binding: UserDataBinding {
+            original_data: {
+                let mut data = ephemeral_pk.clone();
+                data.extend_from_slice(&user_data);
+                data
+            },
+            embedded_hash: {
+                let mut data = ephemeral_pk;
+                data.extend_from_slice(&user_data);
+                data
+            },
+            was_hashed: false,
+            ephemeral_key_len: 32, // Standard ephemeral key length
+        },
+        block_hashes: vec![nxcc_interface::gateway::BlockInfo {
+            chain_id: 1,
+            chain_name: "test".to_string(),
+            block_number: 1,
+            block_hash: vec![1, 2, 3],
+            timestamp: 0,
+            fetched_at: 0,
+        }],
     }
 }
 
-// Helper to create an EnvReport with a specific AttestationReport
-fn test_env_report(attestation: AttestationReport) -> EnvReport {
+// Helper to create an EnvReport with a specific AttestationBundle
+fn test_env_report(attestation: AttestationBundle) -> EnvReport {
     EnvReport {
         attestation,
         operator_signature: None, // No operator signature for test
@@ -74,10 +98,10 @@ async fn test_get_report() {
     let user_data = vec![1, 2, 3, 4];
     let report = secrets.get_report(user_data.clone()).unwrap();
     assert_eq!(
-        report.ephemeral_public_key,
+        report.user_data_binding.extract_ephemeral_key(),
         secrets.ephemeral_kx_keypair.public_key().as_bytes()
     );
-    assert_eq!(report.user_data, user_data);
+    assert_eq!(report.user_data_binding.original_data, user_data);
     assert!(!report.block_hashes.is_empty());
 }
 
@@ -89,13 +113,13 @@ fn test_store_and_check_authorization() {
 
     let client_kx = KeyExchangeKeyPair::generate();
     let client_attestation =
-        test_attestation_report(client_kx.public_key().as_bytes().to_vec(), vec![0u8; 32]);
+        test_attestation_bundle(client_kx.public_key().as_bytes().to_vec(), vec![0u8; 32]);
     let client_env_report = test_env_report(client_attestation.clone());
 
     // Initially, no authorization exists (check with a *different* attestation to be sure)
     let other_kx = KeyExchangeKeyPair::generate();
     let other_attestation =
-        test_attestation_report(other_kx.public_key().as_bytes().to_vec(), vec![1u8; 32]);
+        test_attestation_bundle(other_kx.public_key().as_bytes().to_vec(), vec![1u8; 32]);
     assert!(!secrets.check_authorization(&other_attestation, &secret_id, &ConsumerInfo::default()));
 
     // Create and store a policy report with a positive decision, using client_env_report
@@ -129,7 +153,7 @@ fn test_store_authorization_with_negative_decision() {
 
     let client_kx = KeyExchangeKeyPair::generate();
     let client_attestation =
-        test_attestation_report(client_kx.public_key().as_bytes().to_vec(), vec![0u8; 32]);
+        test_attestation_bundle(client_kx.public_key().as_bytes().to_vec(), vec![0u8; 32]);
     let client_env_report = test_env_report(client_attestation.clone());
 
     let policy_request = PolicyExecutionRequest {
@@ -156,7 +180,7 @@ fn test_authorization_expiry() {
 
     let client_kx = KeyExchangeKeyPair::generate();
     let client_attestation =
-        test_attestation_report(client_kx.public_key().as_bytes().to_vec(), vec![0u8; 32]);
+        test_attestation_bundle(client_kx.public_key().as_bytes().to_vec(), vec![0u8; 32]);
     let client_env_report = test_env_report(client_attestation.clone());
 
     let policy_request = PolicyExecutionRequest {
@@ -207,7 +231,7 @@ fn test_put_secrets_attestation_binding_success() {
     let binding_hash = secrets_box.calculate_binding_hash();
 
     // EnvReport that the sender will present (ephemeral_public_key = sender_kx, user_data = binding_hash)
-    let presented_attestation = test_attestation_report(
+    let presented_attestation = test_attestation_bundle(
         sender_kx.public_key().as_bytes().to_vec(),
         binding_hash.to_vec(),
     );
@@ -269,7 +293,7 @@ fn test_put_secrets_attestation_binding_hash_mismatch() {
     incorrect_hash_vec[0] ^= 0xff; // Tamper
 
     // Attestation that sender *would* present if hash was correct (for auth store)
-    let auth_attestation = test_attestation_report(
+    let auth_attestation = test_attestation_bundle(
         sender_kx.public_key().as_bytes().to_vec(),
         correct_binding_hash.to_vec(),
     );
@@ -284,7 +308,7 @@ fn test_put_secrets_attestation_binding_hash_mismatch() {
     secrets.store_authorization(test_policy_report(auth_request, true));
 
     // EnvReport with the *incorrect* hash
-    let presented_attestation_bad_hash = test_attestation_report(
+    let presented_attestation_bad_hash = test_attestation_bundle(
         sender_kx.public_key().as_bytes().to_vec(),
         incorrect_hash_vec,
     );
@@ -324,7 +348,7 @@ fn test_put_secrets_existing_is_canonical() {
     )
     .unwrap();
     let binding_hash1 = secrets_box1.calculate_binding_hash();
-    let env_report1_attestation = test_attestation_report(
+    let env_report1_attestation = test_attestation_bundle(
         sender_kx.public_key().as_bytes().to_vec(),
         binding_hash1.to_vec(),
     );
@@ -374,7 +398,7 @@ fn test_put_secrets_existing_is_canonical() {
     // then a *new* authorization for env_report2 would be needed.
     // Let's assume authorization is granted for the second attempt as well, to focus on the canonical check.
 
-    let env_report2_attestation = test_attestation_report(
+    let env_report2_attestation = test_attestation_bundle(
         sender_kx.public_key().as_bytes().to_vec(),
         binding_hash2.to_vec(),
     );
@@ -422,7 +446,7 @@ fn test_put_secrets_unauthorized_with_attestation() {
     .unwrap();
     let binding_hash = secrets_box.calculate_binding_hash();
 
-    let presented_attestation = test_attestation_report(
+    let presented_attestation = test_attestation_bundle(
         sender_kx.public_key().as_bytes().to_vec(),
         binding_hash.to_vec(),
     );
@@ -468,7 +492,7 @@ fn test_put_secrets_expired() {
     .unwrap();
     let binding_hash = secrets_box.calculate_binding_hash();
 
-    let presented_attestation = test_attestation_report(
+    let presented_attestation = test_attestation_bundle(
         sender_kx.public_key().as_bytes().to_vec(),
         binding_hash.to_vec(),
     );
@@ -515,7 +539,7 @@ fn test_put_secrets_older_ignored() {
     )
     .unwrap();
     let bh1 = box1.calculate_binding_hash();
-    let env1 = test_env_report(test_attestation_report(
+    let env1 = test_env_report(test_attestation_bundle(
         sender_kx.public_key().as_bytes().to_vec(),
         bh1.to_vec(),
     ));
@@ -542,7 +566,7 @@ fn test_put_secrets_older_ignored() {
         &secrets_to_send2,
     )
     .unwrap();
-    let env2 = test_env_report(test_attestation_report(
+    let env2 = test_env_report(test_attestation_bundle(
         sender_kx.public_key().as_bytes().to_vec(),
         box2.calculate_binding_hash().to_vec(),
     ));
@@ -594,7 +618,7 @@ fn test_put_secrets_multiple_bundles() {
     )
     .unwrap();
     let binding_hash1 = secrets_box1.calculate_binding_hash();
-    let attestation1 = test_attestation_report(
+    let attestation1 = test_attestation_bundle(
         sender_kx1.public_key().as_bytes().to_vec(),
         binding_hash1.to_vec(),
     );
@@ -623,7 +647,7 @@ fn test_put_secrets_multiple_bundles() {
     )
     .unwrap();
     let binding_hash2 = secrets_box2.calculate_binding_hash();
-    let attestation2 = test_attestation_report(
+    let attestation2 = test_attestation_bundle(
         sender_kx2.public_key().as_bytes().to_vec(),
         binding_hash2.to_vec(),
     );
@@ -688,7 +712,7 @@ fn test_get_secrets_authorization_check() {
     let requester_kx = KeyExchangeKeyPair::generate();
     // For GetSecrets, user_data in attestation isn't a binding hash, can be anything or empty.
     let requester_attestation =
-        test_attestation_report(requester_kx.public_key().as_bytes().to_vec(), vec![0u8; 32]);
+        test_attestation_bundle(requester_kx.public_key().as_bytes().to_vec(), vec![0u8; 32]);
     let requester_env_report = test_env_report(requester_attestation.clone());
 
     let consumer_for_auth_req = ConsumerInfo::default();

@@ -24,7 +24,7 @@ use nxcc_interface::{
         Header as ProtoHeader, HttpRequest as ProtoHttpRequest, HttpResponse as ProtoHttpResponse,
         StreamWorkerLogsResponse, TrustedConfig, UntrustedConfig, WorkerStatus,
     },
-    types::{AttestationReport, EventPayload},
+    types::{AttestationBundle, EventPayload},
 };
 use nxcc_vm_base::{
     logging::{LogEntry, VmmLogManager},
@@ -630,7 +630,7 @@ impl VmRuntime for WorkerdVmm {
     }
 
     #[instrument(level = "info", skip(self, _user_data), err)]
-    async fn get_attestation(&self, _user_data: Vec<u8>) -> Result<AttestationReport, VmError> {
+    async fn get_attestation(&self, _user_data: Vec<u8>) -> Result<AttestationBundle, VmError> {
         Err(WorkerdVmError::AttestationNotSupported.into())
     }
 

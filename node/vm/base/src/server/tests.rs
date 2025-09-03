@@ -91,15 +91,30 @@ impl VmRuntime for MockVmRuntime {
     async fn get_attestation(
         &self,
         user_data: Vec<u8>,
-    ) -> Result<nxcc_interface::types::AttestationReport, VmError> {
+    ) -> Result<nxcc_interface::types::AttestationBundle, VmError> {
+        use nxcc_interface::types::{RawAttestation, UserDataBinding};
+
         if self.force_attestation_error.load(Ordering::SeqCst) {
             return Err(VmError::new("Forced attestation error"));
         }
-        Ok(nxcc_interface::types::AttestationReport {
-            measurement: vec![0u8; 32],
-            ephemeral_public_key: vec![],
+
+        let ephemeral_key = vec![];
+        let mut data = ephemeral_key.clone();
+        data.extend_from_slice(&user_data);
+
+        Ok(nxcc_interface::types::AttestationBundle {
+            raw_attestation: RawAttestation {
+                platform_type: "test".to_string(),
+                evidence: vec![0u8; 32],
+                certificates: None,
+            },
+            user_data_binding: UserDataBinding {
+                original_data: data.clone(),
+                embedded_hash: data,
+                was_hashed: false,
+                ephemeral_key_len: ephemeral_key.len(),
+            },
             block_hashes: vec![],
-            user_data,
         })
     }
 
@@ -268,8 +283,14 @@ async fn test_vm_service_grpc_stop_invoke_attestation() {
         user_data: vec![7, 8],
     });
     let response = service.get_attestation(request).await.unwrap().into_inner();
-    assert!(response.report.is_some());
-    assert_eq!(response.report.unwrap().user_data, vec![7, 8]);
+    assert!(response.bundle.is_some());
+    let bundle = response.bundle.unwrap();
+    let user_data_binding = bundle.user_data_binding.unwrap();
+    let ephemeral_key_len = user_data_binding.ephemeral_key_len as usize;
+    assert_eq!(
+        user_data_binding.original_data[ephemeral_key_len..],
+        vec![7, 8]
+    );
 }
 
 #[tokio::test]

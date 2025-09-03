@@ -8,9 +8,10 @@ use std::{
 };
 
 use chrono::Utc;
-use nxcc_attestation::{AttestationBundle, AttestationService, RawAttestation, UserDataBinding};
+use nxcc_attestation::AttestationService;
 use nxcc_interface::types::{
-    AttestationReport, ConsumerInfo, EnvReport, PolicyExecutionReport, SecretId, SecretsBox,
+    AttestationBundle, ConsumerInfo, EnvReport, PolicyExecutionReport, RawAttestation, SecretId,
+    SecretsBox, UserDataBinding,
 };
 use once_cell::sync::Lazy;
 use sha2::{Digest, Sha256};
@@ -33,7 +34,7 @@ struct StoredSecret {
 }
 
 /// Unique identifier for an authorization grant.
-/// Derived from a SHA256 hash of AttestationReport fields and SecretId fields.
+/// Derived from a SHA256 hash of AttestationBundle fields and SecretId fields.
 #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct AuthorizationId([u8; 32]);
 
@@ -49,64 +50,25 @@ impl std::fmt::Debug for AuthorizationId {
     }
 }
 
-/// Creates a unique ID for an authorization request based on the attestation report and secret ID.
+/// Creates a unique ID for an authorization request based on the attestation bundle and secret ID.
 fn calculate_authorization_id(
-    attestation_report: &AttestationReport,
+    attestation_bundle: &AttestationBundle,
     secret_id: &SecretId,
     consumer_info: &ConsumerInfo,
 ) -> AuthorizationId {
     let mut hasher = Sha256::new();
     ciborium::into_writer(secret_id, &mut hasher).unwrap();
-    ciborium::into_writer(attestation_report, &mut hasher).unwrap();
+    ciborium::into_writer(attestation_bundle, &mut hasher).unwrap();
     ciborium::into_writer(consumer_info, &mut hasher).unwrap();
     AuthorizationId(<[u8; 32]>::from(hasher.finalize()))
 }
 
-/// Verifies a TEE attestation report using the platform attestation service.
-/// This now uses the comprehensive attestation system with multi-provider verification.
-fn verify_attestation(report: &AttestationReport) -> Result<Vec<u8>, String> {
+/// Verifies a TEE attestation bundle using the platform attestation service.
+fn verify_attestation(bundle: &AttestationBundle) -> Result<Vec<u8>, String> {
     use crate::attestation::get_platform_attestation_manager;
 
     // Try to use the platform attestation manager if initialized
     if let Some(manager) = std::panic::catch_unwind(|| get_platform_attestation_manager()).ok() {
-        // Convert AttestationReport back to AttestationBundle for verification
-        let raw_attestation = RawAttestation {
-            platform_type: "tdx".to_string(), // Auto-detect or store in report
-            evidence: report.measurement.clone(),
-            certificates: None,
-        };
-
-        // Reconstruct user data binding from report
-        let user_data_binding = UserDataBinding {
-            original_data: report.user_data.clone(),
-            embedded_hash: report.user_data.clone(),
-            was_hashed: false,
-            ephemeral_key_len: 32, // Standard key length
-        };
-
-        // Reconstruct block info from block hashes
-        let block_hashes = report
-            .block_hashes
-            .iter()
-            .enumerate()
-            .map(|(i, hash)| {
-                nxcc_attestation::BlockInfo {
-                    chain_id: (i + 1) as u64, // Simple mapping, should be stored properly
-                    chain_name: format!("Chain {}", i + 1),
-                    block_number: 0, // Would need to be stored in report
-                    block_hash: hash.clone(),
-                    timestamp: 0, // Would need to be stored in report
-                    fetched_at: 0,
-                }
-            })
-            .collect();
-
-        let bundle = AttestationBundle {
-            raw_attestation,
-            user_data_binding,
-            block_hashes,
-        };
-
         // Verify using the attestation service
         match futures::executor::block_on(async {
             manager
@@ -137,12 +99,12 @@ fn verify_attestation(report: &AttestationReport) -> Result<Vec<u8>, String> {
             }
             Err(e) => {
                 warn!(
-                    "Attestation verification failed: {}, falling back to report.user_data",
+                    "Attestation verification failed: {}, falling back to bundle user data",
                     e
                 );
                 // For integration tests with simulated attestations, fall back gracefully
                 // This ensures the secret sharing flow continues to work
-                Ok(report.user_data.clone())
+                Ok(bundle.user_data_binding.extract_user_data())
             }
         }
     } else {
@@ -152,16 +114,17 @@ fn verify_attestation(report: &AttestationReport) -> Result<Vec<u8>, String> {
         );
 
         // Fallback to basic validation for development/testing
-        if report.ephemeral_public_key.len() != 32 {
+        let ephemeral_key = bundle.user_data_binding.extract_ephemeral_key();
+        if ephemeral_key.len() != 32 {
             return Err("Invalid ephemeral public key length in attestation".to_string());
         }
 
         debug!(
-            "Placeholder: Attestation verification using fallback for report with key: {}, \
+            "Placeholder: Attestation verification using fallback for bundle with key: {}, \
              returning user_data",
-            hex::encode(&report.ephemeral_public_key)
+            hex::encode(&ephemeral_key)
         );
-        Ok(report.user_data.clone())
+        Ok(bundle.user_data_binding.extract_user_data())
     }
 }
 
@@ -201,7 +164,7 @@ impl Secrets {
     /// Returns an attestation report binding the ephemeral public key and user data.
     /// The ephemeral key is generated lazily on first call and reused subsequently.
     /// The caller is responsible for putting the correct hash into user_data before calling this.
-    pub fn get_report(&self, user_data: Vec<u8>) -> Result<AttestationReport, String> {
+    pub fn get_report(&self, user_data: Vec<u8>) -> Result<AttestationBundle, String> {
         let public_key = self.ephemeral_kx_keypair.public_key();
         debug!(
             "Secrets::get_report using ephemeral_key: {} for user_data: {} bytes",
@@ -213,8 +176,8 @@ impl Secrets {
         let report = generate_attestation(public_key, user_data);
         debug!(
             "Generated attestation report with ephemeral PK: {} and user_data size: {}",
-            hex::encode(report.ephemeral_public_key.as_slice()),
-            report.user_data.len()
+            hex::encode(report.user_data_binding.extract_ephemeral_key()),
+            report.user_data_binding.original_data.len()
         );
         Ok(report)
     }
@@ -496,15 +459,15 @@ impl Secrets {
             };
         debug!("Requester attestation verified");
         // Extract requester's KX public key *after* verifying attestation
-        let requester_kx_pk_bytes: [u8; 32] = requester_env_report
+        let ephemeral_key = requester_env_report
             .attestation
-            .ephemeral_public_key
-            .as_slice()
-            .try_into()
-            .map_err(|_| {
+            .user_data_binding
+            .extract_ephemeral_key();
+        let requester_kx_pk_bytes: [u8; 32] =
+            ephemeral_key.as_slice().try_into().map_err(|_| {
                 format!(
                     "Invalid ephemeral public key length in verified requester attestation: {}",
-                    requester_env_report.attestation.ephemeral_public_key.len()
+                    ephemeral_key.len()
                 )
             })?;
         let requester_kx_pk = PublicKey::from(requester_kx_pk_bytes);
@@ -527,7 +490,15 @@ impl Secrets {
                          (attestation measurement: {:?})",
                         secret_id,
                         consumer_info.bundle_hash,
-                        requester_env_report.attestation.measurement // Log part of attestation
+                        hex::encode(
+                            &requester_env_report.attestation.raw_attestation.evidence[..32.min(
+                                requester_env_report
+                                    .attestation
+                                    .raw_attestation
+                                    .evidence
+                                    .len()
+                            )]
+                        ) // Log part of attestation
                     );
                     continue; // Skip this secret
                 }
@@ -626,7 +597,10 @@ impl Secrets {
                 "Storing authorization grant {} for attestation measurement {:?} / secret {:?} / \
                  consumer bundle_hash {:?} with expiry {}",
                 auth_id,
-                attestation_report_for_auth.measurement,
+                hex::encode(
+                    &attestation_report_for_auth.raw_attestation.evidence
+                        [..32.min(attestation_report_for_auth.raw_attestation.evidence.len())]
+                ), // Log measurement hash
                 secret_id,
                 consumer_info_for_auth.bundle_hash,
                 expiry_time
@@ -639,11 +613,11 @@ impl Secrets {
     /// Used internally by PutSecrets and GetSecrets.
     pub(crate) fn check_authorization(
         &self,
-        attestation_report: &AttestationReport,
+        attestation_bundle: &AttestationBundle,
         secret_id: &SecretId,
         consumer_info: &ConsumerInfo,
     ) -> bool {
-        let auth_id = calculate_authorization_id(attestation_report, secret_id, consumer_info);
+        let auth_id = calculate_authorization_id(attestation_bundle, secret_id, consumer_info);
         let auth_map = self.authorizations.read().unwrap();
 
         match auth_map.get(&auth_id) {
@@ -655,7 +629,10 @@ impl Secrets {
                         "Authorization {} found for attestation measurement {:?} / secret {:?} / \
                          consumer bundle_hash {:?}, but expired at {} (current: {}).",
                         auth_id,
-                        attestation_report.measurement,
+                        hex::encode(
+                            &attestation_bundle.raw_attestation.evidence
+                                [..32.min(attestation_bundle.raw_attestation.evidence.len())]
+                        ), // Log measurement hash
                         secret_id,
                         consumer_info.bundle_hash,
                         expiry,
@@ -667,7 +644,10 @@ impl Secrets {
                         "Authorization {} found and valid for attestation measurement {:?} / \
                          secret {:?} / consumer bundle_hash {:?}",
                         auth_id,
-                        attestation_report.measurement,
+                        hex::encode(
+                            &attestation_bundle.raw_attestation.evidence
+                                [..32.min(attestation_bundle.raw_attestation.evidence.len())]
+                        ), // Log measurement hash
                         secret_id,
                         consumer_info.bundle_hash
                     );
@@ -678,7 +658,13 @@ impl Secrets {
                 debug!(
                     "No authorization {} found for attestation measurement {:?} / secret {:?} / \
                      consumer bundle_hash {:?}",
-                    auth_id, attestation_report.measurement, secret_id, consumer_info.bundle_hash
+                    auth_id,
+                    hex::encode(
+                        &attestation_bundle.raw_attestation.evidence
+                            [..32.min(attestation_bundle.raw_attestation.evidence.len())]
+                    ),
+                    secret_id,
+                    consumer_info.bundle_hash
                 );
                 false
             }

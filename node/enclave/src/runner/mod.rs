@@ -13,7 +13,7 @@ use nxcc_interface::{
         InvokeWorkerRequest as ProtoInvokeWorkerRequest, TrustedConfig, UntrustedConfig,
     },
     types::{
-        AttestationReport, ConsumerInfo, EventPayload, InterfaceConfirmationMethod, InterfaceJwk,
+        AttestationBundle, ConsumerInfo, EventPayload, InterfaceConfirmationMethod, InterfaceJwk,
         InterfaceMeasurement, PolicyExecutionContextForWorker, PolicyExecutionReport,
         PolicyExecutionRequest, StandardizedAttestationClaims, VmAddress, Web3Log, WorkerBundle,
         WorkerManifest,
@@ -642,11 +642,13 @@ impl RunnerService {
             .iter()
             .map(|context| {
                 // Extract user-provided data from the full attestation
-                // The user_data field in AttestationReport contains mixed system + user data
-                // For now, we pass the full user_data field but policy workers should
-                // receive only the user-provided portion. This can be refined based on
-                // how user data is structured in practice.
-                let user_provided_data = context.env_report.attestation.user_data.clone();
+                // The user_data_binding contains the user data that was bound to the attestation
+                // We extract the user portion (excluding ephemeral keys and system data)
+                let user_provided_data = context
+                    .env_report
+                    .attestation
+                    .user_data_binding
+                    .extract_user_data();
                 context.for_policy_worker(user_provided_data)
             })
             .collect();
@@ -721,57 +723,15 @@ impl RunnerService {
     /// Helper method to verify attestation and extract standardized claims
     async fn verify_attestation_and_extract_claims(
         &self,
-        report: &AttestationReport,
+        bundle: &AttestationBundle,
         manager: &crate::attestation::PlatformAttestationManager,
     ) -> Result<StandardizedAttestationClaims, String> {
-        use nxcc_attestation::{AttestationBundle, RawAttestation, UserDataBinding};
         use nxcc_interface::types::StandardizedAttestationClaims;
-
-        // Convert AttestationReport to AttestationBundle for verification
-        let raw_attestation = RawAttestation {
-            platform_type: "tdx".to_string(), // Auto-detect or extract from report
-            evidence: report.measurement.clone(),
-            certificates: None,
-        };
-
-        // Reconstruct user data binding from report
-        let user_data_binding = UserDataBinding {
-            original_data: report.user_data.clone(),
-            embedded_hash: report.user_data.clone(),
-            was_hashed: false,
-            ephemeral_key_len: 32, // Standard key length
-        };
-
-        // Extract ephemeral key before moving user_data_binding
-        let ephemeral_public_key = user_data_binding.extract_ephemeral_key();
-
-        // Reconstruct block info from block hashes
-        let block_hashes = report
-            .block_hashes
-            .iter()
-            .enumerate()
-            .map(|(i, hash)| {
-                nxcc_attestation::BlockInfo {
-                    chain_id: (i + 1) as u64, // Simple mapping
-                    chain_name: format!("Chain {}", i + 1),
-                    block_number: 0, // Would need to be stored in report for full reconstruction
-                    block_hash: hash.clone(),
-                    timestamp: 0, // Would need to be stored in report
-                    fetched_at: 0,
-                }
-            })
-            .collect();
-
-        let bundle = AttestationBundle {
-            raw_attestation,
-            user_data_binding,
-            block_hashes,
-        };
 
         // Verify using the attestation service
         match manager
             .attestation_service()
-            .verify_attestation(&bundle)
+            .verify_attestation(bundle)
             .await
         {
             Ok(claims) => {

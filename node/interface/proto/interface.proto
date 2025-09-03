@@ -6,11 +6,32 @@ import "google/protobuf/empty.proto";
 
 // Common types shared across daemon/enclave.
 
-message AttestationReport {
-  bytes ephemeral_public_key = 1;
-  bytes measurement = 2;
-  repeated bytes block_hashes = 3;
-  bytes user_data = 4;
+message RawAttestation {
+  string platform_type = 1;
+  bytes evidence = 2;
+  repeated bytes certificates = 3;
+}
+
+message UserDataBinding {
+  bytes original_data = 1;
+  bytes embedded_hash = 2;
+  bool was_hashed = 3;
+  uint32 ephemeral_key_len = 4;
+}
+
+message BlockInfo {
+  uint64 chain_id = 1;
+  string chain_name = 2;
+  uint64 block_number = 3;
+  bytes block_hash = 4;
+  uint64 timestamp = 5;
+  uint64 fetched_at = 6;
+}
+
+message AttestationBundle {
+  RawAttestation raw_attestation = 1;
+  UserDataBinding user_data_binding = 2;
+  repeated BlockInfo block_hashes = 3;
 }
 
 message OperatorSignature {
@@ -49,7 +70,7 @@ message SecretRequest {
 }
 
 message EnvReport {
-  AttestationReport attestation = 1;
+  AttestationBundle attestation = 1;
   OperatorSignature operator_signature = 2;  // Changed from bytes to structured OperatorSignature
 }
 

@@ -4,8 +4,8 @@ use nxcc_attestation::tdx::hardware::TdxInterface;
 use nxcc_interface::{
     proto::vm::WorkerStatus,
     types::{
-        AttestationReport, ConsumerInfo, EnvReport, PolicyExecutionContextForWorker,
-        PolicyExecutionRequest,
+        AttestationBundle, ConsumerInfo, EnvReport, PolicyExecutionContextForWorker,
+        PolicyExecutionRequest, RawAttestation, UserDataBinding,
     },
 };
 use nxcc_vm_base::client::mock::MockExecutionBehavior;
@@ -395,7 +395,8 @@ async fn test_execute_policy_vm_detached_consistency_issue() {
 #[tokio::test]
 async fn test_execute_policy_with_attestation_claims() {
     use nxcc_interface::types::{
-        AttestationReport, EnvReport, InterfaceMeasurement, StandardizedAttestationClaims,
+        AttestationBundle, EnvReport, InterfaceMeasurement, RawAttestation,
+        StandardizedAttestationClaims, UserDataBinding,
     };
 
     let (secrets, runner_service, mock_client) = setup();
@@ -404,21 +405,54 @@ async fn test_execute_policy_with_attestation_claims() {
     let node_id = "node-attestation-1";
     let secret_id = test_secret_id(901);
 
-    // Create a realistic attestation report with proper TDX quote structure
-    let attestation_report = AttestationReport {
-        ephemeral_public_key: vec![0x01; 32], // Mock ephemeral key
-        measurement: {
-            // Create a realistic TDX quote structure for testing
-            use nxcc_attestation::tdx::hardware::TdxSimulator;
-            let simulator = TdxSimulator::new();
-            simulator.generate_quote(&[0x42; 32]).unwrap()
+    // Create a realistic attestation bundle with proper TDX quote structure
+    let attestation_bundle = AttestationBundle {
+        raw_attestation: RawAttestation {
+            platform_type: "tdx".to_string(),
+            evidence: {
+                // Create a realistic TDX quote structure for testing
+                use nxcc_attestation::tdx::hardware::TdxSimulator;
+                let simulator = TdxSimulator::new();
+                simulator.generate_quote(&[0x42; 32]).unwrap()
+            },
+            certificates: None,
         },
-        block_hashes: vec![vec![0xAB; 32], vec![0xCD; 32]], // Mock block hashes
-        user_data: vec![0x42; 32],                          // User data that was bound to the quote
+        user_data_binding: UserDataBinding {
+            original_data: {
+                let mut data = vec![0x01; 32]; // ephemeral key
+                data.extend_from_slice(&vec![0x42; 32]); // user data
+                data
+            },
+            embedded_hash: {
+                let mut data = vec![0x01; 32]; // ephemeral key
+                data.extend_from_slice(&vec![0x42; 32]); // user data
+                data
+            },
+            was_hashed: false,
+            ephemeral_key_len: 32,
+        },
+        block_hashes: vec![
+            nxcc_interface::gateway::BlockInfo {
+                chain_id: 1,
+                chain_name: "test1".to_string(),
+                block_number: 1,
+                block_hash: vec![0xAB; 32],
+                timestamp: 0,
+                fetched_at: 0,
+            },
+            nxcc_interface::gateway::BlockInfo {
+                chain_id: 2,
+                chain_name: "test2".to_string(),
+                block_number: 2,
+                block_hash: vec![0xCD; 32],
+                timestamp: 0,
+                fetched_at: 0,
+            },
+        ],
     };
 
     let env_report = EnvReport {
-        attestation: attestation_report,
+        attestation: attestation_bundle,
         operator_signature: None, // Not needed for this test
     };
 
@@ -509,12 +543,35 @@ async fn test_execute_policy_bad_quote_no_claims() {
     let node_id = "node-bad-quote-1";
     let secret_id = test_secret_id(902);
 
-    // Create an attestation report with invalid quote data
-    let bad_attestation = AttestationReport {
-        ephemeral_public_key: vec![0x01; 32],
-        measurement: vec![0xFF; 10], // Too short to be a valid TDX quote
-        block_hashes: vec![vec![0xAB; 32]],
-        user_data: vec![0x42; 32],
+    // Create an attestation bundle with invalid quote data
+    let bad_attestation = AttestationBundle {
+        raw_attestation: RawAttestation {
+            platform_type: "tdx".to_string(),
+            evidence: vec![0xFF; 10], // Too short to be a valid TDX quote
+            certificates: None,
+        },
+        user_data_binding: UserDataBinding {
+            original_data: {
+                let mut data = vec![0x01; 32]; // ephemeral key
+                data.extend_from_slice(&vec![0x42; 32]); // user data
+                data
+            },
+            embedded_hash: {
+                let mut data = vec![0x01; 32]; // ephemeral key
+                data.extend_from_slice(&vec![0x42; 32]); // user data
+                data
+            },
+            was_hashed: false,
+            ephemeral_key_len: 32,
+        },
+        block_hashes: vec![nxcc_interface::gateway::BlockInfo {
+            chain_id: 1,
+            chain_name: "test".to_string(),
+            block_number: 1,
+            block_hash: vec![0xAB; 32],
+            timestamp: 0,
+            fetched_at: 0,
+        }],
     };
 
     let env_report = EnvReport {
@@ -597,15 +654,38 @@ async fn test_execute_policy_verification_before_execution() {
     let secret_id = test_secret_id(903);
 
     // Create a context with a good quote that should verify successfully
-    let good_attestation = AttestationReport {
-        ephemeral_public_key: vec![0x01; 32],
-        measurement: {
-            use nxcc_attestation::tdx::hardware::TdxSimulator;
-            let simulator = TdxSimulator::new();
-            simulator.generate_quote(&[0x42; 32]).unwrap()
+    let good_attestation = AttestationBundle {
+        raw_attestation: RawAttestation {
+            platform_type: "tdx".to_string(),
+            evidence: {
+                use nxcc_attestation::tdx::hardware::TdxSimulator;
+                let simulator = TdxSimulator::new();
+                simulator.generate_quote(&[0x42; 32]).unwrap()
+            },
+            certificates: None,
         },
-        block_hashes: vec![vec![0xAB; 32]],
-        user_data: vec![0x42; 32],
+        user_data_binding: UserDataBinding {
+            original_data: {
+                let mut data = vec![0x01; 32]; // ephemeral key
+                data.extend_from_slice(&vec![0x42; 32]); // user data
+                data
+            },
+            embedded_hash: {
+                let mut data = vec![0x01; 32]; // ephemeral key
+                data.extend_from_slice(&vec![0x42; 32]); // user data
+                data
+            },
+            was_hashed: false,
+            ephemeral_key_len: 32,
+        },
+        block_hashes: vec![nxcc_interface::gateway::BlockInfo {
+            chain_id: 1,
+            chain_name: "test".to_string(),
+            block_number: 1,
+            block_hash: vec![0xAB; 32],
+            timestamp: 0,
+            fetched_at: 0,
+        }],
     };
 
     let env_report = EnvReport {

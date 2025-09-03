@@ -4,7 +4,7 @@ use aes_gcm_siv::{
     AeadCore as _, Aes256GcmSiv,
     aead::{Aead, KeyInit, OsRng, generic_array::GenericArray},
 };
-use nxcc_interface::types::{AttestationReport, ChainIdentifier, SecretId, SecretsBox};
+use nxcc_interface::types::{AttestationBundle, ChainIdentifier, SecretId, SecretsBox};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use x25519_dalek::{PublicKey, SharedSecret, StaticSecret};
@@ -223,9 +223,9 @@ pub fn decrypt_secrets_box(
     Ok(secrets)
 }
 
-/// Generates an attestation report using the platform attestation manager.
+/// Generates an attestation bundle using the platform attestation manager.
 /// Falls back to dummy attestation if the manager is not available.
-pub fn generate_attestation(ephemeral_kx_pk: &PublicKey, user_data: Vec<u8>) -> AttestationReport {
+pub fn generate_attestation(ephemeral_kx_pk: &PublicKey, user_data: Vec<u8>) -> AttestationBundle {
     use crate::attestation::get_platform_attestation_manager;
 
     tracing::debug!(
@@ -245,17 +245,7 @@ pub fn generate_attestation(ephemeral_kx_pk: &PublicKey, user_data: Vec<u8>) -> 
                     "Successfully generated platform attestation with {} block hashes",
                     bundle.block_hashes.len()
                 );
-                // Convert AttestationBundle to AttestationReport for backward compatibility
-                return AttestationReport {
-                    ephemeral_public_key: ephemeral_kx_pk.as_bytes().to_vec(),
-                    measurement: bundle.raw_attestation.evidence, // Store raw evidence
-                    block_hashes: bundle
-                        .block_hashes
-                        .iter()
-                        .map(|b| b.block_hash.clone())
-                        .collect(),
-                    user_data,
-                };
+                return bundle;
             }
             Err(e) => {
                 tracing::warn!(
@@ -270,11 +260,26 @@ pub fn generate_attestation(ephemeral_kx_pk: &PublicKey, user_data: Vec<u8>) -> 
 
     // Fallback to dummy attestation
     tracing::debug!("Using dummy attestation fallback");
-    AttestationReport {
-        ephemeral_public_key: ephemeral_kx_pk.as_bytes().to_vec(),
-        measurement: vec![0u8; 32],                       // Placeholder
-        block_hashes: vec![b"dummy_block_hash".to_vec()], // Placeholder
-        user_data,
+    use nxcc_interface::types::{RawAttestation, UserDataBinding};
+    AttestationBundle {
+        raw_attestation: RawAttestation {
+            platform_type: "dummy".to_string(),
+            evidence: vec![0u8; 32], // Placeholder
+            certificates: None,
+        },
+        user_data_binding: UserDataBinding::new_with_ephemeral_key(
+            ephemeral_kx_pk.as_bytes().to_vec(),
+            user_data,
+            64, // Dummy platform constraint
+        ),
+        block_hashes: vec![nxcc_interface::gateway::BlockInfo {
+            chain_id: 0,
+            chain_name: "dummy".to_string(),
+            block_number: 0,
+            block_hash: b"dummy_block_hash".to_vec(),
+            timestamp: 0,
+            fetched_at: 0,
+        }],
     }
 }
 

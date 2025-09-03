@@ -3,7 +3,7 @@ use std::sync::Arc;
 use nxcc_interface::{
     proto::vm::WorkerStatus,
     types::{
-        AttestationReport, ChainIdentifier, ConsumerInfo, DSSE_WORKER_BUNDLE_PAYLOAD_TYPE,
+        AttestationBundle, ChainIdentifier, ConsumerInfo, DSSE_WORKER_BUNDLE_PAYLOAD_TYPE,
         DsseEnvelope, DsseSignatureEntry, EnvReport, PolicyExecutionRequest, SecretId,
         WorkerBundle, WorkerBundlePayload, WorkerBundlePointer, WorkerManifest,
     },
@@ -35,11 +35,44 @@ pub fn test_policy_request(secret_ids: Vec<SecretId>) -> PolicyExecutionRequest 
             signature: vec![2; 64],
         },
         env_report: EnvReport {
-            attestation: AttestationReport {
-                measurement: vec![0u8; 32],
-                ephemeral_public_key: vec![3; 32], // Needs to be 32 bytes for Secrets mock
-                block_hashes: vec![vec![4, 5], vec![6, 7]],
-                user_data: vec![8, 9],
+            attestation: AttestationBundle {
+                raw_attestation: nxcc_interface::types::RawAttestation {
+                    platform_type: "test".to_string(),
+                    evidence: vec![0u8; 32],
+                    certificates: None,
+                },
+                user_data_binding: nxcc_interface::types::UserDataBinding {
+                    original_data: {
+                        let mut data = vec![3; 32]; // ephemeral key
+                        data.extend_from_slice(&vec![8, 9]); // user data
+                        data
+                    },
+                    embedded_hash: {
+                        let mut data = vec![3; 32]; // ephemeral key
+                        data.extend_from_slice(&vec![8, 9]); // user data
+                        data
+                    },
+                    was_hashed: false,
+                    ephemeral_key_len: 32,
+                },
+                block_hashes: vec![
+                    nxcc_interface::gateway::BlockInfo {
+                        chain_id: 1,
+                        chain_name: "test1".to_string(),
+                        block_number: 1,
+                        block_hash: vec![4, 5],
+                        timestamp: 0,
+                        fetched_at: 0,
+                    },
+                    nxcc_interface::gateway::BlockInfo {
+                        chain_id: 2,
+                        chain_name: "test2".to_string(),
+                        block_number: 2,
+                        block_hash: vec![6, 7],
+                        timestamp: 0,
+                        fetched_at: 0,
+                    },
+                ],
             },
             operator_signature: None,
         },

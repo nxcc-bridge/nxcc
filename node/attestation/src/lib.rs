@@ -19,6 +19,8 @@ mod integration_tests;
 pub use error::AttestationError;
 // Re-export gateway types from interface crate
 pub use nxcc_interface::gateway::{BlockInfo, GatewayConfig, GatewayProvider};
+// Re-export attestation types from interface crate
+pub use nxcc_interface::types::{AttestationBundle, RawAttestation, UserDataBinding};
 pub use types::*;
 
 /// Platform-specific attestation provider
@@ -132,8 +134,11 @@ impl AttestationService {
         // Use the first provider for generation
         let provider = &providers[0];
         let max_size = provider.max_user_data_size();
-        let user_data_binding =
-            UserDataBinding::new_with_ephemeral_key(ephemeral_key, &combined_user_data, max_size);
+        let user_data_binding = UserDataBinding::new_with_ephemeral_key(
+            ephemeral_key.to_vec(),
+            combined_user_data,
+            max_size,
+        );
 
         // Generate raw attestation
         let raw_attestation = provider.generate_attestation(&user_data_binding).await?;
