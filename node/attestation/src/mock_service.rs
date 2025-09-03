@@ -214,6 +214,10 @@ impl AttestationProvider for MockTdxProvider {
         "tdx"
     }
 
+    fn is_available(&self) -> bool {
+        true
+    }
+
     fn max_user_data_size(&self) -> usize {
         64 // TDX report data size
     }
@@ -367,6 +371,97 @@ impl MockAttestationService {
     /// Update provider configuration
     pub async fn update_config(&mut self, config_json: &str) -> Result<()> {
         self.provider.update_config(config_json).await
+    }
+}
+
+/// Test provider for non-TDX specific tests
+#[cfg(test)]
+pub struct TestProvider;
+
+#[cfg(test)]
+#[async_trait]
+impl AttestationProvider for TestProvider {
+    fn platform_type(&self) -> &str {
+        "test"
+    }
+
+    fn is_available(&self) -> bool {
+        true
+    }
+
+    fn max_user_data_size(&self) -> usize {
+        64
+    }
+
+    async fn update_config(&mut self, _config_json: &str) -> Result<()> {
+        Ok(())
+    }
+
+    async fn generate_attestation(&self, userdata_hash: &[u8]) -> Result<RawAttestation> {
+        let mut evidence = b"test-evidence-".to_vec();
+        evidence.extend_from_slice(userdata_hash);
+        Ok(RawAttestation {
+            platform_type: "test".to_string(),
+            evidence,
+            certificates: None,
+        })
+    }
+
+    async fn verify_attestation(&self, bundle: &AttestationBundle) -> Result<VerificationResult> {
+        if bundle.raw_attestation.platform_type != "test" {
+            return Ok(VerificationResult::Unsupported);
+        }
+
+        let received_userdata_hash = user_data_binding::hash_userdata(&bundle.detached_userdata);
+        let expected_prefix = b"test-evidence-";
+        if !bundle.raw_attestation.evidence.starts_with(expected_prefix) {
+            return Ok(VerificationResult::Failed(
+                "Invalid evidence prefix".to_string(),
+            ));
+        }
+        let evidence_hash = &bundle.raw_attestation.evidence[expected_prefix.len()..];
+
+        if evidence_hash != received_userdata_hash {
+            return Ok(VerificationResult::Failed(
+                "Userdata hash mismatch".to_string(),
+            ));
+        }
+
+        let claims = StandardizedClaims {
+            iat: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            eat_nonce: Some(received_userdata_hash.to_vec()),
+            ueid: Some(vec![0xDE; 32]),
+            oemid: Some("test-platform".to_string()),
+            hwmodel: Some("test-hw".to_string()),
+            hwversion: Some("1.0".to_string()),
+            dbgstat: 0,
+            measurements: vec![Measurement {
+                val: vec![0xAD; 32],
+                alg: "sha-256".to_string(),
+                measurement_type: Some("application".to_string()),
+                vendor: Some("test".to_string()),
+                version: None,
+            }],
+            eat_profile: "urn:nxcc:profile:test-v1".to_string(),
+            sueids: None,
+            oemboot: None,
+            swname: None,
+            swversion: None,
+            manifests: None,
+            measres: None,
+            submods: None,
+            cnf: None,
+            intuse: None,
+            uptime: None,
+            bootcount: None,
+            bootseed: None,
+            dloas: None,
+        };
+
+        Ok(VerificationResult::Verified(Box::new(claims)))
     }
 }
 

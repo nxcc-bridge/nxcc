@@ -23,6 +23,10 @@ impl AttestationProvider for TestAttestationProvider {
         64
     }
 
+    fn is_available(&self) -> bool {
+        true
+    }
+
     async fn update_config(&mut self, _config_json: &str) -> Result<()> {
         Ok(())
     }

@@ -10,7 +10,7 @@ mod tests {
 
     use crate::{
         freshness::{FreshnessConfig, FreshnessEmbedder, FreshnessService},
-        mock_service::{MockAttestationService, MockTdxConfig},
+        mock_service::{MockAttestationService, MockTdxConfig, MockTdxProvider},
         providers::tdx_qvl::TdxQvlProvider,
         tdx::{
             hardware::{TdxHardware, TdxInterface, TdxSimulator, TdxSimulatorConfig},
@@ -364,21 +364,16 @@ mod tests {
         let gateway_provider = Arc::new(MockGatewayProvider);
         let mut service = AttestationService::new(gateway_provider);
 
-        // Register multiple providers with test interfaces
-        let tdx_interface1 = create_tdx_interface_for_test();
-        let tdx_interface2 = create_tdx_interface_for_test();
-        service.register_provider(
-            "tdx".to_string(),
-            Box::new(TdxQvlProvider::new_with_interface(tdx_interface1)),
-        );
-        service.register_provider(
-            "tdx".to_string(),
-            Box::new(TdxQvlProvider::new_with_interface(tdx_interface2)),
-        );
+        // Register multiple mock providers for the 'tdx' platform
+        service.register_provider("tdx".to_string(), Box::new(MockTdxProvider::new()));
+        service.register_provider("tdx".to_string(), Box::new(MockTdxProvider::new()));
 
-        // Generate attestation
+        // Generate attestation using the 'tdx' platform
         let ephemeral_key = vec![0x42; 32];
-        let bundle = service.generate_attestation(&ephemeral_key).await.unwrap();
+        let bundle = service
+            .generate_attestation_for_platform(&ephemeral_key, "tdx")
+            .await
+            .unwrap();
 
         assert_eq!(bundle.raw_attestation.platform_type, "tdx");
 
@@ -389,12 +384,54 @@ mod tests {
 
         // First 32 bytes should contain our userdata hash
         assert_eq!(&claims.report_data[..32], userdata_hash.as_slice());
-        // Remaining bytes should be zero (reserved for future use)
-        assert_eq!(&claims.report_data[32..], &[0u8; 32][..]);
 
-        // Verify attestation should work with fallback
+        // Verify attestation should work
         let claims = service.verify_attestation(&bundle).await.unwrap();
         assert!(!claims.measurements.is_empty()); // Ensure measurements are present
+        assert_eq!(claims.oemid, Some("mock-intel-tdx".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_attestation_service_with_test_provider() {
+        use crate::mock_service::TestProvider;
+        let gateway_provider = Arc::new(MockGatewayProvider);
+        let mut service = AttestationService::new(gateway_provider);
+
+        service.register_provider("test".to_string(), Box::new(TestProvider));
+
+        let ephemeral_key = vec![0xAB; 32];
+        let bundle = service
+            .generate_attestation_for_platform(&ephemeral_key, "test")
+            .await
+            .unwrap();
+
+        assert_eq!(bundle.raw_attestation.platform_type, "test");
+
+        let claims = service.verify_attestation(&bundle).await.unwrap();
+        assert_eq!(claims.oemid, Some("test-platform".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_attestation_service_auto_detection() {
+        use crate::{mock_service::TestProvider, providers::TdxQvlProvider};
+
+        let gateway_provider = Arc::new(MockGatewayProvider);
+        let mut service = AttestationService::new(gateway_provider);
+
+        // Register both providers. TDX has higher priority.
+        service.register_provider("tdx".to_string(), Box::new(TdxQvlProvider::new()));
+        service.register_provider("test".to_string(), Box::new(TestProvider));
+
+        let ephemeral_key = vec![0xCC; 32];
+        let bundle = service.generate_attestation(&ephemeral_key).await.unwrap();
+
+        // Check if the correct provider was chosen based on hardware availability.
+        let tdx_available = TdxHardware::new().is_hardware_available();
+        if tdx_available {
+            assert_eq!(bundle.raw_attestation.platform_type, "tdx");
+        } else {
+            assert_eq!(bundle.raw_attestation.platform_type, "test");
+        }
     }
 
     #[tokio::test]

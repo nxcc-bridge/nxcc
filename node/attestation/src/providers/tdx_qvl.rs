@@ -3,8 +3,8 @@ use async_trait::async_trait;
 
 use crate::{
     tdx::{
-        hardware::{TdxHardware, TdxInterface, TdxSimulator},
-        TdxAttestationClaims, TdxQuote,
+        hardware::{TdxHardware, TdxInterface},
+        TdxAttestationClaims,
     },
     types::Measurement,
     user_data_binding, AttestationBundle, AttestationProvider, RawAttestation, StandardizedClaims,
@@ -24,35 +24,8 @@ impl Default for TdxQvlProvider {
 
 impl TdxQvlProvider {
     pub fn new() -> Self {
-        // Runtime mode selection based on environment variable
-        let require_hardware = std::env::var("TDX_TESTS_REQUIRE_HARDWARE")
-            .map(|v| v == "true" || v == "1")
-            .unwrap_or(false);
-
-        let hardware = TdxHardware::new();
-
-        if require_hardware {
-            // PRODUCTION MODE: Hardware required, no simulation fallback
-            if !hardware.is_hardware_available() {
-                panic!(
-                    "FATAL: TDX hardware required (TDX_TESTS_REQUIRE_HARDWARE=true) but TDX \
-                     device not available in TdxQvlProvider"
-                );
-            }
-            Self {
-                tdx_interface: Box::new(hardware),
-            }
-        } else {
-            // DEVELOPMENT MODE: Allow simulation fallback
-            if hardware.is_hardware_available() {
-                Self {
-                    tdx_interface: Box::new(hardware),
-                }
-            } else {
-                Self {
-                    tdx_interface: Box::new(TdxSimulator::new()),
-                }
-            }
+        Self {
+            tdx_interface: Box::new(TdxHardware::new()),
         }
     }
 
@@ -61,15 +34,6 @@ impl TdxQvlProvider {
     }
 
     async fn verify_with_dcap_qvl(&self, quote: &[u8]) -> Result<TdxAttestationClaims> {
-        // Check if this is a simulator quote by trying to parse it first
-        let is_simulator_quote = self.is_simulator_quote(quote);
-
-        if is_simulator_quote {
-            // For simulator quotes, we'll do basic structural verification only
-            // since they can't be verified against real Intel infrastructure
-            return self.verify_simulator_quote(quote).await;
-        }
-
         // For real hardware quotes, use full dcap-qvl verification
         let pccs_url = std::env::var("PCCS_URL").unwrap_or_else(|_| {
             "https://api.trustedservices.intel.com/sgx/certification/v4/".to_string()
@@ -147,53 +111,6 @@ impl TdxQvlProvider {
         );
 
         Ok(quote_data)
-    }
-
-    /// Check if this is a simulator-generated quote by examining its structure
-    fn is_simulator_quote(&self, quote: &[u8]) -> bool {
-        // Look for simulator signature patterns that indicate a mock quote
-        if quote.len() < 1000 {
-            return true; // Real TDX quotes are typically larger
-        }
-
-        // Check for the mock signature pattern used by TdxSimulator
-        let mock_signature = b"MOCK_TDX_SIGNATURE_DATA";
-        if let Some(_sig_start) = quote
-            .windows(mock_signature.len())
-            .position(|window| window == mock_signature)
-        {
-            tracing::debug!("Detected simulator quote by mock signature pattern");
-            return true;
-        }
-
-        // Check if we can detect simulator interface by trying any type of downcasting
-        // This is a fallback for when the signature detection doesn't work
-        false
-    }
-
-    /// Verify a simulator quote using local parsing only
-    async fn verify_simulator_quote(&self, quote: &[u8]) -> Result<TdxAttestationClaims> {
-        // Use our existing TDX parser for basic structural verification
-        let parsed_quote = TdxQuote::parse(quote)
-            .map_err(|e| anyhow::anyhow!("Failed to parse simulator quote: {}", e))?;
-
-        // Basic structure verification
-        parsed_quote
-            .verify_structure()
-            .map_err(|e| anyhow::anyhow!("Simulator quote structure invalid: {}", e))?;
-
-        // Extract claims
-        let claims = parsed_quote.extract_claims();
-
-        tracing::info!(
-            "Successfully verified simulator TDX quote: mrtd_len={}, debug_enabled={}, \
-             user_data_len={}",
-            claims.mrtd.len(),
-            claims.debug_enabled,
-            claims.user_data.len()
-        );
-
-        Ok(claims)
     }
 
     fn extract_standardized_claims(
@@ -301,6 +218,10 @@ impl AttestationProvider for TdxQvlProvider {
         "tdx"
     }
 
+    fn is_available(&self) -> bool {
+        self.tdx_interface.is_hardware_available()
+    }
+
     fn max_user_data_size(&self) -> usize {
         64 // TDX user data limit
     }
@@ -346,49 +267,18 @@ impl AttestationProvider for TdxQvlProvider {
                 let claims = self.extract_standardized_claims(quote_data, bundle)?;
                 Ok(VerificationResult::Verified(Box::new(claims)))
             }
-            Err(e)
-                if e.to_string().contains("not available")
-                    || e.to_string().contains("unsupported")
-                    || e.to_string().contains("collateral") =>
-            {
-                // QVL verification failed, try simulator verification as fallback
-                tracing::info!(
-                    "dcap-qvl verification failed, trying simulator verification: {}",
-                    e
-                );
-                match self
-                    .verify_simulator_quote(&bundle.raw_attestation.evidence)
-                    .await
-                {
-                    Ok(quote_data) => {
-                        // Also verify userdata binding for simulator quotes.
-                        let received_userdata_hash =
-                            user_data_binding::hash_userdata(&bundle.detached_userdata);
-
-                        if quote_data.report_data.len() < 32
-                            || quote_data.report_data[..32] != received_userdata_hash
-                        {
-                            return Ok(VerificationResult::Failed(
-                                "Userdata hash mismatch".to_string(),
-                            ));
-                        }
-
-                        let claims = self.extract_standardized_claims(quote_data, bundle)?;
-                        Ok(VerificationResult::Verified(Box::new(claims)))
-                    }
-                    Err(sim_err) => {
-                        tracing::warn!(
-                            "Both dcap-qvl and simulator verification failed: dcap={}, sim={}",
-                            e,
-                            sim_err
-                        );
-                        Ok(VerificationResult::Unsupported)
-                    }
-                }
-            }
             Err(e) => {
-                // Definitive verification failure
-                Ok(VerificationResult::Failed(e.to_string()))
+                let e_str = e.to_string();
+                if e_str.contains("not available")
+                    || e_str.contains("unsupported")
+                    || e_str.contains("collateral")
+                {
+                    tracing::warn!("dcap-qvl verification unsupported: {}", e);
+                    Ok(VerificationResult::Unsupported)
+                } else {
+                    // Definitive verification failure
+                    Ok(VerificationResult::Failed(e.to_string()))
+                }
             }
         }
     }

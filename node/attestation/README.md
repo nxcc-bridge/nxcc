@@ -1,6 +1,6 @@
 # TDX Attestation
 
-This crate provides TDX attestation with runtime selection between hardware and simulation.
+This crate provides TDX attestation. For production, it requires TDX hardware. For testing, it can use either real hardware or a simulator.
 
 ## Test Environment Control
 

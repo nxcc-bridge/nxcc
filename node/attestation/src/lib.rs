@@ -29,6 +29,9 @@ pub trait AttestationProvider: Send + Sync {
     /// Platform type this provider handles
     fn platform_type(&self) -> &str;
 
+    /// Check if the provider is available on the current platform
+    fn is_available(&self) -> bool;
+
     /// Maximum user data size for this platform
     fn max_user_data_size(&self) -> usize;
 
@@ -88,9 +91,47 @@ impl AttestationService {
 
     /// Generate attestation (auto-detects platform)
     pub async fn generate_attestation(&self, ephemeral_key: &[u8]) -> Result<AttestationBundle> {
-        // TODO: Auto-detect platform type
-        let platform_type = "tdx";
+        // Define platform priority. Real TEEs should come first.
+        #[allow(unused_mut)]
+        let mut platform_priority = std::iter::once("tdx");
+        #[cfg(test)]
+        let mut platform_priority = platform_priority.chain(std::iter::once("test"));
 
+        let provider = platform_priority.find_map(|platform_type| {
+            self.providers
+                .get(platform_type)
+                .and_then(|providers| providers.iter().find(|p| p.is_available()))
+        });
+
+        if let Some(provider) = provider {
+            let freshness_proof = self.freshness_service.fetch_freshness_proof().await?;
+
+            let user_data_payload =
+                user_data_binding::UserData::new(ephemeral_key.to_vec(), freshness_proof.blocks);
+
+            let detached_userdata = user_data_payload.to_cbor()?;
+            let userdata_hash = user_data_binding::hash_userdata(&detached_userdata);
+
+            let raw_attestation = provider.generate_attestation(&userdata_hash).await?;
+
+            Ok(AttestationBundle {
+                raw_attestation,
+                detached_userdata,
+            })
+        } else {
+            Err(AttestationError::NoProvidersAvailable(
+                "No available TEE platform detected".to_string(),
+            )
+            .into())
+        }
+    }
+
+    #[cfg(test)]
+    pub async fn generate_attestation_for_platform(
+        &self,
+        ephemeral_key: &[u8],
+        platform_type: &str,
+    ) -> Result<AttestationBundle> {
         let providers = self
             .providers
             .get(platform_type)
@@ -191,14 +232,13 @@ impl AttestationService {
     pub async fn update_provider_config(
         &mut self,
         platform_type: &str,
-        _config_json: &str,
+        config_json: &str,
     ) -> Result<()> {
-        if let Some(_providers) = self.providers.get_mut(platform_type) {
+        if let Some(providers) = self.providers.get_mut(platform_type) {
             // Update all providers for this platform type
-            // Note: We can't call mutable methods on trait objects in a Vec
-            // This is a design limitation that would need to be addressed
-            // For now, we'll implement a different approach in the concrete implementation
-            tracing::warn!("Provider config update not implemented for trait objects");
+            for provider in providers.iter_mut() {
+                provider.update_config(config_json).await?;
+            }
         }
         Ok(())
     }

@@ -92,49 +92,13 @@ impl Secrets {
 
     /// Returns an attestation report binding the ephemeral public key and user data.
     /// The ephemeral key is generated lazily on first call and reused subsequently.
-    pub async fn get_report(&self) -> Result<AttestationBundle, String> {
+    pub async fn get_report(&self) -> Result<AttestationBundle, anyhow::Error> {
         let public_key = self.ephemeral_kx_keypair.public_key();
         debug!(
             "Secrets::get_report using ephemeral_key: {}",
             hex::encode(public_key.as_bytes()),
         );
-
-        match self.attestation_manager.generate_attestation().await {
-            Ok(bundle) => {
-                info!(
-                    "Successfully generated platform attestation with detached userdata size: {}",
-                    bundle.detached_userdata.len()
-                );
-                Ok(bundle)
-            }
-            Err(e) => {
-                warn!(
-                    "Failed to generate platform attestation: {}, falling back to dummy",
-                    e
-                );
-                // Fallback to dummy attestation
-                debug!("Using dummy attestation fallback");
-                use nxcc_attestation::user_data_binding;
-                use nxcc_interface::types::attestation::RawAttestation;
-
-                let user_data_payload =
-                    user_data_binding::UserData::new(public_key.as_bytes().to_vec(), vec![]);
-                let detached_userdata = user_data_payload.to_cbor().map_err(|e| e.to_string())?;
-                let userdata_hash = user_data_binding::hash_userdata(&detached_userdata);
-
-                let mut evidence = vec![0u8; 64];
-                evidence[..32].copy_from_slice(&userdata_hash);
-
-                Ok(AttestationBundle {
-                    raw_attestation: RawAttestation {
-                        platform_type: "dummy".to_string(),
-                        evidence, // Placeholder with hash
-                        certificates: None,
-                    },
-                    detached_userdata,
-                })
-            }
-        }
+        self.attestation_manager.generate_attestation().await
     }
 
     /// Verifies a TEE attestation bundle using the platform attestation service.
@@ -328,7 +292,7 @@ impl Secrets {
     pub async fn generate_secrets(
         &self,
         requests: Vec<(SecretId, ConsumerInfo)>,
-    ) -> Result<(), String> {
+    ) -> Result<(), anyhow::Error> {
         info!(
             "GenerateSecrets request for {} ID-Consumer pairs",
             requests.len()
@@ -363,7 +327,7 @@ impl Secrets {
             if secrets_map.contains_key(&secret_id) {
                 error!("Secret {:?} already exists. Cannot generate.", secret_id);
                 // Return error immediately if a duplicate is requested for generation
-                return Err(format!("Secret {:?} already exists", secret_id));
+                return Err(anyhow::anyhow!("Secret {:?} already exists", secret_id));
             }
 
             // 3. Generate secret data (e.g., 32 bytes)
@@ -397,7 +361,7 @@ impl Secrets {
         &self,
         secret_ids_with_names: Vec<(SecretId, String)>,
         worker_consumer_info: ConsumerInfo,
-    ) -> Result<HashMap<String, Vec<u8>>, String> {
+    ) -> Result<HashMap<String, Vec<u8>>, anyhow::Error> {
         let enclave_self_attestation = self.get_report().await?;
         let mut worker_secrets_map = HashMap::new();
         let secrets_map_guard = self.secrets_storage.read().unwrap();
