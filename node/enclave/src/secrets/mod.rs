@@ -10,7 +10,7 @@ use std::{
 use chrono::Utc;
 use nxcc_attestation::AttestationService;
 use nxcc_interface::types::{
-    attestation::{AttestationBundle, EnvReport, RawAttestation, UserDataBinding},
+    attestation::{AttestationBundle, EnvReport, RawAttestation},
     policy::PolicyExecutionReport,
     secrets::{ConsumerInfo, SecretId, SecretsBox},
 };
@@ -90,13 +90,9 @@ fn verify_attestation(bundle: &AttestationBundle) -> Result<Vec<u8>, String> {
                     measurement_info
                 );
 
-                // Extract the user data from the verified bundle's binding
-                let user_data = bundle.user_data_binding.extract_user_data();
-                debug!(
-                    "Extracted user data from verified attestation: {} bytes",
-                    user_data.len()
-                );
-                Ok(user_data)
+                // The entire detached payload is now considered trusted.
+                // The caller might deserialize it to get specific fields.
+                Ok(bundle.detached_userdata.clone())
             }
             Err(e) => Err(format!("Attestation verification failed: {}", e)),
         }
@@ -107,7 +103,10 @@ fn verify_attestation(bundle: &AttestationBundle) -> Result<Vec<u8>, String> {
         );
 
         // Fallback to basic validation for development/testing
-        let ephemeral_key = bundle.user_data_binding.extract_ephemeral_key();
+        use nxcc_attestation::user_data_binding;
+        let userdata = user_data_binding::UserData::from_cbor(&bundle.detached_userdata)
+            .map_err(|e| format!("Failed to parse userdata in fallback: {}", e))?;
+        let ephemeral_key = userdata.ephemeral_public_key;
         if ephemeral_key.len() != 32 {
             return Err("Invalid ephemeral public key length in attestation".to_string());
         }
@@ -117,7 +116,7 @@ fn verify_attestation(bundle: &AttestationBundle) -> Result<Vec<u8>, String> {
              returning user_data",
             hex::encode(&ephemeral_key)
         );
-        Ok(bundle.user_data_binding.extract_user_data())
+        Ok(bundle.detached_userdata.clone())
     }
 }
 
@@ -156,21 +155,18 @@ impl Secrets {
 
     /// Returns an attestation report binding the ephemeral public key and user data.
     /// The ephemeral key is generated lazily on first call and reused subsequently.
-    /// The caller is responsible for putting the correct hash into user_data before calling this.
-    pub fn get_report(&self, user_data: Vec<u8>) -> Result<AttestationBundle, String> {
+    pub async fn get_report(&self) -> Result<AttestationBundle, String> {
         let public_key = self.ephemeral_kx_keypair.public_key();
         debug!(
-            "Secrets::get_report using ephemeral_key: {} for user_data: {} bytes",
+            "Secrets::get_report using ephemeral_key: {}",
             hex::encode(public_key.as_bytes()),
-            user_data.len()
         );
-        // In a real TEE, this would involve hardware interaction.
-        // The user_data provided here should be the hash calculated by the caller.
-        let report = generate_attestation(public_key, user_data);
+        let report = generate_attestation(public_key)
+            .await
+            .map_err(|e| e.to_string())?;
         debug!(
-            "Generated attestation report with ephemeral PK: {} and user_data size: {}",
-            hex::encode(report.user_data_binding.extract_ephemeral_key()),
-            report.user_data_binding.original_data.len()
+            "Generated attestation report with detached userdata size: {}",
+            report.detached_userdata.len()
         );
         Ok(report)
     }
@@ -205,27 +201,29 @@ impl Secrets {
 
             // TODO (important!): verify that env report is bound to the attestation (node_id is used but untrusted)
 
-            // 2. Verify SecretsBox Binding using the hash from user_data
-            let expected_hash_slice = verified_user_data.as_slice();
-            if expected_hash_slice.len() != 32 {
-                error!(
-                    "Invalid hash length ({}) in attestation user_data for bundle",
-                    expected_hash_slice.len()
-                );
-                continue; // Skip this bundle entirely - no partial processing
-            }
-            let expected_hash: [u8; 32] = expected_hash_slice.try_into().unwrap(); // Safe due to length check
-            let calculated_hash = secrets_box.calculate_binding_hash();
+            // 2. Deserialize userdata to get sender's EPK
+            use nxcc_attestation::user_data_binding;
+            let sender_userdata = match user_data_binding::UserData::from_cbor(&verified_user_data)
+            {
+                Ok(ud) => ud,
+                Err(e) => {
+                    warn!("Skipping bundle: Failed to parse sender userdata: {}", e);
+                    continue;
+                }
+            };
+            let epk_from_attestation = sender_userdata.ephemeral_public_key;
 
-            if expected_hash != calculated_hash {
-                error!(
-                    "SecretsBox hash mismatch for bundle. Expected {}, calculated {}",
-                    hex::encode(expected_hash),
-                    hex::encode(calculated_hash)
+            // 3. Verify SecretsBox binding via EPK
+            if epk_from_attestation != secrets_box.sender_public_key {
+                warn!(
+                    "Skipping bundle: SecretsBox sender public key does not match key from \
+                     attestation. Attested key: {}, Box key: {}",
+                    hex::encode(&epk_from_attestation),
+                    hex::encode(&secrets_box.sender_public_key)
                 );
                 continue; // Skip this bundle entirely - no partial processing
             }
-            debug!("SecretsBox binding verified");
+            debug!("SecretsBox binding verified via EPK");
 
             // 3. Check authorization for *each* secret contained in the box.
             // This checks if *our* runner approved the *sender* (identified by their attestation report)
@@ -320,7 +318,10 @@ impl Secrets {
     }
 
     /// Generates new secrets from entropy if authorized and not already existing.
-    pub fn generate_secrets(&self, requests: Vec<(SecretId, ConsumerInfo)>) -> Result<(), String> {
+    pub async fn generate_secrets(
+        &self,
+        requests: Vec<(SecretId, ConsumerInfo)>,
+    ) -> Result<(), String> {
         info!(
             "GenerateSecrets request for {} ID-Consumer pairs",
             requests.len()
@@ -328,12 +329,12 @@ impl Secrets {
         let current_time = Utc::now().timestamp() as u64;
         let mut secrets_generated_count = 0;
 
+        // For self-generation, we need our own attestation report to check authorization.
+        // Get this before acquiring the write lock to avoid holding lock across await.
+        let self_attestation_report = self.get_report().await?;
+
         // Acquire write lock once
         let mut secrets_map = self.secrets_storage.write().unwrap();
-
-        // For self-generation, we need our own attestation report to check authorization.
-        // Use empty user_data for self-attestation in this context.
-        let self_attestation_report = self.get_report(vec![])?;
 
         for (secret_id, consumer_info) in requests {
             // 1. Check authorization for self-generation
@@ -385,12 +386,12 @@ impl Secrets {
 
     /// Retrieves secrets for a locally run worker, checking self-authorization.
     /// Returns a map of secret names (for VM env) to secret data.
-    pub fn get_secrets_for_local_worker(
+    pub async fn get_secrets_for_local_worker(
         &self,
         secret_ids_with_names: Vec<(SecretId, String)>,
         worker_consumer_info: ConsumerInfo,
     ) -> Result<HashMap<String, Vec<u8>>, String> {
-        let enclave_self_attestation = self.get_report(vec![])?;
+        let enclave_self_attestation = self.get_report().await?;
         let mut worker_secrets_map = HashMap::new();
         let secrets_map_guard = self.secrets_storage.read().unwrap();
         let current_time = Utc::now().timestamp() as u64;
@@ -429,7 +430,7 @@ impl Secrets {
     /// Retrieves secrets and packages them into an encrypted SecretsBox for the requester.
     /// Assumes the runner service has already executed policies and stored approvals via `store_authorization`.
     /// Verifies the requester's attestation before proceeding.
-    pub fn get_secrets(
+    pub async fn get_secrets(
         &self,
         requests: Vec<(SecretId, ConsumerInfo)>,
         requester_env_report: EnvReport,
@@ -442,7 +443,7 @@ impl Secrets {
 
         // 1. Verify the requester's EnvReport's attestation
         // This is crucial to ensure we are sending secrets to a trusted enclave.
-        let _verified_requester_user_data =
+        let verified_requester_detached_userdata =
             match verify_attestation(&requester_env_report.attestation) {
                 Ok(data) => data, // We don't necessarily need the user_data here, just verification success
                 Err(e) => {
@@ -450,16 +451,20 @@ impl Secrets {
                 }
             };
         debug!("Requester attestation verified");
+        use nxcc_attestation::user_data_binding;
+        let requester_userdata =
+            user_data_binding::UserData::from_cbor(&verified_requester_detached_userdata)
+                .map_err(|e| format!("Failed to parse requester userdata: {}", e))?;
+
         // Extract requester's KX public key *after* verifying attestation
-        let ephemeral_key = requester_env_report
-            .attestation
-            .user_data_binding
-            .extract_ephemeral_key();
-        let requester_kx_pk_bytes: [u8; 32] =
-            ephemeral_key.as_slice().try_into().map_err(|_| {
+        let requester_kx_pk_bytes: [u8; 32] = requester_userdata
+            .ephemeral_public_key
+            .as_slice()
+            .try_into()
+            .map_err(|_| {
                 format!(
-                    "Invalid ephemeral public key length in verified requester attestation: {}",
-                    ephemeral_key.len()
+                    "Invalid ephemeral public key length in verified requester userdata: {}",
+                    requester_userdata.ephemeral_public_key.len()
                 )
             })?;
         let requester_kx_pk = PublicKey::from(requester_kx_pk_bytes);

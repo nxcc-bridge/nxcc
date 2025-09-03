@@ -90,17 +90,27 @@ impl VmRuntime for MockVmRuntime {
 
     async fn get_attestation(
         &self,
-        user_data: Vec<u8>,
+        _user_data: Vec<u8>,
     ) -> Result<nxcc_interface::types::attestation::AttestationBundle, VmError> {
-        use nxcc_interface::types::attestation::{RawAttestation, UserDataBinding};
+        use nxcc_interface::types::attestation::RawAttestation;
 
         if self.force_attestation_error.load(Ordering::SeqCst) {
             return Err(VmError::new("Forced attestation error"));
         }
 
-        let ephemeral_key = vec![];
-        let mut data = ephemeral_key.clone();
-        data.extend_from_slice(&user_data);
+        // Create test userdata with ephemeral key and freshness info
+        let ephemeral_key = vec![1, 2, 3, 4, 5];
+        let test_userdata = nxcc_attestation::user_data_binding::UserData::new(
+            ephemeral_key,
+            vec![nxcc_attestation::BlockInfo {
+                block_hash: vec![10, 11, 12],
+                block_number: 0,
+                timestamp: 0,
+                chain_id: 1,
+                chain_name: "test".to_string(),
+                fetched_at: 0,
+            }],
+        );
 
         Ok(nxcc_interface::types::attestation::AttestationBundle {
             raw_attestation: RawAttestation {
@@ -108,13 +118,7 @@ impl VmRuntime for MockVmRuntime {
                 evidence: vec![0u8; 32],
                 certificates: None,
             },
-            user_data_binding: UserDataBinding {
-                original_data: data.clone(),
-                embedded_hash: data,
-                was_hashed: false,
-                ephemeral_key_len: ephemeral_key.len(),
-            },
-            block_hashes: vec![],
+            detached_userdata: test_userdata.to_cbor().unwrap(),
         })
     }
 
@@ -285,12 +289,12 @@ async fn test_vm_service_grpc_stop_invoke_attestation() {
     let response = service.get_attestation(request).await.unwrap().into_inner();
     assert!(response.bundle.is_some());
     let bundle = response.bundle.unwrap();
-    let user_data_binding = bundle.user_data_binding.unwrap();
-    let ephemeral_key_len = user_data_binding.ephemeral_key_len as usize;
-    assert_eq!(
-        user_data_binding.original_data[ephemeral_key_len..],
-        vec![7, 8]
-    );
+    
+    // Verify the detached userdata can be decoded
+    let userdata = nxcc_attestation::user_data_binding::UserData::from_cbor(&bundle.detached_userdata).unwrap();
+    assert_eq!(userdata.ephemeral_public_key, vec![1, 2, 3, 4, 5]);
+    assert_eq!(userdata.block_hashes.len(), 1);
+    assert_eq!(userdata.block_hashes[0].chain_id, 1);
 }
 
 #[tokio::test]

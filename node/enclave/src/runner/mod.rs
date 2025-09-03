@@ -468,10 +468,14 @@ impl RunnerService {
                 signature: dsse_signature,
             };
 
-            match self.secrets.get_secrets_for_local_worker(
-                worker_manifest.identities.clone(), // Vec<(SecretId, String)>
-                worker_consumer_info,
-            ) {
+            match self
+                .secrets
+                .get_secrets_for_local_worker(
+                    worker_manifest.identities.clone(), // Vec<(SecretId, String)>
+                    worker_consumer_info,
+                )
+                .await
+            {
                 Ok(secrets_map) => {
                     worker_secrets_for_vm = secrets_map;
                     info!(
@@ -648,13 +652,9 @@ impl RunnerService {
             .iter()
             .map(|context| {
                 // Extract user-provided data from the full attestation
-                // The user_data_binding contains the user data that was bound to the attestation
+                // The detached_userdata contains the user data that was bound to the attestation
                 // We extract the user portion (excluding ephemeral keys and system data)
-                let user_provided_data = context
-                    .env_report
-                    .attestation
-                    .user_data_binding
-                    .extract_user_data();
+                let user_provided_data = context.env_report.attestation.detached_userdata.clone();
                 context.for_policy_worker(user_provided_data)
             })
             .collect();

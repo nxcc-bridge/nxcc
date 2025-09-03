@@ -75,7 +75,7 @@ async fn test_local_worker_secret_authorization_flow() {
     // 3a. Get Enclave's own EnvReport
     let enclave_attestation_report_proto = secrets_grpc
         .get_report(Request::new(
-            nxcc_interface::proto::enclave::GetReportRequest { user_data: vec![] },
+            nxcc_interface::proto::enclave::GetReportRequest {},
         ))
         .await
         .expect("Failed to get enclave report")

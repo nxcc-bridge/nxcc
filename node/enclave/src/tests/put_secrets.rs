@@ -14,7 +14,7 @@ use crate::crypto::{KeyExchangeKeyPair, encrypt_secrets_box};
 
 #[tokio::test]
 #[tracing_test::traced_test]
-async fn test_put_secrets_mismatched_binding_hash() {
+async fn test_put_secrets_mismatched_epk() {
     let (secrets_service, runner_service, mock_vm_client, secrets_grpc, runner_grpc) =
         setup_services();
     let vm_id = "mock-vm-put-badhash";
@@ -24,25 +24,21 @@ async fn test_put_secrets_mismatched_binding_hash() {
     let secret_id = test_secret_id(2001);
     let putter_node_id = "node-putter-badhash";
     let putter_kx = KeyExchangeKeyPair::generate();
-    let enclave_pk_bytes = secrets_service
-        .get_report(vec![])
-        .unwrap()
-        .user_data_binding
-        .extract_ephemeral_key();
-    let enclave_pk =
-        x25519_dalek::PublicKey::from(<[u8; 32]>::try_from(enclave_pk_bytes.as_slice()).unwrap());
+    let enclave_report = secrets_service.get_report().await.unwrap();
+    let enclave_userdata =
+        nxcc_attestation::user_data_binding::UserData::from_cbor(&enclave_report.detached_userdata)
+            .unwrap();
+    let enclave_pk = x25519_dalek::PublicKey::from(
+        <[u8; 32]>::try_from(enclave_userdata.ephemeral_public_key.as_slice()).unwrap(),
+    );
     let secrets_to_send = vec![(secret_id.clone(), b"data".to_vec(), 0, 1)];
     let secrets_box = encrypt_secrets_box(&putter_kx, &enclave_pk, &secrets_to_send).unwrap();
 
-    let correct_binding_hash = secrets_box.calculate_binding_hash();
-    let mut incorrect_hash_vec = correct_binding_hash.to_vec();
-    incorrect_hash_vec[0] ^= 0xff; // Tamper with the hash
+    // The putter will present an attestation with a *different* ephemeral key
+    let wrong_putter_kx = KeyExchangeKeyPair::generate();
 
-    // EnvReport with the INCORRECT binding hash (this is what the putter will present)
-    let putter_env_report_bad_hash = test_env_report_for_client(
-        putter_kx.public_key().as_bytes(),
-        incorrect_hash_vec.clone(), // Use the tampered hash
-    );
+    let putter_env_report_wrong_key =
+        test_env_report_for_client(wrong_putter_kx.public_key().as_bytes());
 
     // Authorize the putter based on the EnvReport it WILL present (even if it's "bad" for binding)
     // This ensures the authorization check passes, so the binding hash check is actually reached.
@@ -50,7 +46,7 @@ async fn test_put_secrets_mismatched_binding_hash() {
         &runner_grpc,
         &mock_vm_client,
         &policy_worker_id,
-        putter_env_report_bad_hash.clone(),
+        putter_env_report_wrong_key.clone(),
         vec![secret_id.clone()],
         true,
         test_consumer_info(),
@@ -60,17 +56,17 @@ async fn test_put_secrets_mismatched_binding_hash() {
     let put_secrets_req = Request::new(ProtoPutSecretsRequest {
         secrets_bundles: vec![SecretsBundle {
             secrets_box: Some(secrets_box.into()),
-            env_report: Some(putter_env_report_bad_hash.into()),
+            env_report: Some(putter_env_report_wrong_key.into()),
             consumer_info: Some(test_consumer_info().into()),
         }],
     });
     let put_secrets_resp = secrets_grpc.put_secrets(put_secrets_req).await.unwrap();
     assert!(
         !put_secrets_resp.into_inner().success,
-        "PutSecrets should fail due to hash mismatch"
+        "PutSecrets should fail due to EPK mismatch"
     );
     assert!(!check_secret_exists(&secrets_grpc, &secret_id).await);
-    info!("Test OK: PutSecrets rejected due to mismatched binding hash");
+    info!("Test OK: PutSecrets rejected due to mismatched EPK");
 }
 
 #[tokio::test]
@@ -92,12 +88,9 @@ async fn test_put_secrets_invalid_secrets_box_structure() {
         alg: "X25519_AES-GCM-SIV".to_string(),
         contained_secret_ids: vec![secret_id.clone()],
     };
-    let binding_hash_bad_box = bad_secrets_box.calculate_binding_hash();
 
-    let putter_env_report_for_bad_box = test_env_report_for_client(
-        putter_kx.public_key().as_bytes(),
-        binding_hash_bad_box.to_vec(),
-    );
+    let putter_env_report_for_bad_box =
+        test_env_report_for_client(putter_kx.public_key().as_bytes());
 
     execute_policy_with_env_report(
         &runner_grpc,
@@ -147,12 +140,9 @@ async fn test_put_secrets_decryption_failure() {
         &secrets_to_send,
     )
     .unwrap();
-    let binding_hash_wrong_key_box = secrets_box_wrong_key.calculate_binding_hash();
 
-    let putter_env_report_for_wrong_key_box = test_env_report_for_client(
-        putter_kx.public_key().as_bytes(),
-        binding_hash_wrong_key_box.to_vec(),
-    );
+    let putter_env_report_for_wrong_key_box =
+        test_env_report_for_client(putter_kx.public_key().as_bytes());
 
     execute_policy_with_env_report(
         &runner_grpc,

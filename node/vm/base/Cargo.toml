@@ -8,6 +8,7 @@ clap = { version = "4.5.37", features = ["derive", "env"] }
 figment = { version = "0.10.19", features = ["toml", "env"] }
 futures = "0.3.31"
 hyper-util = { version = "0.1.11", features = ["tokio"] }
+nxcc-attestation = { path = "../../attestation", optional = true }
 nxcc-interface = { path = "../../interface" }
 parking_lot = "0.12.3"
 rcgen = { version = "0.14.3", features = ["x509-parser"] }
@@ -25,10 +26,11 @@ default = ["uds"]
 uds = []
 vsock = ["tokio-vsock"]
 tcp = []
-test = [] # enables mock client
+test = ["nxcc-attestation"] # enables mock client
 
 [dev-dependencies]
 http = "1.1.0"
+nxcc-attestation = { path = "../../attestation" }
 pem = "3.0.5"
 rand = "0.8.5"
 rustls = { version = "0.23", features = ["aws-lc-rs"] }

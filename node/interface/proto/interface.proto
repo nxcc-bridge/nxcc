@@ -12,13 +12,6 @@ message RawAttestation {
   repeated bytes certificates = 3;
 }
 
-message UserDataBinding {
-  bytes original_data = 1;
-  bytes embedded_hash = 2;
-  bool was_hashed = 3;
-  uint32 ephemeral_key_len = 4;
-}
-
 message BlockInfo {
   uint64 chain_id = 1;
   string chain_name = 2;
@@ -30,8 +23,9 @@ message BlockInfo {
 
 message AttestationBundle {
   RawAttestation raw_attestation = 1;
-  UserDataBinding user_data_binding = 2;
-  repeated BlockInfo block_hashes = 3;
+  // The detached user data payload that was hashed and included in the quote.
+  // This is typically a serialized structure containing an ephemeral public key and freshness information.
+  bytes detached_userdata = 2;
 }
 
 message OperatorSignature {

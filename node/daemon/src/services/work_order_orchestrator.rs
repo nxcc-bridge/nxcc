@@ -185,7 +185,7 @@ impl WorkOrderOrchestrator {
         );
         let daemon_env_report_for_self_auth = self
             .secrets_service
-            .get_own_env_report(vec![])
+            .get_own_env_report()
             .await
             .map_err(|e| match &e {
                 AppError::Io(io_err) => AppError::Service(format!(
@@ -306,20 +306,20 @@ impl WorkOrderOrchestrator {
                     missing_secret_requests.len(), // Using payload.id for logging clarity
                     work_order_hash_b64url
                 );
-                let daemon_env_report = self
-                    .secrets_service
-                    .get_own_env_report(vec![])
-                    .await
-                    .map_err(|e| match &e {
-                        AppError::Io(io_err) => AppError::Service(format!(
-                            "Failed to get daemon env report for work order {}: {}",
-                            work_order_hash_b64url, io_err
-                        )),
-                        other => AppError::Service(format!(
-                            "Failed to get daemon env report for work order {}: {}",
-                            work_order_hash_b64url, other
-                        )),
-                    })?;
+                let daemon_env_report =
+                    self.secrets_service
+                        .get_own_env_report()
+                        .await
+                        .map_err(|e| match &e {
+                            AppError::Io(io_err) => AppError::Service(format!(
+                                "Failed to get daemon env report for work order {}: {}",
+                                work_order_hash_b64url, io_err
+                            )),
+                            other => AppError::Service(format!(
+                                "Failed to get daemon env report for work order {}: {}",
+                                work_order_hash_b64url, other
+                            )),
+                        })?;
                 self.secrets_service
                     .clone() // Arc clone
                     .get_secrets(missing_secret_requests, daemon_env_report)

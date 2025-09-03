@@ -26,7 +26,7 @@ service Secrets {
 }
 
 message GetReportRequest {
-  bytes user_data = 1;
+  // No fields are needed. The enclave will bind its own userdata.
 }
 
 message PutSecretsRequest {

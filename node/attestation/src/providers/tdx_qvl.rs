@@ -7,7 +7,7 @@ use crate::{
         TdxAttestationClaims, TdxQuote,
     },
     types::Measurement,
-    AttestationBundle, AttestationProvider, RawAttestation, StandardizedClaims, UserDataBinding,
+    user_data_binding, AttestationBundle, AttestationProvider, RawAttestation, StandardizedClaims,
     VerificationResult,
 };
 
@@ -305,16 +305,11 @@ impl AttestationProvider for TdxQvlProvider {
         Ok(())
     }
 
-    async fn generate_attestation(
-        &self,
-        user_data_binding: &UserDataBinding,
-    ) -> Result<RawAttestation> {
+    async fn generate_attestation(&self, userdata_hash: &[u8]) -> Result<RawAttestation> {
         tracing::info!("Generating TDX attestation using hardware/simulator interface");
 
         // Use the unified TDX interface to generate quote
-        let quote_bytes = self
-            .tdx_interface
-            .generate_quote(&user_data_binding.embedded_hash)?;
+        let quote_bytes = self.tdx_interface.generate_quote(userdata_hash)?;
 
         Ok(RawAttestation {
             platform_type: "tdx".to_string(),
@@ -324,13 +319,26 @@ impl AttestationProvider for TdxQvlProvider {
     }
 
     async fn verify_attestation(&self, bundle: &AttestationBundle) -> Result<VerificationResult> {
-        match self
+        // First, verify the quote itself.
+        let quote_data_result = self
             .verify_with_dcap_qvl(&bundle.raw_attestation.evidence)
-            .await
-        {
-            Ok(claims) => {
-                let standardized_claims = self.extract_standardized_claims(claims, bundle)?;
-                Ok(VerificationResult::Verified(Box::new(standardized_claims)))
+            .await;
+
+        match quote_data_result {
+            Ok(quote_data) => {
+                // Second, verify the userdata binding.
+                let received_userdata_hash =
+                    user_data_binding::hash_userdata(&bundle.detached_userdata);
+
+                if quote_data.user_data.len() < 32
+                    || &quote_data.user_data[..32] != received_userdata_hash
+                {
+                    return Ok(VerificationResult::Failed(
+                        "Userdata hash mismatch".to_string(),
+                    ));
+                }
+                let claims = self.extract_standardized_claims(quote_data, bundle)?;
+                Ok(VerificationResult::Verified(Box::new(claims)))
             }
             Err(e)
                 if e.to_string().contains("not available")
@@ -346,10 +354,21 @@ impl AttestationProvider for TdxQvlProvider {
                     .verify_simulator_quote(&bundle.raw_attestation.evidence)
                     .await
                 {
-                    Ok(claims) => {
-                        let standardized_claims =
-                            self.extract_standardized_claims(claims, bundle)?;
-                        Ok(VerificationResult::Verified(Box::new(standardized_claims)))
+                    Ok(quote_data) => {
+                        // Also verify userdata binding for simulator quotes.
+                        let received_userdata_hash =
+                            user_data_binding::hash_userdata(&bundle.detached_userdata);
+
+                        if quote_data.user_data.len() < 32
+                            || &quote_data.user_data[..32] != received_userdata_hash
+                        {
+                            return Ok(VerificationResult::Failed(
+                                "Userdata hash mismatch".to_string(),
+                            ));
+                        }
+
+                        let claims = self.extract_standardized_claims(quote_data, bundle)?;
+                        Ok(VerificationResult::Verified(Box::new(claims)))
                     }
                     Err(sim_err) => {
                         tracing::warn!(

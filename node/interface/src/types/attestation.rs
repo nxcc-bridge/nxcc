@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
-use crate::{gateway, proto::interface};
+use crate::proto::interface;
 
 /// EAT-compliant measurement entry for interface
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,133 +95,6 @@ pub struct StandardizedAttestationClaims {
     pub eat_profile: String,
 }
 
-/// User data that exceeds platform limits gets hashed
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UserDataBinding {
-    /// The actual user data (may be large)
-    pub original_data: Vec<u8>,
-    /// Hash that was embedded in the attestation
-    pub embedded_hash: Vec<u8>,
-    /// Whether the data was hashed due to size constraints
-    pub was_hashed: bool,
-    /// Ephemeral public key length (used for extraction)
-    pub ephemeral_key_len: usize,
-}
-
-impl UserDataBinding {
-    /// Create binding with ephemeral key, hashing if necessary for platform constraints
-    pub fn new_with_ephemeral_key(
-        ephemeral_key: Vec<u8>,
-        user_data: Vec<u8>,
-        max_size: usize,
-    ) -> Self {
-        let mut combined_data = ephemeral_key.clone();
-        combined_data.extend_from_slice(&user_data);
-
-        if combined_data.len() <= max_size {
-            Self {
-                embedded_hash: combined_data,
-                original_data: user_data,
-                was_hashed: false,
-                ephemeral_key_len: ephemeral_key.len(),
-            }
-        } else {
-            let mut hasher = Sha256::new();
-            hasher.update(&combined_data);
-            let hash = hasher.finalize().to_vec();
-
-            Self {
-                embedded_hash: hash,
-                original_data: user_data,
-                was_hashed: true,
-                ephemeral_key_len: ephemeral_key.len(),
-            }
-        }
-    }
-
-    /// Create binding, hashing if necessary for platform constraints
-    pub fn new(data: Vec<u8>, max_size: usize) -> Self {
-        if data.len() <= max_size {
-            Self {
-                embedded_hash: data.clone(),
-                original_data: data,
-                was_hashed: false,
-                ephemeral_key_len: 0, // No ephemeral key separation when data fits
-            }
-        } else {
-            let mut hasher = Sha256::new();
-            hasher.update(&data);
-            let hash = hasher.finalize().to_vec();
-
-            Self {
-                embedded_hash: hash,
-                original_data: data,
-                was_hashed: true,
-                ephemeral_key_len: 0,
-            }
-        }
-    }
-
-    /// Verify that the embedded hash matches the original data
-    pub fn verify_binding(&self) -> bool {
-        if !self.was_hashed {
-            // Direct data comparison
-            self.embedded_hash == self.original_data
-        } else {
-            // Hash verification
-            let mut hasher = Sha256::new();
-            hasher.update(&self.original_data);
-            let computed_hash = hasher.finalize().to_vec();
-            computed_hash == self.embedded_hash
-        }
-    }
-
-    /// Extract ephemeral key from the binding
-    pub fn extract_ephemeral_key(&self) -> Vec<u8> {
-        if self.ephemeral_key_len == 0 {
-            return Vec::new();
-        }
-
-        if !self.was_hashed && self.embedded_hash.len() >= self.ephemeral_key_len {
-            // When not hashed, embedded_hash contains the combined ephemeral_key + user_data
-            self.embedded_hash[..self.ephemeral_key_len].to_vec()
-        } else {
-            // If data was hashed, we can't extract the original ephemeral key
-            Vec::new()
-        }
-    }
-
-    /// Extract user data from the binding
-    pub fn extract_user_data(&self) -> Vec<u8> {
-        if self.ephemeral_key_len == 0 {
-            return if self.was_hashed {
-                self.original_data.clone()
-            } else {
-                self.embedded_hash.clone()
-            };
-        }
-
-        if !self.was_hashed && self.embedded_hash.len() > self.ephemeral_key_len {
-            // When not hashed, embedded_hash contains ephemeral_key + user_data
-            self.embedded_hash[self.ephemeral_key_len..].to_vec()
-        } else if self.was_hashed {
-            // If data was hashed, return original user data (stored separately)
-            self.original_data.clone()
-        } else {
-            // Fallback case
-            Vec::new()
-        }
-    }
-
-    /// Verify that extracted ephemeral key and user data match the binding
-    pub fn verify_extraction(&self, ephemeral_key: &[u8], user_data: &[u8]) -> bool {
-        let expected_ephemeral = self.extract_ephemeral_key();
-        let expected_user_data = self.extract_user_data();
-
-        ephemeral_key == expected_ephemeral && user_data == expected_user_data
-    }
-}
-
 /// Platform-specific raw attestation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RawAttestation {
@@ -235,8 +107,9 @@ pub struct RawAttestation {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AttestationBundle {
     pub raw_attestation: RawAttestation,
-    pub user_data_binding: UserDataBinding,
-    pub block_hashes: Vec<gateway::BlockInfo>,
+    /// The detached user data payload that was hashed and included in the quote.
+    /// This is typically a serialized structure containing an ephemeral public key and freshness information.
+    pub detached_userdata: Vec<u8>,
 }
 
 impl From<interface::RawAttestation> for RawAttestation {
@@ -263,28 +136,6 @@ impl From<RawAttestation> for interface::RawAttestation {
     }
 }
 
-impl From<interface::UserDataBinding> for UserDataBinding {
-    fn from(p: interface::UserDataBinding) -> Self {
-        Self {
-            original_data: p.original_data,
-            embedded_hash: p.embedded_hash,
-            was_hashed: p.was_hashed,
-            ephemeral_key_len: p.ephemeral_key_len as usize,
-        }
-    }
-}
-
-impl From<UserDataBinding> for interface::UserDataBinding {
-    fn from(value: UserDataBinding) -> Self {
-        Self {
-            original_data: value.original_data,
-            embedded_hash: value.embedded_hash,
-            was_hashed: value.was_hashed,
-            ephemeral_key_len: value.ephemeral_key_len as u32,
-        }
-    }
-}
-
 impl From<interface::AttestationBundle> for AttestationBundle {
     fn from(p: interface::AttestationBundle) -> Self {
         Self {
@@ -296,27 +147,7 @@ impl From<interface::AttestationBundle> for AttestationBundle {
                     evidence: Vec::new(),
                     certificates: None,
                 }),
-            user_data_binding: p
-                .user_data_binding
-                .map(UserDataBinding::from)
-                .unwrap_or_else(|| UserDataBinding {
-                    original_data: Vec::new(),
-                    embedded_hash: Vec::new(),
-                    was_hashed: false,
-                    ephemeral_key_len: 0,
-                }),
-            block_hashes: p
-                .block_hashes
-                .into_iter()
-                .map(|b| gateway::BlockInfo {
-                    chain_id: b.chain_id,
-                    chain_name: b.chain_name,
-                    block_number: b.block_number,
-                    block_hash: b.block_hash,
-                    timestamp: b.timestamp,
-                    fetched_at: b.fetched_at,
-                })
-                .collect(),
+            detached_userdata: p.detached_userdata,
         }
     }
 }
@@ -325,19 +156,7 @@ impl From<AttestationBundle> for interface::AttestationBundle {
     fn from(value: AttestationBundle) -> Self {
         Self {
             raw_attestation: Some(value.raw_attestation.into()),
-            user_data_binding: Some(value.user_data_binding.into()),
-            block_hashes: value
-                .block_hashes
-                .into_iter()
-                .map(|b| interface::BlockInfo {
-                    chain_id: b.chain_id,
-                    chain_name: b.chain_name,
-                    block_number: b.block_number,
-                    block_hash: b.block_hash,
-                    timestamp: b.timestamp,
-                    fetched_at: b.fetched_at,
-                })
-                .collect(),
+            detached_userdata: value.detached_userdata,
         }
     }
 }
@@ -346,19 +165,7 @@ impl From<&AttestationBundle> for interface::AttestationBundle {
     fn from(value: &AttestationBundle) -> Self {
         Self {
             raw_attestation: Some(value.raw_attestation.clone().into()),
-            user_data_binding: Some(value.user_data_binding.clone().into()),
-            block_hashes: value
-                .block_hashes
-                .iter()
-                .map(|b| interface::BlockInfo {
-                    chain_id: b.chain_id,
-                    chain_name: b.chain_name.clone(),
-                    block_number: b.block_number,
-                    block_hash: b.block_hash.clone(),
-                    timestamp: b.timestamp,
-                    fetched_at: b.fetched_at,
-                })
-                .collect(),
+            detached_userdata: value.detached_userdata.clone(),
         }
     }
 }

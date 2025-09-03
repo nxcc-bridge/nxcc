@@ -132,7 +132,7 @@ impl SecretsService {
             }
         }
 
-        let self_env_report = self.get_own_env_report(vec![]).await?;
+        let self_env_report = self.get_own_env_report().await?;
 
         for secret_id in &missing_ids {
             let policy_package = match self.policy_manager.get_policy(secret_id).await {
@@ -473,10 +473,7 @@ impl SecretsService {
                     sb.contained_secret_ids.len()
                 );
                 // 3. Generate *our* EnvReport to send back with the secrets
-                match self
-                    .get_own_env_report(sb.calculate_binding_hash().to_vec())
-                    .await
-                {
+                match self.get_own_env_report().await {
                     Ok(our_env_report) => Some((sb, our_env_report)),
                     Err(e) => {
                         error!("Failed to generate own EnvReport for response: {}", e);
@@ -784,7 +781,7 @@ impl SecretsService {
             return Ok(());
         }
 
-        let self_env_report = self.get_own_env_report(vec![]).await?;
+        let self_env_report = self.get_own_env_report().await?;
 
         for (secret_id, consumer_info) in &requests_with_consumer {
             let policy_package = self.policy_manager.get_policy(secret_id).await?;
@@ -830,15 +827,11 @@ impl SecretsService {
     }
 
     /// Constructs the EnvReport for the current node.
-    pub(crate) async fn get_own_env_report(
-        &self,
-        user_data_hash: Vec<u8>,
-    ) -> Result<EnvReport, AppError> {
-        let attestation = self
-            .enclave_client
-            .get_report(user_data_hash)
-            .await
-            .map_err(|e| AppError::Service(format!("Failed to get attestation report: {}", e)))?;
+    pub(crate) async fn get_own_env_report(&self) -> Result<EnvReport, AppError> {
+        let attestation =
+            self.enclave_client.get_report().await.map_err(|e| {
+                AppError::Service(format!("Failed to get attestation report: {}", e))
+            })?;
 
         // Generate operator signature if signing key is configured
         let operator_signature =
@@ -888,12 +881,16 @@ impl SecretsService {
             .map_err(|_| "Failed to convert key bytes to array")?;
 
         // Create hash of attestation data to sign
-        let ephemeral_key = attestation.user_data_binding.extract_ephemeral_key();
-        let user_data = attestation.user_data_binding.extract_user_data();
+        // Parse the detached userdata to extract ephemeral key
+        let userdata = nxcc_attestation::user_data_binding::UserData::from_cbor(
+            &attestation.detached_userdata,
+        )
+        .map_err(|e| format!("Failed to parse detached userdata: {}", e))?;
+        let ephemeral_key = userdata.ephemeral_public_key;
         let attestation_data = [
             ephemeral_key,
             attestation.raw_attestation.evidence.clone(),
-            user_data,
+            attestation.detached_userdata.clone(),
         ]
         .concat();
 
@@ -962,28 +959,12 @@ mod tests {
         std::fs::write(&key_path, test_key).unwrap();
 
         // Create test attestation bundle
-        use nxcc_interface::types::attestation::{RawAttestation, UserDataBinding};
-        let attestation = AttestationBundle {
-            raw_attestation: RawAttestation {
-                platform_type: "test".to_string(),
-                evidence: vec![5, 6, 7, 8],
-                certificates: None,
-            },
-            user_data_binding: UserDataBinding {
-                original_data: {
-                    let mut data = vec![1, 2, 3, 4]; // ephemeral key
-                    data.extend_from_slice(&vec![9, 10, 11, 12]); // user data
-                    data
-                },
-                embedded_hash: {
-                    let mut data = vec![1, 2, 3, 4]; // ephemeral key
-                    data.extend_from_slice(&vec![9, 10, 11, 12]); // user data
-                    data
-                },
-                was_hashed: false,
-                ephemeral_key_len: 4,
-            },
-            block_hashes: vec![
+        use nxcc_interface::types::attestation::RawAttestation;
+
+        // Create test userdata with ephemeral key and freshness info
+        let test_userdata = nxcc_attestation::user_data_binding::UserData::new(
+            vec![1, 2, 3, 4], // ephemeral key (4 bytes for test)
+            vec![
                 nxcc_interface::gateway::BlockInfo {
                     chain_id: 1,
                     chain_name: "test1".to_string(),
@@ -1001,20 +982,32 @@ mod tests {
                     fetched_at: 0,
                 },
             ],
+        );
+
+        let detached_userdata = test_userdata.to_cbor().unwrap();
+        let attestation = AttestationBundle {
+            raw_attestation: RawAttestation {
+                platform_type: "test".to_string(),
+                evidence: vec![5, 6, 7, 8],
+                certificates: None,
+            },
+            detached_userdata,
         };
 
         // Test the signature creation logic directly (without the full SecretsService)
-
-        // Test the signature creation logic directly
         let key_bytes = std::fs::read(&key_path).unwrap();
         let signing_key_array: [u8; 32] = key_bytes.try_into().unwrap();
 
-        let ephemeral_key = attestation.user_data_binding.extract_ephemeral_key();
-        let user_data = attestation.user_data_binding.extract_user_data();
+        // Parse the detached userdata to extract ephemeral key
+        let userdata = nxcc_attestation::user_data_binding::UserData::from_cbor(
+            &attestation.detached_userdata,
+        )
+        .unwrap();
+        let ephemeral_key = userdata.ephemeral_public_key;
         let attestation_data = [
             ephemeral_key,
             attestation.raw_attestation.evidence.clone(),
-            user_data,
+            attestation.detached_userdata.clone(),
         ]
         .concat();
 

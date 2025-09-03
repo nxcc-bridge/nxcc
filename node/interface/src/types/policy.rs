@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use super::{
     attestation::{
         AttestationBundle, EnvReport, OperatorSignature, RawAttestation,
-        StandardizedAttestationClaims, UserDataBinding,
+        StandardizedAttestationClaims,
     },
     error::ConversionError,
     secrets::{ConsumerInfo, SecretId},
@@ -53,13 +53,7 @@ impl PolicyEnvReport {
                     evidence: self.attestation.evidence.clone(),
                     certificates: None, // Empty - system data removed
                 },
-                user_data_binding: UserDataBinding {
-                    original_data: self.attestation.user_data.clone(),
-                    embedded_hash: self.attestation.user_data.clone(),
-                    was_hashed: false,
-                    ephemeral_key_len: 0, // Empty - system data removed
-                },
-                block_hashes: Vec::new(), // Empty - system data removed
+                detached_userdata: self.attestation.user_data.clone(),
             },
             operator_signature: self.operator_signature.clone(),
         }

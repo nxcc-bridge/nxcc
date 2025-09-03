@@ -33,18 +33,16 @@ async fn test_get_secrets_unauthorized_node() {
     // 1. Put a secret
     let putter_node_id = "node-putter-for-get-test";
     let putter_kx = KeyExchangeKeyPair::generate();
-    let enclave_pk_bytes = secrets_service
-        .get_report(vec![])
-        .unwrap()
-        .user_data_binding
-        .extract_ephemeral_key();
-    let enclave_pk =
-        x25519_dalek::PublicKey::from(<[u8; 32]>::try_from(enclave_pk_bytes.as_slice()).unwrap());
+    let enclave_report = secrets_service.get_report().await.unwrap();
+    let enclave_userdata =
+        nxcc_attestation::user_data_binding::UserData::from_cbor(&enclave_report.detached_userdata)
+            .unwrap();
+    let enclave_pk = x25519_dalek::PublicKey::from(
+        <[u8; 32]>::try_from(enclave_userdata.ephemeral_public_key.as_slice()).unwrap(),
+    );
     let secrets_to_send = vec![(secret_id.clone(), secret_data.clone(), 0, 1)];
     let secrets_box_put = encrypt_secrets_box(&putter_kx, &enclave_pk, &secrets_to_send).unwrap();
-    let binding_hash_put = secrets_box_put.calculate_binding_hash();
-    let putter_env_report =
-        test_env_report_for_client(putter_kx.public_key().as_bytes(), binding_hash_put.to_vec());
+    let putter_env_report = test_env_report_for_client(putter_kx.public_key().as_bytes());
     execute_policy_with_env_report(
         &runner_grpc,
         &mock_vm_client,
@@ -69,10 +67,8 @@ async fn test_get_secrets_unauthorized_node() {
 
     // 2. Authorize the *authorized* node
     let authorized_getter_kx = KeyExchangeKeyPair::generate();
-    let authorized_getter_env_report = test_env_report_for_client(
-        authorized_getter_kx.public_key().as_bytes(),
-        vec![0u8; 32], // user_data for GetSecrets attestation can be arbitrary
-    );
+    let authorized_getter_env_report =
+        test_env_report_for_client(authorized_getter_kx.public_key().as_bytes());
     execute_policy_with_env_report(
         &runner_grpc,
         &mock_vm_client,
@@ -86,10 +82,8 @@ async fn test_get_secrets_unauthorized_node() {
 
     // 3. Attempt GetSecrets from the *unauthorized* node
     let unauthorized_getter_kx = KeyExchangeKeyPair::generate();
-    let unauthorized_getter_env_report = test_env_report_for_client(
-        unauthorized_getter_kx.public_key().as_bytes(),
-        vec![1u8; 32], // Different user_data to ensure different attestation if needed
-    );
+    let unauthorized_getter_env_report =
+        test_env_report_for_client(unauthorized_getter_kx.public_key().as_bytes());
     // DO NOT authorize this unauthorized_getter_env_report
 
     let get_req_unauth = Request::new(ProtoGetSecretsRequest {
@@ -135,16 +129,14 @@ async fn test_get_secrets_invalid_requester_report() {
     let getter_node_id = "node-getter-badreport";
 
     let mut bad_env_report_proto: nxcc_interface::proto::interface::EnvReport =
-        test_env_report_for_client(&[0; 32], vec![]).into();
+        test_env_report_for_client(&[0; 32]).into();
     // Tamper with the attestation part of the proto directly
+    let bad_userdata = vec![0; 31]; // Invalid CBOR
     bad_env_report_proto
         .attestation
         .as_mut()
         .unwrap()
-        .user_data_binding
-        .as_mut()
-        .unwrap()
-        .original_data = vec![0; 31]; // Invalid data that will cause ephemeral key extraction to fail
+        .detached_userdata = bad_userdata;
 
     let get_secrets_req = Request::new(ProtoGetSecretsRequest {
         requests: vec![SecretRequest {
@@ -159,11 +151,11 @@ async fn test_get_secrets_invalid_requester_report() {
         "GetSecrets should fail with invalid report"
     );
     let status = result.err().unwrap();
-    assert_eq!(status.code(), Code::Internal); // Secrets service maps this to Internal
+    assert_eq!(status.code(), Code::Internal);
     assert!(
         status
             .message()
-            .contains("Invalid ephemeral public key length")
+            .contains("Failed to parse requester userdata")
     );
     info!("Test OK: GetSecrets failed due to invalid requester EnvReport");
 }

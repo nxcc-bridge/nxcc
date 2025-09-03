@@ -45,38 +45,30 @@ pub fn test_policy_request(secret_ids: Vec<SecretId>) -> PolicyExecutionRequest 
                     evidence: vec![0u8; 32],
                     certificates: None,
                 },
-                user_data_binding: nxcc_interface::types::attestation::UserDataBinding {
-                    original_data: {
-                        let mut data = vec![3; 32]; // ephemeral key
-                        data.extend_from_slice(&vec![8, 9]); // user data
-                        data
-                    },
-                    embedded_hash: {
-                        let mut data = vec![3; 32]; // ephemeral key
-                        data.extend_from_slice(&vec![8, 9]); // user data
-                        data
-                    },
-                    was_hashed: false,
-                    ephemeral_key_len: 32,
+                detached_userdata: {
+                    let test_userdata = nxcc_attestation::user_data_binding::UserData::new(
+                        vec![3; 32], // ephemeral key
+                        vec![
+                            nxcc_attestation::BlockInfo {
+                                chain_id: 1,
+                                chain_name: "test1".to_string(),
+                                block_number: 1,
+                                block_hash: vec![4, 5],
+                                timestamp: 0,
+                                fetched_at: 0,
+                            },
+                            nxcc_attestation::BlockInfo {
+                                chain_id: 2,
+                                chain_name: "test2".to_string(),
+                                block_number: 2,
+                                block_hash: vec![6, 7],
+                                timestamp: 0,
+                                fetched_at: 0,
+                            },
+                        ],
+                    );
+                    test_userdata.to_cbor().unwrap()
                 },
-                block_hashes: vec![
-                    nxcc_interface::gateway::BlockInfo {
-                        chain_id: 1,
-                        chain_name: "test1".to_string(),
-                        block_number: 1,
-                        block_hash: vec![4, 5],
-                        timestamp: 0,
-                        fetched_at: 0,
-                    },
-                    nxcc_interface::gateway::BlockInfo {
-                        chain_id: 2,
-                        chain_name: "test2".to_string(),
-                        block_number: 2,
-                        block_hash: vec![6, 7],
-                        timestamp: 0,
-                        fetched_at: 0,
-                    },
-                ],
             },
             operator_signature: None,
         },

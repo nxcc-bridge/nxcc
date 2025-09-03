@@ -5,7 +5,10 @@ use std::{
 
 use alloy_primitives::{Address, U256};
 use nxcc_interface::{
-    proto::enclave::{runner_server::Runner as _, secrets_server::Secrets as _},
+    proto::{
+        enclave::{runner_server::Runner as _, secrets_server::Secrets as _},
+        interface::SecretRequest,
+    },
     types::{
         attestation::{AttestationBundle, EnvReport},
         policy::{PolicyExecutionReport, PolicyExecutionRequest},
@@ -42,12 +45,11 @@ pub fn test_consumer_info() -> ConsumerInfo {
     }
 }
 
-// Helper to create an EnvReport with a specific ephemeral public key and user_data.
-// This is crucial for ensuring consistency between policy execution context and actual operation context.
-pub fn test_env_report_for_client(
-    client_kx_public_key: &[u8],
-    user_data_for_attestation: Vec<u8>, // For PutSecrets, this is the binding hash. For GetSecrets, can be anything.
-) -> EnvReport {
+// Helper to create an EnvReport with a specific ephemeral public key.
+pub fn test_env_report_for_client(client_kx_public_key: &[u8]) -> EnvReport {
+    use nxcc_attestation::user_data_binding;
+    let userdata = user_data_binding::UserData::new(client_kx_public_key.to_vec(), vec![]);
+    let detached_userdata = userdata.to_cbor().unwrap();
     EnvReport {
         attestation: AttestationBundle {
             raw_attestation: nxcc_interface::types::attestation::RawAttestation {
@@ -55,28 +57,7 @@ pub fn test_env_report_for_client(
                 evidence: vec![0u8; 32], // Consistent measurement for tests
                 certificates: None,
             },
-            user_data_binding: nxcc_interface::types::attestation::UserDataBinding {
-                original_data: {
-                    let mut data = client_kx_public_key.to_vec();
-                    data.extend_from_slice(&user_data_for_attestation);
-                    data
-                },
-                embedded_hash: {
-                    let mut data = client_kx_public_key.to_vec();
-                    data.extend_from_slice(&user_data_for_attestation);
-                    data
-                },
-                was_hashed: false,
-                ephemeral_key_len: client_kx_public_key.len(),
-            },
-            block_hashes: vec![nxcc_interface::gateway::BlockInfo {
-                chain_id: 1,
-                chain_name: "test".to_string(),
-                block_number: 1,
-                block_hash: vec![1, 2],
-                timestamp: 0,
-                fetched_at: 0,
-            }],
+            detached_userdata,
         },
         operator_signature: None, // Consistent operator_signature
     }
@@ -287,7 +268,8 @@ pub async fn get_secret_status(
 
 pub async fn authorize_self_generation(secrets_service: &Secrets, secret_id: &SecretId) {
     let self_attestation = secrets_service
-        .get_report(vec![])
+        .get_report()
+        .await
         .expect("Failed to get self-report for auth");
     let self_env_report = EnvReport {
         attestation: self_attestation,

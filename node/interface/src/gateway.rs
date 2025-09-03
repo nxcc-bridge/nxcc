@@ -11,7 +11,7 @@ pub struct GatewayConfig {
     pub is_default: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BlockInfo {
     pub chain_id: u64,
     pub chain_name: String,

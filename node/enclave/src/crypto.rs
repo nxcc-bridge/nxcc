@@ -4,6 +4,7 @@ use aes_gcm_siv::{
     AeadCore as _, Aes256GcmSiv,
     aead::{Aead, KeyInit, OsRng, generic_array::GenericArray},
 };
+use anyhow::Result;
 use nxcc_interface::types::{
     attestation::AttestationBundle,
     secrets::{ChainIdentifier, SecretId, SecretsBox},
@@ -228,27 +229,26 @@ pub fn decrypt_secrets_box(
 
 /// Generates an attestation bundle using the platform attestation manager.
 /// Falls back to dummy attestation if the manager is not available.
-pub fn generate_attestation(ephemeral_kx_pk: &PublicKey, user_data: Vec<u8>) -> AttestationBundle {
+pub async fn generate_attestation(ephemeral_kx_pk: &PublicKey) -> Result<AttestationBundle> {
+    use nxcc_attestation::user_data_binding;
+
     use crate::attestation::get_platform_attestation_manager;
 
     tracing::debug!(
-        "generate_attestation called with ephemeral_key: {} and user_data: {} bytes",
+        "generate_attestation called with ephemeral_key: {}",
         hex::encode(ephemeral_kx_pk.as_bytes()),
-        user_data.len()
     );
 
     // Try to use the platform attestation manager if initialized
     if let Some(manager) = std::panic::catch_unwind(|| get_platform_attestation_manager()).ok() {
         tracing::debug!("Platform attestation manager available, generating bound attestation");
-        match futures::executor::block_on(async {
-            manager.generate_bound_attestation(&user_data).await
-        }) {
+        match manager.generate_attestation().await {
             Ok(bundle) => {
                 tracing::info!(
-                    "Successfully generated platform attestation with {} block hashes",
-                    bundle.block_hashes.len()
+                    "Successfully generated platform attestation with detached userdata size: {}",
+                    bundle.detached_userdata.len()
                 );
-                return bundle;
+                return Ok(bundle);
             }
             Err(e) => {
                 tracing::warn!(
@@ -263,27 +263,24 @@ pub fn generate_attestation(ephemeral_kx_pk: &PublicKey, user_data: Vec<u8>) -> 
 
     // Fallback to dummy attestation
     tracing::debug!("Using dummy attestation fallback");
-    use nxcc_interface::types::attestation::{RawAttestation, UserDataBinding};
-    AttestationBundle {
+    use nxcc_interface::types::attestation::RawAttestation;
+
+    let user_data_payload =
+        user_data_binding::UserData::new(ephemeral_kx_pk.as_bytes().to_vec(), vec![]);
+    let detached_userdata = user_data_payload.to_cbor()?;
+    let userdata_hash = user_data_binding::hash_userdata(&detached_userdata);
+
+    let mut evidence = vec![0u8; 64];
+    evidence[..32].copy_from_slice(&userdata_hash);
+
+    Ok(AttestationBundle {
         raw_attestation: RawAttestation {
             platform_type: "dummy".to_string(),
-            evidence: vec![0u8; 32], // Placeholder
+            evidence, // Placeholder with hash
             certificates: None,
         },
-        user_data_binding: UserDataBinding::new_with_ephemeral_key(
-            ephemeral_kx_pk.as_bytes().to_vec(),
-            user_data,
-            64, // Dummy platform constraint
-        ),
-        block_hashes: vec![nxcc_interface::gateway::BlockInfo {
-            chain_id: 0,
-            chain_name: "dummy".to_string(),
-            block_number: 0,
-            block_hash: b"dummy_block_hash".to_vec(),
-            timestamp: 0,
-            fetched_at: 0,
-        }],
-    }
+        detached_userdata,
+    })
 }
 
 #[cfg(test)]

@@ -51,12 +51,9 @@ impl SecretsServerTrait for SecretsGrpcService {
         &self,
         request: Request<GetReportRequest>,
     ) -> Result<Response<interface::AttestationBundle>, Status> {
-        let user_data = request.into_inner().user_data;
-        debug!(
-            "gRPC GetReport request with user_data size {}",
-            user_data.len()
-        );
-        match self.secrets.get_report(user_data) {
+        let _req = request.into_inner();
+        debug!("gRPC GetReport request");
+        match self.secrets.get_report().await {
             Ok(report) => Ok(Response::new(report.into())),
             Err(e) => {
                 error!("GetReport failed: {}", e);
@@ -134,6 +131,7 @@ impl SecretsServerTrait for SecretsGrpcService {
         match self
             .secrets
             .get_secrets(internal_requests, requester_env_report)
+            .await
         {
             Ok(secrets_box) => Ok(Response::new(GetSecretsResponse {
                 secrets_box: Some(secrets_box.into()),
@@ -203,7 +201,7 @@ impl SecretsServerTrait for SecretsGrpcService {
             .into_iter()
             .map(|sr| (sr.secret_id, sr.consumer)) // Extract parts
             .collect();
-        match self.secrets.generate_secrets(internal_requests) {
+        match self.secrets.generate_secrets(internal_requests).await {
             Ok(()) => Ok(Response::new(())),
             Err(e) => {
                 error!("GenerateSecrets failed: {}", e);

@@ -321,7 +321,7 @@ async fn env_report_handler(
     // Get the env report from the secrets service
     let env_report = state
         .secrets_service
-        .get_own_env_report(Vec::new()) // Empty user data
+        .get_own_env_report()
         .await
         .map_err(|e| ApiError::from(format!("Failed to get env report: {}", e)))?;
 

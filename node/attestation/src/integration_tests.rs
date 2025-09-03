@@ -17,8 +17,7 @@ mod tests {
             TdxQuote, TEE_TYPE_TDX,
         },
         types::*,
-        user_data_binding::EnhancedUserDataBinding,
-        *,
+        user_data_binding, *,
     };
 
     /// Create TDX interface for tests based on environment variable
@@ -267,13 +266,11 @@ mod tests {
         provider.update_config("{}").await.unwrap();
 
         // Generate attestation
-        let user_data = b"QVL provider test".to_vec();
-        let user_data_binding = UserDataBinding::new(user_data, 64);
+        let user_data_payload = user_data_binding::UserData::new(vec![0x42; 32], vec![]);
+        let detached_userdata = user_data_payload.to_cbor().unwrap();
+        let userdata_hash = user_data_binding::hash_userdata(&detached_userdata);
 
-        let attestation = provider
-            .generate_attestation(&user_data_binding)
-            .await
-            .unwrap();
+        let attestation = provider.generate_attestation(&userdata_hash).await.unwrap();
         assert_eq!(attestation.platform_type, "tdx");
         assert!(attestation.evidence.len() > 600);
 
@@ -281,8 +278,11 @@ mod tests {
         let parsed_quote = TdxQuote::parse(&attestation.evidence).unwrap();
         let claims = parsed_quote.extract_claims();
 
-        let extracted_msg = TdxQuote::extract_user_message(&claims.report_data);
-        assert!(extracted_msg.starts_with("QVL provider") || extracted_msg.contains("test"));
+        // In the new detached userdata system, report_data contains the hash of the userdata
+        // First 32 bytes should contain our userdata hash
+        assert_eq!(&claims.report_data[..32], userdata_hash.as_slice());
+        // Remaining bytes should be zero (reserved for future use)
+        assert_eq!(&claims.report_data[32..], &[0u8; 32][..]);
     }
 
     #[tokio::test]
@@ -297,20 +297,17 @@ mod tests {
         let provider = TdxQvlProvider::new_with_interface(tdx_interface);
 
         // Generate attestation
-        let user_data = b"QVL verification test".to_vec();
-        let user_data_binding = UserDataBinding::new(user_data, 64);
+        let user_data_payload = user_data_binding::UserData::new(vec![0x42; 32], vec![]);
+        let detached_userdata = user_data_payload.to_cbor().unwrap();
+        let userdata_hash = user_data_binding::hash_userdata(&detached_userdata);
 
-        let attestation = provider
-            .generate_attestation(&user_data_binding)
-            .await
-            .unwrap();
+        let attestation = provider.generate_attestation(&userdata_hash).await.unwrap();
         assert_eq!(attestation.platform_type, "tdx");
 
         // Create test bundle for verification
         let bundle = AttestationBundle {
             raw_attestation: attestation,
-            user_data_binding,
-            block_hashes: Vec::new(),
+            detached_userdata,
         };
 
         // Verify with dcap-qvl
@@ -329,57 +326,6 @@ mod tests {
             VerificationResult::Failed(reason) => {
                 eprintln!("QVL verification failed: {}", reason);
             }
-        }
-    }
-
-    #[tokio::test]
-    async fn test_enhanced_user_data_binding() {
-        let ephemeral_key = &[0x42; 32];
-        let user_data = b"Enhanced binding test";
-
-        // Create mock block hashes
-        let block_hashes = vec![BlockInfo {
-            chain_id: 1,
-            chain_name: "ethereum".to_string(),
-            block_number: 12345,
-            block_hash: vec![0xaa; 32],
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs()
-                - 100,
-            fetched_at: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-        }];
-
-        let binding = EnhancedUserDataBinding::new_with_ephemeral_and_freshness(
-            ephemeral_key,
-            user_data,
-            &block_hashes,
-            64, // TDX limit
-        );
-
-        assert!(binding.includes_ephemeral_key);
-        assert!(binding.includes_freshness);
-        assert!(binding.verify_binding());
-
-        // Test with TDX interface
-        let tdx_interface = create_tdx_interface_for_test();
-        let quote = tdx_interface
-            .generate_quote(&binding.embedded_hash)
-            .unwrap();
-
-        // Verify the quote contains our data
-        let parsed_quote = TdxQuote::parse(&quote).unwrap();
-        let claims = parsed_quote.extract_claims();
-
-        // Note: For hashed data, we can't directly extract the original message
-        if !binding.was_hashed {
-            let extracted_msg = TdxQuote::extract_user_message(&claims.report_data);
-            // First 32 bytes are ephemeral key, then user data
-            assert!(extracted_msg.len() >= 32);
         }
     }
 
@@ -430,11 +376,20 @@ mod tests {
         );
 
         // Generate attestation
-        let user_data = b"Multi-provider test".to_vec();
-        let bundle = service.generate_attestation(user_data).await.unwrap();
+        let ephemeral_key = vec![0x42; 32];
+        let bundle = service.generate_attestation(&ephemeral_key).await.unwrap();
 
         assert_eq!(bundle.raw_attestation.platform_type, "tdx");
-        assert!(bundle.user_data_binding.verify_binding());
+
+        // Manually verify binding for test
+        let userdata_hash = user_data_binding::hash_userdata(&bundle.detached_userdata);
+        let parsed_quote = TdxQuote::parse(&bundle.raw_attestation.evidence).unwrap();
+        let claims = TdxQuote::extract_claims(&parsed_quote);
+
+        // First 32 bytes should contain our userdata hash
+        assert_eq!(&claims.report_data[..32], userdata_hash.as_slice());
+        // Remaining bytes should be zero (reserved for future use)
+        assert_eq!(&claims.report_data[32..], &[0u8; 32][..]);
 
         // Verify attestation should work with fallback
         let claims = service.verify_attestation(&bundle).await.unwrap();
@@ -450,10 +405,9 @@ mod tests {
         };
 
         let mock_service = MockAttestationService::new_with_config(config);
-        let user_data = b"Mock service integration test".to_vec();
 
         // Generate mock attestation
-        let bundle = mock_service.generate_attestation(user_data).await.unwrap();
+        let bundle = mock_service.generate_attestation().await.unwrap();
         assert_eq!(bundle.raw_attestation.platform_type, "tdx");
 
         // Verify mock attestation
@@ -533,10 +487,7 @@ mod tests {
         };
 
         let failing_mock = MockAttestationService::new_with_config(failing_config);
-        let bundle = failing_mock
-            .generate_attestation(b"test".to_vec())
-            .await
-            .unwrap();
+        let bundle = failing_mock.generate_attestation().await.unwrap();
         let result = failing_mock.verify_attestation(&bundle).await;
 
         assert!(result.is_err());
@@ -679,11 +630,13 @@ mod tests {
                 .as_secs()
         );
 
-        let user_data = test_message.as_bytes().to_vec();
-        let user_data_binding = UserDataBinding::new(user_data, 64);
+        let user_data_payload =
+            user_data_binding::UserData::new(test_message.as_bytes().to_vec(), vec![]);
+        let detached_userdata = user_data_payload.to_cbor().unwrap();
+        let userdata_hash = user_data_binding::hash_userdata(&detached_userdata);
 
         let attestation = provider
-            .generate_attestation(&user_data_binding)
+            .generate_attestation(&userdata_hash)
             .await
             .expect("Failed to generate real TDX attestation");
 
@@ -694,8 +647,7 @@ mod tests {
 
         let bundle = AttestationBundle {
             raw_attestation: attestation,
-            user_data_binding,
-            block_hashes: Vec::new(),
+            detached_userdata,
         };
 
         // Verify via dcap-qvl

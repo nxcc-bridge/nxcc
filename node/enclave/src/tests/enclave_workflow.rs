@@ -42,26 +42,20 @@ async fn test_enclave_workflow() {
 
     // --- Putter's identity and secret box preparation ---
     let putter_kx = KeyExchangeKeyPair::generate();
-    let enclave_report_for_putter = secrets_service.get_report(vec![]).unwrap(); // Putter gets enclave's pubkey
+    let enclave_report_for_putter = secrets_service.get_report().await.unwrap(); // Putter gets enclave's pubkey
+    let enclave_userdata = nxcc_attestation::user_data_binding::UserData::from_cbor(
+        &enclave_report_for_putter.detached_userdata,
+    )
+    .unwrap();
     let enclave_pk_for_putter = x25519_dalek::PublicKey::from(
-        <[u8; 32]>::try_from(
-            enclave_report_for_putter
-                .user_data_binding
-                .extract_ephemeral_key()
-                .as_slice(),
-        )
-        .unwrap(),
+        <[u8; 32]>::try_from(enclave_userdata.ephemeral_public_key.as_slice()).unwrap(),
     );
     let secrets_to_send = vec![(secret_id.clone(), secret_data.clone(), secret_expiry, 1)];
     let secrets_box_for_put =
         encrypt_secrets_box(&putter_kx, &enclave_pk_for_putter, &secrets_to_send).unwrap();
-    let binding_hash_for_put = secrets_box_for_put.calculate_binding_hash();
 
     // Putter's EnvReport, which will be used for policy and for PutSecrets
-    let putter_env_report = test_env_report_for_client(
-        putter_kx.public_key().as_bytes(),
-        binding_hash_for_put.to_vec(),
-    );
+    let putter_env_report = test_env_report_for_client(putter_kx.public_key().as_bytes());
 
     // --- 3. Policy execution fails (wrong context), PutSecret rejected ---
     info!("Step 3a: Attempting policy execution (expected fail)");
@@ -133,11 +127,7 @@ async fn test_enclave_workflow() {
 
     // --- Getter's identity preparation ---
     let getter_kx = KeyExchangeKeyPair::generate();
-    // For GetSecrets, user_data in getter's attestation can be arbitrary.
-    let getter_env_report = test_env_report_for_client(
-        getter_kx.public_key().as_bytes(),
-        vec![0u8; 32], // Arbitrary user_data for getter's report
-    );
+    let getter_env_report = test_env_report_for_client(getter_kx.public_key().as_bytes());
 
     // --- 6. GetSecret fails (no auth yet for getter) ---
     info!("Step 6b: Attempting GetSecret (expected fail - no auth for getter)");

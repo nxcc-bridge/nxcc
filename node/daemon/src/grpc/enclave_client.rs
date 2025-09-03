@@ -71,9 +71,9 @@ impl EnclaveClient {
 
     // Secrets interface calls
 
-    pub async fn get_report(&self, user_data: Vec<u8>) -> Result<AttestationBundle, String> {
+    pub async fn get_report(&self) -> Result<AttestationBundle, String> {
         let mut client = self.secrets();
-        let req = GetReportRequest { user_data };
+        let req = GetReportRequest {};
         let resp = client.get_report(req).await.map_err(|e| e.to_string())?;
         Ok(AttestationBundle::from(resp.into_inner()))
     }

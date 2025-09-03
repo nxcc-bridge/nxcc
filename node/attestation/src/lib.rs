@@ -20,7 +20,7 @@ pub use error::AttestationError;
 // Re-export gateway types from interface crate
 pub use nxcc_interface::gateway::{BlockInfo, GatewayConfig, GatewayProvider};
 // Re-export attestation types from interface crate
-pub use nxcc_interface::types::attestation::{AttestationBundle, RawAttestation, UserDataBinding};
+pub use nxcc_interface::types::attestation::{AttestationBundle, RawAttestation};
 pub use types::*;
 
 /// Platform-specific attestation provider
@@ -36,12 +36,10 @@ pub trait AttestationProvider: Send + Sync {
     async fn update_config(&mut self, config_json: &str) -> Result<()>;
 
     /// Generate attestation with user data binding
-    async fn generate_attestation(
-        &self,
-        user_data_binding: &UserDataBinding,
-    ) -> Result<RawAttestation>;
+    async fn generate_attestation(&self, userdata_hash: &[u8]) -> Result<RawAttestation>;
 
     /// Verify attestation and extract claims
+    /// This method is responsible for verifying both the quote and the userdata binding.
     async fn verify_attestation(&self, bundle: &AttestationBundle) -> Result<VerificationResult>;
 }
 
@@ -75,8 +73,8 @@ impl AttestationService {
     }
 
     /// Generate attestation (auto-detects platform)
-    pub async fn generate_attestation(&self, user_data: Vec<u8>) -> Result<AttestationBundle> {
-        // Auto-detect platform type (for now, assume TDX)
+    pub async fn generate_attestation(&self, ephemeral_key: &[u8]) -> Result<AttestationBundle> {
+        // TODO: Auto-detect platform type
         let platform_type = "tdx";
 
         let providers = self
@@ -87,66 +85,23 @@ impl AttestationService {
         if providers.is_empty() {
             return Err(AttestationError::NoProvidersAvailable(platform_type.to_string()).into());
         }
-
-        // Use the first provider for generation
-        let provider = &providers[0];
-        let max_size = provider.max_user_data_size();
-        let user_data_binding = UserDataBinding::new(user_data, max_size);
 
         // Fetch freshness proof
         let freshness_proof = self.freshness_service.fetch_freshness_proof().await?;
 
+        let user_data_payload =
+            user_data_binding::UserData::new(ephemeral_key.to_vec(), freshness_proof.blocks);
+
+        let detached_userdata = user_data_payload.to_cbor()?;
+        let userdata_hash = user_data_binding::hash_userdata(&detached_userdata);
+
         // Generate raw attestation
-        let raw_attestation = provider.generate_attestation(&user_data_binding).await?;
-
-        Ok(AttestationBundle {
-            raw_attestation,
-            user_data_binding,
-            block_hashes: freshness_proof.blocks,
-        })
-    }
-
-    /// Generate attestation with explicit ephemeral key binding
-    pub async fn generate_attestation_with_ephemeral_key(
-        &self,
-        ephemeral_key: &[u8],
-        user_data: Vec<u8>,
-    ) -> Result<AttestationBundle> {
-        // Auto-detect platform type (for now, assume TDX)
-        let platform_type = "tdx";
-
-        let providers = self
-            .providers
-            .get(platform_type)
-            .ok_or_else(|| AttestationError::NoProvidersAvailable(platform_type.to_string()))?;
-
-        if providers.is_empty() {
-            return Err(AttestationError::NoProvidersAvailable(platform_type.to_string()).into());
-        }
-
-        // Fetch freshness proof first
-        let freshness_proof = self.freshness_service.fetch_freshness_proof().await?;
-
-        // Combine user data with freshness proof for binding
-        let mut combined_user_data = user_data;
-        combined_user_data.extend_from_slice(freshness_proof.get_compact_representation());
-
-        // Use the first provider for generation
         let provider = &providers[0];
-        let max_size = provider.max_user_data_size();
-        let user_data_binding = UserDataBinding::new_with_ephemeral_key(
-            ephemeral_key.to_vec(),
-            combined_user_data,
-            max_size,
-        );
-
-        // Generate raw attestation
-        let raw_attestation = provider.generate_attestation(&user_data_binding).await?;
+        let raw_attestation = provider.generate_attestation(&userdata_hash).await?;
 
         Ok(AttestationBundle {
             raw_attestation,
-            user_data_binding,
-            block_hashes: freshness_proof.blocks,
+            detached_userdata,
         })
     }
 
@@ -168,28 +123,30 @@ impl AttestationService {
         for provider in providers {
             match provider.verify_attestation(bundle).await {
                 Ok(VerificationResult::Verified(claims)) => {
-                    // Verify user data binding
-                    if !bundle.user_data_binding.verify_binding() {
-                        return Err(AttestationError::VerificationFailed(
-                            "User data binding verification failed".to_string(),
-                        )
-                        .into());
-                    }
+                    // The provider has already verified the quote and the binding of the detached_userdata.
+                    // Now, we can trust the contents of detached_userdata and verify freshness.
+                    let userdata =
+                        user_data_binding::UserData::from_cbor(&bundle.detached_userdata)?;
 
-                    // Verify block hash freshness
-                    if !bundle.block_hashes.is_empty() {
+                    if !userdata.block_hashes.is_empty() {
                         let freshness_proof = FreshnessProof::new(
-                            bundle.block_hashes.clone(),
+                            userdata.block_hashes,
                             self.freshness_service.config().clone(),
                         );
-                        if let Err(e) = self
-                            .freshness_service
+                        self.freshness_service
                             .verify_freshness_proof(&freshness_proof)
                             .await
-                        {
-                            tracing::warn!("Freshness verification failed: {}", e);
-                            // Continue verification but log warning
-                        }
+                            .map_err(|e| {
+                                AttestationError::VerificationFailed(format!(
+                                    "Freshness proof verification failed: {}",
+                                    e
+                                ))
+                            })?;
+                    } else if self.freshness_service.config().enabled {
+                        return Err(AttestationError::VerificationFailed(
+                            "Freshness proof missing but required by policy".to_string(),
+                        )
+                        .into());
                     } else {
                         tracing::warn!("No block hashes provided for freshness verification");
                     }

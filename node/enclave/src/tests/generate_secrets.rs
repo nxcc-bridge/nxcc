@@ -77,19 +77,17 @@ async fn test_generate_secrets_workflow() {
     // 5. Attempt PutSecrets for the generated secret -> Fails (Existing is canonical)
     let putter_node_id = "node-putter-for-gen";
     let putter_kx = KeyExchangeKeyPair::generate();
-    let enclave_pk_bytes = secrets_service
-        .get_report(vec![])
-        .unwrap()
-        .user_data_binding
-        .extract_ephemeral_key();
-    let enclave_pk =
-        x25519_dalek::PublicKey::from(<[u8; 32]>::try_from(enclave_pk_bytes.as_slice()).unwrap());
+    let enclave_report = secrets_service.get_report().await.unwrap();
+    let enclave_userdata =
+        nxcc_attestation::user_data_binding::UserData::from_cbor(&enclave_report.detached_userdata)
+            .unwrap();
+    let enclave_pk = x25519_dalek::PublicKey::from(
+        <[u8; 32]>::try_from(enclave_userdata.ephemeral_public_key.as_slice()).unwrap(),
+    );
     let secrets_to_send_put = vec![(secret_id_gen.clone(), b"overwrite attempt".to_vec(), 0, 1)];
     let secrets_box_put =
         encrypt_secrets_box(&putter_kx, &enclave_pk, &secrets_to_send_put).unwrap();
-    let binding_hash_put = secrets_box_put.calculate_binding_hash();
-    let putter_env_report =
-        test_env_report_for_client(putter_kx.public_key().as_bytes(), binding_hash_put.to_vec());
+    let putter_env_report = test_env_report_for_client(putter_kx.public_key().as_bytes());
     execute_policy_with_env_report(
         &runner_grpc,
         &mock_vm_client,
@@ -117,10 +115,7 @@ async fn test_generate_secrets_workflow() {
     // 6. Authorize getter and GetSecrets
     let getter_node_id = "node-getter-for-gen";
     let getter_kx = KeyExchangeKeyPair::generate();
-    let getter_env_report = test_env_report_for_client(
-        getter_kx.public_key().as_bytes(),
-        vec![0u8; 32], // Arbitrary user_data for getter's report
-    );
+    let getter_env_report = test_env_report_for_client(getter_kx.public_key().as_bytes());
     execute_policy_with_env_report(
         &runner_grpc,
         &mock_vm_client,

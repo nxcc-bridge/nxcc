@@ -331,15 +331,13 @@ impl TdxSimulator {
         let mut q = Vec::new();
 
         // Quote header (48 bytes)
-        q.extend_from_slice(&self.cfg.quote_version.to_le_bytes()); // version
-        q.extend_from_slice(&[0x02, 0x00]); // att_key_type = ECDSA
-        q.extend_from_slice(&0x00000081u32.to_le_bytes()); // tee_type TDX
-        q.extend_from_slice(&[0x00; 4]); // reserved
-        q.extend_from_slice(&[0x00, 0x00]); // qe_svn
-        q.extend_from_slice(&[0x00, 0x00]); // pce_svn
-        q.extend_from_slice(&[0u8; 16]); // qe_vendor_id
+        q.extend_from_slice(&self.cfg.quote_version.to_le_bytes()); // version (2 bytes)
+        q.extend_from_slice(&[0x02, 0x00]); // att_key_type = ECDSA (2 bytes)
+        q.extend_from_slice(&0x00000081u32.to_le_bytes()); // tee_type TDX (4 bytes)
+        q.extend_from_slice(&[0x00; 4]); // reserved (4 bytes)
+        q.extend_from_slice(&[0u8; 16]); // qe_vendor_id (16 bytes)
 
-        // first 20 bytes of report_data
+        // first 20 bytes of report_data (20 bytes)
         let mut user20 = [0u8; 20];
         let n = user20.len().min(report_data.len());
         user20[..n].copy_from_slice(&report_data[..n]);

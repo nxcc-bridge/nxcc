@@ -5,12 +5,12 @@ use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use nxcc_interface::types::attestation::{AttestationBundle, RawAttestation, UserDataBinding};
+use nxcc_interface::types::attestation::{AttestationBundle, RawAttestation};
 
 use crate::{
     tdx::{TdxAttestationClaims, TdxQuote},
     types::*,
-    AttestationProvider,
+    user_data_binding, AttestationProvider,
 };
 
 /// Mock TDX provider that uses local parsing for testing
@@ -81,13 +81,8 @@ impl MockTdxProvider {
     fn extract_standardized_claims(
         &self,
         tdx_claims: &TdxAttestationClaims,
-        user_data_binding: &UserDataBinding,
+        _bundle: &AttestationBundle,
     ) -> Result<StandardizedClaims> {
-        // Verify user data binding
-        if !user_data_binding.verify_binding() {
-            return Err(anyhow!("User data binding verification failed"));
-        }
-
         // Check if we should simulate failures
         for failure_type in &self.config.simulate_failures {
             match failure_type.as_str() {
@@ -170,7 +165,7 @@ impl MockTdxProvider {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs(),
-            eat_nonce: Some(user_data_binding.embedded_hash.clone()),
+            eat_nonce: Some(tdx_claims.report_data.clone()),
 
             // Identity and provenance
             ueid: Some(tdx_claims.mrtd[0..32.min(tdx_claims.mrtd.len())].to_vec()),
@@ -255,12 +250,9 @@ impl AttestationProvider for MockTdxProvider {
         Ok(())
     }
 
-    async fn generate_attestation(
-        &self,
-        user_data_binding: &UserDataBinding,
-    ) -> Result<RawAttestation> {
+    async fn generate_attestation(&self, userdata_hash: &[u8]) -> Result<RawAttestation> {
         // Generate mock TDX quote with user data
-        let quote_data = self.generate_mock_quote(&user_data_binding.embedded_hash)?;
+        let quote_data = self.generate_mock_quote(userdata_hash)?;
 
         Ok(RawAttestation {
             platform_type: "tdx".to_string(),
@@ -297,8 +289,18 @@ impl AttestationProvider for MockTdxProvider {
         // Extract TDX-specific claims
         let tdx_claims = quote.extract_claims();
 
+        // Verify userdata binding
+        let received_userdata_hash = user_data_binding::hash_userdata(&bundle.detached_userdata);
+        if tdx_claims.report_data.len() < 32
+            || &tdx_claims.report_data[..32] != &received_userdata_hash[..]
+        {
+            return Ok(VerificationResult::Failed(
+                "Userdata hash mismatch".to_string(),
+            ));
+        }
+
         // Convert to standardized claims
-        match self.extract_standardized_claims(&tdx_claims, &bundle.user_data_binding) {
+        match self.extract_standardized_claims(&tdx_claims, bundle) {
             Ok(claims) => Ok(VerificationResult::Verified(Box::new(claims))),
             Err(e) => Ok(VerificationResult::Failed(e.to_string())),
         }
@@ -330,19 +332,19 @@ impl MockAttestationService {
     }
 
     /// Generate attestation using mock provider
-    pub async fn generate_attestation(&self, user_data: Vec<u8>) -> Result<AttestationBundle> {
-        let max_size = self.provider.max_user_data_size();
-        let user_data_binding = UserDataBinding::new(user_data, max_size);
+    pub async fn generate_attestation(&self) -> Result<AttestationBundle> {
+        let user_data_payload = user_data_binding::UserData {
+            ephemeral_public_key: vec![0x42; 32],
+            block_hashes: vec![],
+        };
+        let detached_userdata = user_data_payload.to_cbor()?;
+        let userdata_hash = user_data_binding::hash_userdata(&detached_userdata);
 
-        let raw_attestation = self
-            .provider
-            .generate_attestation(&user_data_binding)
-            .await?;
+        let raw_attestation = self.provider.generate_attestation(&userdata_hash).await?;
 
         Ok(AttestationBundle {
             raw_attestation,
-            user_data_binding,
-            block_hashes: Vec::new(), // Mock service doesn't use block hashes
+            detached_userdata,
         })
     }
 
@@ -392,15 +394,10 @@ mod tests {
     #[tokio::test]
     async fn test_mock_attestation_flow() {
         let service = MockAttestationService::new();
-        let user_data = b"Hello, mock attestation!".to_vec();
 
         // Generate attestation
-        let bundle = service
-            .generate_attestation(user_data.clone())
-            .await
-            .unwrap();
+        let bundle = service.generate_attestation().await.unwrap();
         assert_eq!(bundle.raw_attestation.platform_type, "tdx");
-        assert!(bundle.user_data_binding.verify_binding());
 
         // Verify attestation
         let claims = service.verify_attestation(&bundle).await.unwrap();
@@ -422,10 +419,7 @@ mod tests {
         service.update_config(&config.to_string()).await.unwrap();
 
         // Generate and try to verify - should fail
-        let bundle = service
-            .generate_attestation(b"test".to_vec())
-            .await
-            .unwrap();
+        let bundle = service.generate_attestation().await.unwrap();
         let result = service.verify_attestation(&bundle).await;
 
         assert!(result.is_err());
@@ -440,10 +434,7 @@ mod tests {
         let mut service = MockAttestationService::new();
 
         // First generate an attestation to get the actual MRTD
-        let bundle = service
-            .generate_attestation(b"test".to_vec())
-            .await
-            .unwrap();
+        let bundle = service.generate_attestation().await.unwrap();
         let claims = service.verify_attestation(&bundle).await.unwrap();
 
         // Configure with the actual MRTD as expected
@@ -466,29 +457,6 @@ mod tests {
         assert_eq!(
             verified_claims.measurements.len(),
             claims.measurements.len()
-        );
-    }
-
-    #[tokio::test]
-    async fn test_large_user_data_hashing() {
-        let service = MockAttestationService::new();
-        let large_data = vec![0x42; 1000]; // 1KB of data, exceeds 64-byte limit
-
-        let bundle = service
-            .generate_attestation(large_data.clone())
-            .await
-            .unwrap();
-
-        // Should have been hashed due to size
-        assert!(bundle.user_data_binding.was_hashed);
-        assert_eq!(bundle.user_data_binding.original_data, large_data);
-        assert_eq!(bundle.user_data_binding.embedded_hash.len(), 32); // SHA256 hash
-
-        // Verification should still work
-        let claims = service.verify_attestation(&bundle).await.unwrap();
-        assert_eq!(
-            claims.eat_nonce.as_ref().unwrap(),
-            &bundle.user_data_binding.embedded_hash
         );
     }
 }
