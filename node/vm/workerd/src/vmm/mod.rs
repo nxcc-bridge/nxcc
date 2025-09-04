@@ -254,6 +254,7 @@ impl VmRuntime for WorkerdVmm {
     )]
     async fn start_worker(
         &self,
+        worker_id: String,
         worker_code: Vec<u8>,
         untrusted_config: UntrustedConfig,
         trusted_config: TrustedConfig,
@@ -274,7 +275,7 @@ impl VmRuntime for WorkerdVmm {
             )
         };
         let base_path = temp_dir_handle.path();
-        let instance_id = uuid::Uuid::new_v4().to_string();
+        let instance_id = worker_id;
         tracing::Span::current().record("instance_id", &instance_id);
 
         let short_id = &instance_id[..8];

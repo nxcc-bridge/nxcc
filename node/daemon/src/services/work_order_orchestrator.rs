@@ -80,7 +80,7 @@ impl WorkOrderOrchestrator {
     pub async fn submit_work_order(
         self: Arc<Self>,
         work_order_dsse_bytes: Vec<u8>,
-    ) -> Result<(String, String), AppError> {
+    ) -> Result<String, AppError> {
         // Calculate SHA256 hash of the raw DSSE envelope bytes for unique ID and mount path.
         let mut hasher = Sha256::new();
         hasher.update(&work_order_dsse_bytes);
@@ -109,10 +109,7 @@ impl WorkOrderOrchestrator {
             warn!("{}", msg);
             // It's not an error per se, more like a duplicate submission.
             // The gRPC handler expects Ok(SubmitWorkOrderResponse) even for app-level "failures".
-            return Ok((
-                work_order_hash_b64url,
-                "Work order already active.".to_string(),
-            ));
+            return Ok(work_order_hash_b64url);
         }
         // For now, we assume it's valid if it parses.
         if dsse_envelope.payload_type != DSSE_WORK_ORDER_PAYLOAD_TYPE {
@@ -354,6 +351,7 @@ impl WorkOrderOrchestrator {
         let enclave_worker_id = self
             .enclave_client
             .run_worker(
+                work_order_hash_b64url.clone(),
                 self.config.enclave.default_vm_id.clone(),
                 manifest_bytes,
                 bundle_bytes,
@@ -548,10 +546,7 @@ impl WorkOrderOrchestrator {
             }
         }
 
-        Ok((
-            work_order_hash_b64url, // Return the unique hash as the ID
-            format!("Work order submitted and processed. ID: {}.", wo_payload.id),
-        ))
+        Ok(work_order_hash_b64url) // Return the unique hash as the ID
     }
 }
 

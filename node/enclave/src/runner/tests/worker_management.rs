@@ -12,12 +12,17 @@ async fn test_run_worker_success() {
     let bundle_code = vec![1, 2, 3];
     let bundle_obj = test_worker_bundle(bundle_code.clone());
     // launch_payload is no longer passed directly to run_worker
-    let expected_instance_id = "instance-policy-worker-1"; // Default mock ID format
+    let expected_instance_id = "instance-test-worker-1-1"; // MockVmServiceClient format
 
     attach_mock_vm(&runner_service, vm_id, mock_client.clone()).await; // Clone needed if we inspect mock later
 
     let result = runner_service
-        .run_worker(vm_id.to_string(), manifest_obj.clone(), bundle_obj.clone())
+        .run_worker(
+            expected_instance_id.to_string(),
+            vm_id.to_string(),
+            manifest_obj.clone(),
+            bundle_obj.clone(),
+        )
         .await;
 
     let instance_id = result.unwrap();
@@ -54,7 +59,12 @@ async fn test_run_worker_vm_not_attached() {
     let bundle_obj = test_worker_bundle(vec![1, 2, 3]);
 
     let result = runner_service
-        .run_worker(vm_id.to_string(), manifest_obj.clone(), bundle_obj.clone())
+        .run_worker(
+            "test-worker-2".to_string(),
+            vm_id.to_string(),
+            manifest_obj.clone(),
+            bundle_obj.clone(),
+        )
         .await;
 
     assert!(matches!(result, Err(RunnerError::VmNotAttached(id)) if id == vm_id));
@@ -73,7 +83,12 @@ async fn test_run_worker_start_fails_in_vm() {
     mock_client.fail_next_operation(error_msg); // Configure mock to fail start_worker
 
     let result = runner_service
-        .run_worker(vm_id.to_string(), manifest_obj.clone(), bundle_obj.clone())
+        .run_worker(
+            "test-worker-2".to_string(),
+            vm_id.to_string(),
+            manifest_obj.clone(),
+            bundle_obj.clone(),
+        )
         .await;
 
     assert!(matches!(result, Err(RunnerError::WorkerStartFailed(msg)) if msg == error_msg));

@@ -202,6 +202,7 @@ impl EnclaveClient {
 
     pub async fn run_worker(
         &self,
+        worker_id: String,
         vm_id: String,
         worker_manifest_bytes: Vec<u8>,
         worker_bundle_bytes: Vec<u8>,
@@ -210,6 +211,7 @@ impl EnclaveClient {
             vm_id,
             worker_manifest_bytes,
             worker_bundle_bytes,
+            worker_id,
         };
         let mut client = self.runner();
         let resp = client.run_worker(req).await.map_err(|e| e.to_string())?;

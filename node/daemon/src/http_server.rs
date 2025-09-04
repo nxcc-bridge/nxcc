@@ -130,8 +130,9 @@ struct ApiErrorResponse {
 
 #[derive(serde::Serialize)]
 struct SubmitWorkOrderSuccessResponse {
+    #[serde(rename = "workOrderId")]
     work_order_id: String,
-    message: String,
+    success: bool,
 }
 
 #[derive(serde::Serialize)]
@@ -317,7 +318,7 @@ async fn submit_work_order_handler(
 ) -> Result<impl IntoResponse, ApiError> {
     info!("Received HTTP SubmitWorkOrder request");
 
-    let (work_order_id, message) = state
+    let work_order_id = state
         .work_order_orchestrator
         .clone()
         .submit_work_order(body.to_vec())
@@ -328,7 +329,7 @@ async fn submit_work_order_handler(
         StatusCode::ACCEPTED,
         Json(SubmitWorkOrderSuccessResponse {
             work_order_id,
-            message,
+            success: true,
         }),
     ))
 }

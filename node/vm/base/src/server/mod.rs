@@ -53,6 +53,7 @@ pub trait VmRuntime: Send + Sync + 'static {
     /// Starts a new vm instance returning the ID.
     async fn start_worker(
         &self,
+        worker_id: String,
         worker_code: Vec<u8>,
         untrusted_config: nxcc_interface::proto::vm::UntrustedConfig,
         trusted_config: nxcc_interface::proto::vm::TrustedConfig,
@@ -155,7 +156,12 @@ impl<T: VmRuntime> Vm for VmServiceGrpc<T> {
 
         match self
             .runtime
-            .start_worker(req.worker_code, untrusted_config, trusted_config)
+            .start_worker(
+                req.worker_id,
+                req.worker_code,
+                untrusted_config,
+                trusted_config,
+            )
             .await
         {
             Ok(id) => {

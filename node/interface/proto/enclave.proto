@@ -156,6 +156,8 @@ message RunWorkerRequest {
   bytes worker_manifest_bytes = 2;
   /// Raw WorkerBundle (DSSE envelope as JSON bytes).
   bytes worker_bundle_bytes = 3;
+  /// The worker instance identifier (should be work order hash).
+  string worker_id = 4;
 }
 
 message RunWorkerResponse {

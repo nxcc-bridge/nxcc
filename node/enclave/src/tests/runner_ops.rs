@@ -32,6 +32,7 @@ async fn test_runner_ops_non_existent_entities() {
         vm_id: non_existent_vm_id.to_string(),
         worker_manifest_bytes: vec![],
         worker_bundle_bytes: vec![],
+        worker_id: "test-bad-vm".to_string(),
     });
     assert_eq!(
         runner_grpc

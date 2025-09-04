@@ -40,10 +40,9 @@ impl WorkOrder for WorkOrderGrpcService {
             .submit_work_order(req.work_order_dsse_bytes)
             .await
         {
-            Ok((work_order_id, message)) => Ok(Response::new(SubmitWorkOrderResponse {
+            Ok(work_order_id) => Ok(Response::new(SubmitWorkOrderResponse {
                 work_order_id,
                 success: true,
-                message,
             })),
             Err(e) => {
                 tracing::error!("SubmitWorkOrder failed: {:?}", e);
@@ -51,7 +50,6 @@ impl WorkOrder for WorkOrderGrpcService {
                 Ok(Response::new(SubmitWorkOrderResponse {
                     work_order_id: String::new(),
                     success: false,
-                    message: e.to_string(),
                 }))
             }
         }

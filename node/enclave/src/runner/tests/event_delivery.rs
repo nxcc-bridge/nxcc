@@ -9,14 +9,14 @@ use super::common::*;
 async fn test_deliver_single_web3_event_success() {
     let (_secrets, runner_service, mock_client) = setup();
     let vm_id = "vm-event-delivery";
-    let worker_id = "instance-policy-worker-1"; // MockVmServiceClient default format
+    let worker_id = "test-worker-1"; // Use work order hash format
 
     attach_mock_vm(&runner_service, vm_id, mock_client.clone()).await;
     // Run a worker first
     let manifest = test_worker_manifest();
     let bundle = test_worker_bundle(b"some code".to_vec());
     let launched_worker_id = runner_service
-        .run_worker(vm_id.to_string(), manifest, bundle)
+        .run_worker(worker_id.to_string(), vm_id.to_string(), manifest, bundle)
         .await
         .expect("Failed to run worker for event delivery test");
     assert_eq!(launched_worker_id, worker_id);
@@ -79,13 +79,18 @@ async fn test_deliver_single_web3_event_success() {
 async fn test_deliver_batch_events_multiple() {
     let (_secrets, runner_service, mock_client) = setup();
     let vm_id = "vm-batch-event-delivery";
-    let worker_id = "instance-policy-worker-1"; // MockVmServiceClient default format
+    let worker_id = "test-worker-2"; // Use work order hash format
 
     attach_mock_vm(&runner_service, vm_id, mock_client.clone()).await;
     let manifest = test_worker_manifest();
     let bundle = test_worker_bundle(b"batch code".to_vec());
     let launched_worker_id = runner_service
-        .run_worker(vm_id.to_string(), manifest, bundle)
+        .run_worker(
+            "test-worker-2".to_string(),
+            vm_id.to_string(),
+            manifest,
+            bundle,
+        )
         .await
         .expect("Failed to run worker for batch event test");
     assert_eq!(launched_worker_id, worker_id);
@@ -177,14 +182,19 @@ async fn test_deliver_event_to_non_existent_worker() {
 async fn test_deliver_launch_event_success() {
     let (_secrets, runner_service, mock_client) = setup();
     let vm_id = "vm-launch-event-delivery";
-    let worker_id = "instance-policy-worker-1"; // MockVmServiceClient default format
+    let worker_id = "test-worker-3"; // Use work order hash format
 
     attach_mock_vm(&runner_service, vm_id, mock_client.clone()).await;
     // Run a worker first
     let manifest = test_worker_manifest();
     let bundle = test_worker_bundle(b"launch code".to_vec());
     let launched_worker_id = runner_service
-        .run_worker(vm_id.to_string(), manifest, bundle)
+        .run_worker(
+            "test-worker-3".to_string(),
+            vm_id.to_string(),
+            manifest,
+            bundle,
+        )
         .await
         .expect("Failed to run worker for launch event test");
     assert_eq!(launched_worker_id, worker_id);

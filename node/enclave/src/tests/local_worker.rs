@@ -118,6 +118,7 @@ async fn test_local_worker_secret_authorization_flow() {
         vm_id: vm_id.to_string(),
         worker_manifest_bytes: serde_json::to_vec(&worker_manifest_obj).unwrap(),
         worker_bundle_bytes: worker_bundle_obj.0.clone(),
+        worker_id: "test-local-worker".to_string(),
     });
     let run_resp_inner = runner_grpc
         .run_worker(run_req)

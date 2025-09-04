@@ -303,7 +303,7 @@ impl Runner for EnclaveRunnerGrpcService {
 
         match self
             .runner
-            .run_worker(req.vm_id, worker_manifest, worker_bundle)
+            .run_worker(req.worker_id, req.vm_id, worker_manifest, worker_bundle)
             .await
         {
             Ok(worker_id) => Ok(Response::new(RunWorkerResponse {

@@ -34,12 +34,13 @@ struct MockVmRuntime {
 impl VmRuntime for MockVmRuntime {
     async fn start_worker(
         &self,
+        worker_id: String,
         _worker_code: Vec<u8>,
         _untrusted_config: UntrustedConfig,
         _trusted_config: TrustedConfig,
     ) -> Result<String, VmError> {
         self.start_worker_count.fetch_add(1, Ordering::SeqCst);
-        let id = "instance-test-worker".to_string();
+        let id = format!("instance-{}", worker_id);
         let mut workers = self.workers.lock().unwrap();
         workers.insert(id.clone(), WorkerStatus::Running);
         Ok(id)

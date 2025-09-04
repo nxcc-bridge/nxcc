@@ -101,6 +101,7 @@ impl RunnerService {
     /// Starts a worker in a specified VM.
     pub async fn run_worker(
         &self,
+        worker_id: String,
         vm_id: String,
         worker_manifest: WorkerManifest,
         worker_bundle: WorkerBundle,
@@ -172,7 +173,7 @@ impl RunnerService {
 
         match client
             .start_worker(
-                worker_type_id, // This is the 'type' id for the VM
+                worker_id.clone(), // Use the work order hash as worker ID
                 payload.executable,
                 untrusted_config,
                 trusted_config,

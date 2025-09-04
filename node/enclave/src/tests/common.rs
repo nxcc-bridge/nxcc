@@ -153,12 +153,13 @@ pub async fn run_policy_worker(
     let policy_manifest_bytes = serde_json::to_vec(&policy_manifest_obj).unwrap();
     let policy_bundle_bytes = policy_bundle_obj.0.clone();
 
-    let expected_policy_worker_instance_id = format!("instance-{}-1", policy_worker_type_id);
+    let expected_policy_worker_instance_id = "instance-test-common-worker-1".to_string();
 
     let run_worker_req = Request::new(nxcc_interface::proto::enclave::RunWorkerRequest {
         vm_id: vm_id.to_string(),
         worker_manifest_bytes: policy_manifest_bytes,
         worker_bundle_bytes: policy_bundle_bytes,
+        worker_id: "test-common-worker".to_string(),
     });
 
     let run_worker_resp = runner_grpc

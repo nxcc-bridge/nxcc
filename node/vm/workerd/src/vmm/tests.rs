@@ -116,7 +116,7 @@ async fn test_start_invoke_stop_single_worker() -> Result<(), Box<dyn std::error
     let code = create_js_code("single");
 
     let worker_id = vmm
-        .start_worker(code, untrusted, trusted)
+        .start_worker("test-worker-1".to_string(), code, untrusted, trusted)
         .await
         .expect("Failed to start worker");
 
@@ -191,12 +191,12 @@ async fn test_multiple_workers_lifecycle() -> Result<(), Box<dyn std::error::Err
     let code2 = create_js_code("worker2");
 
     let id1 = vmm
-        .start_worker(code1, untrusted1, trusted1)
+        .start_worker("test-worker-1".to_string(), code1, untrusted1, trusted1)
         .await
         .expect("Failed to start worker 1");
     info!("Started worker 1: {}", id1);
     let id2 = vmm
-        .start_worker(code2, untrusted2, trusted2)
+        .start_worker("test-worker-2".to_string(), code2, untrusted2, trusted2)
         .await
         .expect("Failed to start worker 2");
     info!("Started worker 2: {}", id2);
@@ -294,7 +294,7 @@ async fn test_worker_config_bindings() -> Result<(), Box<dyn std::error::Error>>
     let code = create_js_config_code();
 
     let worker_id = vmm
-        .start_worker(code, untrusted, trusted)
+        .start_worker("test-worker-3".to_string(), code, untrusted, trusted)
         .await
         .expect("Failed to start config worker");
 
@@ -402,7 +402,9 @@ async fn test_start_worker_invalid_code() {
     let (untrusted, trusted) = create_mock_configs();
     let invalid_code = vec![0xff, 0xfe, 0xfd];
 
-    let start_res = vmm.start_worker(invalid_code, untrusted, trusted).await;
+    let start_res = vmm
+        .start_worker("test-invalid".to_string(), invalid_code, untrusted, trusted)
+        .await;
     assert!(start_res.is_err());
     let err_msg = start_res.unwrap_err().to_string();
     assert!(
@@ -510,7 +512,9 @@ async fn test_multiple_secret_keys_derived_bits() -> Result<(), Box<dyn std::err
     let code = create_js_multi_key_test_code();
 
     // 3) Start the worker
-    let worker_id = vmm.start_worker(code, untrusted, trusted).await?;
+    let worker_id = vmm
+        .start_worker("test-worker".to_string(), code, untrusted, trusted)
+        .await?;
     // Wait for it to be running
     let status = wait_for_status(
         &vmm,

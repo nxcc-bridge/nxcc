@@ -78,6 +78,7 @@ impl RunnerService {
         &self,
         manifest: &WorkerManifest,
         bundle: &WorkerBundle,
+        worker_id: Option<String>,
     ) -> Result<String, AppError> {
         let manifest_bytes = serde_json::to_vec(manifest).unwrap();
         let bundle_bytes = bundle.0.clone();
@@ -86,6 +87,12 @@ impl RunnerService {
             vm_id: self.enclave_config.default_vm_id.clone(), // TODO: extract this from manifest. check if VM is attached. if so, run. o/w error
             worker_manifest_bytes: manifest_bytes,
             worker_bundle_bytes: bundle_bytes,
+            worker_id: worker_id.unwrap_or_else(|| {
+                format!(
+                    "policy-worker-{}",
+                    chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+                )
+            }),
         };
         let mut client = self.client.clone();
         let resp = client
@@ -170,7 +177,9 @@ impl RunnerService {
         let FullPolicyPackage { manifest, bundle } = policy_package;
 
         // 1. Start Worker
-        let worker_id = self.run_worker_in_default_vm(&manifest, &bundle).await?;
+        let worker_id = self
+            .run_worker_in_default_vm(&manifest, &bundle, None)
+            .await?;
 
         info!("Started policy worker {}", worker_id);
 

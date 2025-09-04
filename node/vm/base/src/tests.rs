@@ -23,11 +23,12 @@ struct E2EMockVmRuntime;
 impl VmRuntime for E2EMockVmRuntime {
     async fn start_worker(
         &self,
+        worker_id: String,
         _worker_code: Vec<u8>,
         _untrusted_config: UntrustedConfig,
         _trusted_config: TrustedConfig,
     ) -> Result<String, VmError> {
-        Ok(format!("instance-e2e-{}", rand::random::<u16>()))
+        Ok(format!("instance-e2e-{}", worker_id))
     }
 
     async fn stop_worker(&self, id: String) -> Result<(), VmError> {

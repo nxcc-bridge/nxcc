@@ -25,7 +25,7 @@ impl VmClient {
     // Async function to start a worker
     pub async fn start_worker(
         &mut self,
-        worker_type_id: String,
+        worker_id: String,
         worker_code: Vec<u8>,
         untrusted_config: UntrustedConfig,
         trusted_config: TrustedConfig,
@@ -33,23 +33,13 @@ impl VmClient {
         match self {
             VmClient::Real(client) => {
                 client
-                    .start_worker(
-                        worker_type_id,
-                        worker_code,
-                        untrusted_config,
-                        trusted_config,
-                    )
+                    .start_worker(worker_id, worker_code, untrusted_config, trusted_config)
                     .await
             }
             #[cfg(test)]
             VmClient::Mock(client) => {
                 client
-                    .start_worker(
-                        worker_type_id,
-                        worker_code,
-                        untrusted_config,
-                        trusted_config,
-                    )
+                    .start_worker(worker_id, worker_code, untrusted_config, trusted_config)
                     .await
             }
         }
