@@ -197,6 +197,7 @@ impl NetworkManager {
             .heartbeat_interval(Duration::from_secs(10))
             .validation_mode(gossipsub::ValidationMode::Strict)
             .message_id_fn(message_id_fn)
+            .do_px()
             .build()
             .map_err(|e| AppError::Network(format!("Error building gossipsub config: {e}")))?;
 
@@ -296,10 +297,35 @@ async fn run_network_loop(
     peer_registry: PeerRegistry,
     mut shutdown: tokio::sync::broadcast::Receiver<()>,
 ) {
+    // Periodic DHT maintenance: bootstrap + a lookup to keep tables fresh.
+    let mut dht_maint = tokio::time::interval(Duration::from_secs(90));
+    #[allow(deprecated)]
+    dht_maint.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+    // Call kad.bootstrap() once after the first successful connection.
+    let mut did_bootstrap_once = false;
+
     loop {
         tokio::select! {
+            _ = dht_maint.tick() => {
+                // Periodic bootstrap (safe to call repeatedly; libp2p coalesces).
+                if let Err(e) = swarm.behaviour_mut().kad.bootstrap() {
+                    debug!("Periodic Kademlia bootstrap failed: {e:?}");
+                }
+                // Actively walk the DHT; using our own ID is a simple, lightweight maintenance query.
+                let target = *swarm.local_peer_id();
+                swarm.behaviour_mut().kad.get_closest_peers(target);
+            },
+
             event = swarm.select_next_some() => {
-                handle_swarm_event(event, &mut swarm, &topic, &secrets_service, &peer_registry).await;
+                handle_swarm_event(
+                    event,
+                    &mut swarm,
+                    &topic,
+                    &secrets_service,
+                    &peer_registry,
+                    &mut did_bootstrap_once,
+                ).await;
             },
 
             msg = secrets_rx.next() => {
@@ -324,6 +350,7 @@ async fn handle_swarm_event(
     topic: &gossipsub::IdentTopic,
     secrets_service: &Arc<SecretsService>,
     peer_registry: &PeerRegistry,
+    did_bootstrap_once: &mut bool,
 ) {
     match event {
         SwarmEvent::Behaviour(app_event) => match app_event {
@@ -331,7 +358,8 @@ async fn handle_swarm_event(
             AppEvent::Gossipsub(gossipsub_event) => {
                 handle_gossipsub_event(gossipsub_event, swarm, topic, secrets_service).await
             }
-            AppEvent::Identify(identify_event) => handle_identify_event(identify_event),
+            // Use identify info to seed Kademlia with listen addrs
+            AppEvent::Identify(identify_event) => handle_identify_event(identify_event, swarm),
             AppEvent::Ping(ping_event) => handle_ping_event(ping_event),
             AppEvent::Kademlia(kad_event) => handle_kademlia_event(kad_event),
         },
@@ -345,6 +373,16 @@ async fn handle_swarm_event(
             // Add peer to registry with its multiaddr
             let multiaddr = format!("{}/p2p/{}", endpoint.get_remote_address(), peer_id);
             peer_registry.add_peer(peer_id.to_string(), multiaddr).await;
+
+            // Trigger an initial DHT bootstrap after the first successful connection (likely to a seed).
+            if !*did_bootstrap_once {
+                if let Err(e) = swarm.behaviour_mut().kad.bootstrap() {
+                    warn!("Kademlia bootstrap failed: {e}");
+                } else {
+                    debug!("Kademlia bootstrap started");
+                    *did_bootstrap_once = true;
+                }
+            }
         }
         SwarmEvent::ConnectionClosed {
             peer_id, endpoint, ..
@@ -535,9 +573,12 @@ fn handle_notification(content: String, timestamp: u64, propagation_source: libp
     );
 }
 
-fn handle_identify_event(event: identify::Event) {
+fn handle_identify_event(event: identify::Event, swarm: &mut Swarm<AppBehaviour>) {
     if let identify::Event::Received { peer_id, info, .. } = event {
         debug!("Identify info from peer {peer_id}: {:?}", info);
+        for addr in info.listen_addrs {
+            swarm.behaviour_mut().kad.add_address(&peer_id, addr);
+        }
     }
 }
 
