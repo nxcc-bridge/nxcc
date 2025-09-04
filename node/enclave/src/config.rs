@@ -23,6 +23,12 @@ pub struct EnclaveConfig {
     #[serde(default)]
     #[clap(flatten)]
     pub grpc: GrpcConfig,
+
+    /// Enable test attestation providers for integration testing
+    #[cfg(feature = "test-attestation")]
+    #[arg(long)]
+    #[serde(default)]
+    pub enable_test_providers: bool,
 }
 
 /// Configuration for the gRPC interface
@@ -97,16 +103,36 @@ impl EnclaveConfig {
             .clone()
             .unwrap_or_else(default_config_path);
 
-        Figment::new()
+        let mut figment = Figment::new()
             // Start with defaults
             .merge(Serialized::defaults(Self::default()))
             // Add config file if it exists
             .merge(Toml::file(config_file_path))
             // Add environment variables
-            .merge(Env::prefixed("NXCC_"))
-            // Add CLI arguments (highest priority)
-            .merge(Serialized::defaults(cli_args))
-            // Extract the final configuration
-            .extract()
+            .merge(Env::prefixed("NXCC_"));
+
+        // Only merge CLI arguments that were explicitly provided
+        // This prevents default CLI values from overriding config file values
+        if cli_args.config_path.is_some() {
+            figment = figment.merge(("config_path", cli_args.config_path));
+        }
+        if cli_args.verbose {
+            figment = figment.merge(("verbose", cli_args.verbose));
+        }
+        // Only merge grpc config if any grpc arguments were provided
+        figment = figment.merge(("grpc", cli_args.grpc));
+
+        #[cfg(feature = "test-attestation")]
+        {
+            // Check if --enable-test-providers was explicitly provided
+            use clap::Parser;
+            let args: Vec<String> = std::env::args().collect();
+            if args.iter().any(|arg| arg == "--enable-test-providers") {
+                figment = figment.merge(("enable_test_providers", true));
+            }
+        }
+
+        // Extract the final configuration
+        figment.extract()
     }
 }

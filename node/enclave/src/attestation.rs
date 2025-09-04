@@ -129,8 +129,27 @@ impl PlatformAttestationManager {
         // Register TDX QVL provider
         service.register_provider("tdx".to_string(), Box::new(TdxQvlProvider::new()));
 
-        // Register test provider for enclave tests (used by test platform type)
-        service.register_provider("test".to_string(), Box::new(TestAttestationProvider));
+        Ok(Self {
+            service,
+            ephemeral_kx_keypair,
+        })
+    }
+
+    #[cfg(feature = "test-attestation")]
+    pub fn new_with_test_providers(
+        ephemeral_kx_keypair: Arc<KeyExchangeKeyPair>,
+        gateway_provider: Arc<dyn GatewayProvider>,
+        enable_test_providers: bool,
+    ) -> Result<Self> {
+        let mut service = AttestationService::new(gateway_provider);
+
+        // Register TDX QVL provider
+        service.register_provider("tdx".to_string(), Box::new(TdxQvlProvider::new()));
+
+        // Register test provider if enabled by config
+        if enable_test_providers {
+            service.register_provider("test".to_string(), Box::new(TestAttestationProvider));
+        }
 
         Ok(Self {
             service,

@@ -1,0 +1,5 @@
+# Test configuration for NXCC enclave integration tests
+# This config enables test attestation providers for non-TDX hardware
+
+enable_test_providers = true
+verbose = true

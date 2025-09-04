@@ -490,10 +490,23 @@ pub async fn start_grpc_server(config: &EnclaveConfig) -> Result<(), Box<dyn std
     // Instantiate shared services with the shared keypair
     let mock_gateway = std::sync::Arc::new(crate::attestation::MockGatewayProvider);
     let attestation_manager = Arc::new(
-        crate::attestation::PlatformAttestationManager::new(
-            ephemeral_kx_keypair.clone(),
-            mock_gateway,
-        )
+        {
+            #[cfg(feature = "test-attestation")]
+            {
+                crate::attestation::PlatformAttestationManager::new_with_test_providers(
+                    ephemeral_kx_keypair.clone(),
+                    mock_gateway,
+                    config.enable_test_providers,
+                )
+            }
+            #[cfg(not(feature = "test-attestation"))]
+            {
+                crate::attestation::PlatformAttestationManager::new(
+                    ephemeral_kx_keypair.clone(),
+                    mock_gateway,
+                )
+            }
+        }
         .map_err(|e| {
             tracing::error!("Failed to initialize platform attestation manager: {}", e);
             e
