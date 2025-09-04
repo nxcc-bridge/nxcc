@@ -1,6 +1,61 @@
 #!/bin/sh
 # shellcheck disable=SC3043  # 'local' is not POSIX but widely supported
 
+# Generate an Ed25519 private key file for operator signing
+generate_operator_key() {
+	key_path="$1"
+	# Generate a 32-byte random key file for Ed25519 private key
+	# The NXCC daemon will interpret this as raw key bytes
+	head -c 32 /dev/urandom >"$key_path"
+}
+
+start_anvils() {
+	echo "Starting Anvil instance 1 (chain $ANVIL_CHAIN_ID_1 on port 8545)..."
+	anvil --port 8545 --chain-id "$ANVIL_CHAIN_ID_1" --silent &
+	ANVIL_PID_1=$!
+	# Wait for anvil to be ready
+	for i in $(seq 1 10); do
+		if cast chain-id --rpc-url "$ANVIL_RPC_URL_1" >/dev/null 2>&1; then
+			echo "Anvil 1 started. Chain ID: $(cast chain-id --rpc-url "$ANVIL_RPC_URL_1")"
+			break
+		fi
+		sleep 1
+	done
+	if ! cast chain-id --rpc-url "$ANVIL_RPC_URL_1" >/dev/null 2>&1; then
+		echo "ERROR: Anvil 1 failed to start or respond in time."
+		exit 1
+	fi
+
+	echo "Starting Anvil instance 2 (chain $ANVIL_CHAIN_ID_2 on port 8546)..."
+	anvil --port 8546 --chain-id "$ANVIL_CHAIN_ID_2" --silent &
+	ANVIL_PID_2=$!
+	# Wait for anvil to be ready
+	for i in $(seq 1 10); do
+		if cast chain-id --rpc-url "$ANVIL_RPC_URL_2" >/dev/null 2>&1; then
+			echo "Anvil 2 started. Chain ID: $(cast chain-id --rpc-url "$ANVIL_RPC_URL_2")"
+			break
+		fi
+		sleep 1
+	done
+	if ! cast chain-id --rpc-url "$ANVIL_RPC_URL_2" >/dev/null 2>&1; then
+		echo "ERROR: Anvil 2 failed to start or respond in time."
+		exit 1
+	fi
+}
+
+stop_anvils() {
+	if [ -n "$ANVIL_PID_1" ]; then
+		echo "Stopping Anvil 1 (PID: $ANVIL_PID_1)..."
+		kill "$ANVIL_PID_1" 2>/dev/null || true
+		ANVIL_PID_1=""
+	fi
+	if [ -n "$ANVIL_PID_2" ]; then
+		echo "Stopping Anvil 2 (PID: $ANVIL_PID_2)..."
+		kill "$ANVIL_PID_2" 2>/dev/null || true
+		ANVIL_PID_2=""
+	fi
+}
+
 # Function to create a temporary directory with proper OS handling
 create_tmp_dir() {
 	local prefix="$1"
@@ -198,4 +253,95 @@ setup_node() {
 	eval "${NODE_NAME}_DAEMON_PID=$NODE_DAEMON_PID"
 
 	return 0
+}
+
+# Function to deploy the HTTP echo worker and return its Work Order ID
+# Args:
+#   $1 - Daemon UDS Path
+#   $2 - A unique suffix for file names to avoid collisions
+deploy_http_echo_worker() {
+	local daemon_sock="$1"
+	local suffix="$2"
+
+	echo "Preparing HTTP echo work order with suffix '$suffix'..." >&2
+	local HTTP_ECHO_WORKER_JS_CONTENT
+	HTTP_ECHO_WORKER_JS_CONTENT=$(cat "$HTTP_ECHO_WORKER_JS_BUNDLE_PATH")
+	local HTTP_ECHO_WORKER_JS_B64
+	HTTP_ECHO_WORKER_JS_B64=$(printf "%s" "$HTTP_ECHO_WORKER_JS_CONTENT" | base64 | tr -d '\n')
+
+	local HTTP_ECHO_WORKER_BUNDLE_PAYLOAD_FILE="$TEST_DIR/http_echo_worker_bundle_payload_${suffix}.json"
+	jq -n \
+		--arg vm "nxcc/workerd" \
+		--arg executable_b64 "$HTTP_ECHO_WORKER_JS_B64" \
+		'{vm: $vm, executable: $executable_b64, metadata: {}}' >"$HTTP_ECHO_WORKER_BUNDLE_PAYLOAD_FILE"
+
+	local HTTP_ECHO_WORKER_BUNDLE_PAYLOAD_B64_FILE="$TEST_DIR/http_echo_worker_bundle_payload_b64_${suffix}.txt"
+	base64 <"$HTTP_ECHO_WORKER_BUNDLE_PAYLOAD_FILE" | tr -d '\n' >"$HTTP_ECHO_WORKER_BUNDLE_PAYLOAD_B64_FILE"
+
+	local HTTP_ECHO_WORKER_BUNDLE_DSSE_FILE="$TEST_DIR/http_echo_worker_bundle_dsse_${suffix}.json"
+	jq -n \
+		--rawfile payload_b64 "$HTTP_ECHO_WORKER_BUNDLE_PAYLOAD_B64_FILE" \
+		--arg payload_type "application/vnd.nxcc.workerbundlepayload.v1+json" \
+		'{payload: $payload_b64, payloadType: $payload_type, signatures: [{keyid: "mock", sig: "'"$(printf "%s" "mocksig" | base64 | tr -d '\n')"'"}]}' >"$HTTP_ECHO_WORKER_BUNDLE_DSSE_FILE"
+
+	local HTTP_ECHO_WORKER_BUNDLE_DSSE_B64_FILE="$TEST_DIR/http_echo_worker_bundle_dsse_b64_${suffix}.txt"
+	base64 <"$HTTP_ECHO_WORKER_BUNDLE_DSSE_FILE" | tr -d '\n' >"$HTTP_ECHO_WORKER_BUNDLE_DSSE_B64_FILE"
+
+	local HTTP_ECHO_WORKER_MANIFEST_FILE="$TEST_DIR/http_echo_worker_manifest_${suffix}.json"
+	jq -n \
+		--rawfile bundle_source_b64 "$HTTP_ECHO_WORKER_BUNDLE_DSSE_B64_FILE" \
+		"{
+        bundle: {source: (\"data:application/json;base64,\" + \$bundle_source_b64), hash: null},
+        identities: [],
+        userdata: {}
+    }" >"$HTTP_ECHO_WORKER_MANIFEST_FILE"
+
+	local HTTP_ECHO_WORK_ORDER_PAYLOAD_FILE="$TEST_DIR/http_echo_work_order_payload_${suffix}.json"
+	jq -n \
+		--arg id "http-echo-work-order-${suffix}-$(date +%s%N)" \
+		--slurpfile worker_manifest "$HTTP_ECHO_WORKER_MANIFEST_FILE" \
+		'{
+        id: $id,
+        worker: $worker_manifest[0],
+        events: [
+            {"handler": "fetch", "kind": "http_request"}
+        ]
+    }' >"$HTTP_ECHO_WORK_ORDER_PAYLOAD_FILE"
+
+	local HTTP_ECHO_WORK_ORDER_PAYLOAD_B64_FILE="$TEST_DIR/http_echo_work_order_payload_b64_${suffix}.txt"
+	base64 <"$HTTP_ECHO_WORK_ORDER_PAYLOAD_FILE" | tr -d '\n' >"$HTTP_ECHO_WORK_ORDER_PAYLOAD_B64_FILE"
+
+	local HTTP_ECHO_WORK_ORDER_DSSE_FILE="$TEST_DIR/http_echo_work_order_dsse_${suffix}.json"
+	jq -n \
+		--rawfile payload_b64 "$HTTP_ECHO_WORK_ORDER_PAYLOAD_B64_FILE" \
+		--arg payload_type "$DSSE_WORK_ORDER_PAYLOAD_TYPE" \
+		'{payload: $payload_b64, payloadType: $payload_type, signatures: [{keyid: "mock", sig: "'"$(printf "%s" "mocksig" | base64 | tr -d '\n')"'"}]}' >"$HTTP_ECHO_WORK_ORDER_DSSE_FILE"
+
+	local HTTP_ECHO_WORK_ORDER_DSSE_B64_FILE="$TEST_DIR/http_echo_work_order_dsse_b64_${suffix}.txt"
+	base64 <"$HTTP_ECHO_WORK_ORDER_DSSE_FILE" | tr -d '\n' >"$HTTP_ECHO_WORK_ORDER_DSSE_B64_FILE"
+
+	local GRPCURL_SUBMIT_HTTP_ECHO_WO_PAYLOAD_FILE="$TEST_DIR/submit_http_echo_wo_payload_${suffix}.json"
+	jq -n \
+		--rawfile work_order_dsse_bytes "$HTTP_ECHO_WORK_ORDER_DSSE_B64_FILE" \
+		'{work_order_dsse_bytes: $work_order_dsse_bytes}' >"$GRPCURL_SUBMIT_HTTP_ECHO_WO_PAYLOAD_FILE"
+
+	echo "Submitting HTTP echo work order to $daemon_sock..." >&2
+	local submit_response
+	submit_response=$(grpcurl_submit_work_order "$daemon_sock" "$GRPCURL_SUBMIT_HTTP_ECHO_WO_PAYLOAD_FILE")
+
+	local submit_success
+	submit_success=$(echo "$submit_response" | jq -r .success)
+	if [ "$submit_success" != "true" ]; then
+		echo "ERROR: Submitting HTTP echo work order was not successful: $submit_response"
+		exit 1
+	fi
+
+	local work_order_id
+	work_order_id=$(echo "$submit_response" | jq -r .workOrderId)
+	if [ -z "$work_order_id" ] || [ "$work_order_id" = "null" ]; then
+		echo "ERROR: Failed to get workOrderId from HTTP echo work order submission."
+		exit 1
+	fi
+
+	echo "$work_order_id"
 }
