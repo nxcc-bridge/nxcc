@@ -317,8 +317,9 @@ sleep 1
 # shellcheck disable=SC2154  # charlie_* variables are set by setup_node
 grpcurl_attach_vm "$charlie_DAEMON_SOCK" "$charlie_VM_ID" "$charlie_VM_SOCK"
 
-echo "⏳ Waiting for P2P network to stabilize..."
-sleep 3
+# Wait for all nodes to properly connect to each other
+# In a 3-node setup, each node should connect to 2 other nodes
+wait_for_peer_connections "$NODE1_HTTP_PORT $NODE2_HTTP_PORT $NODE3_HTTP_PORT" 2 30
 
 echo "✅ All nodes started and connected to P2P network"
 

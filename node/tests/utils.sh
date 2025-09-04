@@ -35,6 +35,67 @@ cleanup_node() {
 	fi
 }
 
+# Function to wait for all nodes to be properly connected to each other
+# Args:
+#   $1 - Space-separated list of HTTP ports (e.g., "6922 6923 6924")
+#   $2 - Expected number of peer connections per node (e.g., 2 for 3-node setup)
+#   $3 - Timeout in seconds (default: 30)
+wait_for_peer_connections() {
+	HTTP_PORTS="$1"
+	EXPECTED_PEER_COUNT="$2"
+	TIMEOUT="${3:-30}"
+
+	echo "⏳ Waiting for all nodes to establish peer connections..."
+	echo "   Expected connections per node: $EXPECTED_PEER_COUNT"
+
+	# Convert space-separated ports to a list we can iterate over
+	PORT_LIST=""
+	for port in $HTTP_PORTS; do
+		PORT_LIST="$PORT_LIST $port"
+	done
+
+	start_time=$(date +%s)
+	while true; do
+		current_time=$(date +%s)
+		elapsed=$((current_time - start_time))
+
+		if [ $elapsed -ge "$TIMEOUT" ]; then
+			echo "❌ ERROR: Timeout waiting for peer connections after ${TIMEOUT}s"
+			echo "   Checking final connection status..."
+			for port in $PORT_LIST; do
+				echo "   Node on port $port:"
+				curl -s "http://127.0.0.1:$port/api/status" | jq -r '.connected_peers | to_entries | map("     " + .key + " -> " + (.value | tostring)) | .[]' 2>/dev/null || echo "     Failed to get status"
+			done
+			return 1
+		fi
+
+		# Check all nodes have the expected number of connections
+		all_connected=true
+		for port in $PORT_LIST; do
+			# Get connected_peers count for this node
+			peer_count=$(curl -s "http://127.0.0.1:$port/api/status" 2>/dev/null | jq -r '.connected_peers | length' 2>/dev/null || echo "0")
+
+			if [ "$peer_count" -ne "$EXPECTED_PEER_COUNT" ]; then
+				all_connected=false
+				break
+			fi
+		done
+
+		if [ "$all_connected" = "true" ]; then
+			echo "✅ All nodes have established expected peer connections"
+			# Show final connection summary
+			for port in $PORT_LIST; do
+				peer_count=$(curl -s "http://127.0.0.1:$port/api/status" 2>/dev/null | jq -r '.connected_peers | length' 2>/dev/null || echo "0")
+				echo "   Node on port $port: $peer_count connected peers"
+			done
+			return 0
+		fi
+
+		printf "."
+		sleep 1
+	done
+}
+
 # Function to set up and start a node
 # Args:
 #   $1 - Node name (e.g., "alice")

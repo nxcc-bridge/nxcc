@@ -335,7 +335,7 @@ async fn submit_work_order_handler(
 
 /// Handles status requests, returning node health and P2P information.
 async fn status_handler(State(state): State<Arc<AppState>>) -> Result<impl IntoResponse, ApiError> {
-    info!("Received status request");
+    tracing::trace!("Received status request");
 
     // Get peer ID from local key
     let peer_id = state.local_key.public().to_peer_id().to_string();
