@@ -38,39 +38,51 @@ pub fn test_policy_request(secret_ids: Vec<SecretId>) -> PolicyExecutionRequest 
             bundle_hash: vec![1; 32],
             signature: vec![2; 64],
         },
-        env_report: EnvReport {
-            attestation: AttestationBundle {
-                raw_attestation: nxcc_interface::types::attestation::RawAttestation {
-                    platform_type: "test".to_string(),
-                    evidence: vec![0u8; 32],
-                    certificates: None,
+        env_report: {
+            let ephemeral_key = vec![3; 32];
+            let test_userdata = nxcc_attestation::user_data_binding::UserData::new(
+                ephemeral_key.clone(),
+                vec![
+                    nxcc_attestation::BlockInfo {
+                        chain_id: 1,
+                        chain_name: "test1".to_string(),
+                        block_number: 1,
+                        block_hash: vec![4, 5],
+                        timestamp: 0,
+                        fetched_at: 0,
+                    },
+                    nxcc_attestation::BlockInfo {
+                        chain_id: 2,
+                        chain_name: "test2".to_string(),
+                        block_number: 2,
+                        block_hash: vec![6, 7],
+                        timestamp: 0,
+                        fetched_at: 0,
+                    },
+                ],
+            );
+            let detached_userdata = test_userdata.to_cbor().unwrap();
+            let userdata_hash =
+                nxcc_attestation::user_data_binding::hash_userdata(&detached_userdata);
+
+            // Create valid null evidence
+            let null_evidence = nxcc_attestation::providers::null::NullAttestationEvidence {
+                userdata_hash: userdata_hash.to_vec(),
+                ephemeral_key: ephemeral_key.clone(),
+            };
+            let evidence_bytes = serde_json::to_vec(&null_evidence).unwrap();
+
+            EnvReport {
+                attestation: AttestationBundle {
+                    raw_attestation: nxcc_interface::types::attestation::RawAttestation {
+                        platform_type: "null".to_string(),
+                        evidence: evidence_bytes,
+                        certificates: None,
+                    },
+                    detached_userdata,
                 },
-                detached_userdata: {
-                    let test_userdata = nxcc_attestation::user_data_binding::UserData::new(
-                        vec![3; 32], // ephemeral key
-                        vec![
-                            nxcc_attestation::BlockInfo {
-                                chain_id: 1,
-                                chain_name: "test1".to_string(),
-                                block_number: 1,
-                                block_hash: vec![4, 5],
-                                timestamp: 0,
-                                fetched_at: 0,
-                            },
-                            nxcc_attestation::BlockInfo {
-                                chain_id: 2,
-                                chain_name: "test2".to_string(),
-                                block_number: 2,
-                                block_hash: vec![6, 7],
-                                timestamp: 0,
-                                fetched_at: 0,
-                            },
-                        ],
-                    );
-                    test_userdata.to_cbor().unwrap()
-                },
-            },
-            operator_signature: None,
+                operator_signature: None,
+            }
         },
     }
 }

@@ -153,8 +153,7 @@ setup_node() {
 
 	# Start Enclave
 	echo "Starting $NODE_NAME Enclave..."
-	# Enable test attestation providers for integration tests (both env var and CLI flag supported)
-	NXCC_ENABLE_TEST_PROVIDERS=true RUST_LOG=nxcc_platform_enclave=debug "$ENCLAVE_BIN" --grpc-mode uds --grpc-uds-path "$NODE_ENCLAVE_SOCK" --enable-test-providers --verbose &
+	RUST_LOG=nxcc_platform_enclave=debug "$ENCLAVE_BIN" --grpc-mode uds --grpc-uds-path "$NODE_ENCLAVE_SOCK" --verbose &
 	NODE_ENCLAVE_PID=$!
 	sleep 1
 

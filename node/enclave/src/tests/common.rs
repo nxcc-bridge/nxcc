@@ -51,11 +51,20 @@ pub fn test_env_report_for_client(client_kx_public_key: &[u8]) -> EnvReport {
     use nxcc_attestation::user_data_binding;
     let userdata = user_data_binding::UserData::new(client_kx_public_key.to_vec(), vec![]);
     let detached_userdata = userdata.to_cbor().unwrap();
+    let userdata_hash = user_data_binding::hash_userdata(&detached_userdata);
+
+    // Create valid null evidence
+    let null_evidence = nxcc_attestation::providers::null::NullAttestationEvidence {
+        userdata_hash: userdata_hash.to_vec(),
+        ephemeral_key: client_kx_public_key.to_vec(),
+    };
+    let evidence_bytes = serde_json::to_vec(&null_evidence).unwrap();
+
     EnvReport {
         attestation: AttestationBundle {
             raw_attestation: nxcc_interface::types::attestation::RawAttestation {
-                platform_type: "test".to_string(),
-                evidence: vec![0u8; 32], // Consistent measurement for tests
+                platform_type: "null".to_string(),
+                evidence: evidence_bytes,
                 certificates: None,
             },
             detached_userdata,

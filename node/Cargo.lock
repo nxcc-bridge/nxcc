@@ -4224,6 +4224,7 @@ dependencies = [
  "log",
  "nix 0.29.0",
  "nxcc-interface",
+ "rand 0.8.5",
  "ring",
  "scopeguard",
  "serde",

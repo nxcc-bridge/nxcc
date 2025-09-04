@@ -429,11 +429,20 @@ async fn test_execute_policy_with_attestation_claims() {
     );
 
     let userdata_cbor = test_userdata.to_cbor().unwrap();
+    let userdata_hash = nxcc_attestation::user_data_binding::hash_userdata(&userdata_cbor);
+    let ephemeral_key = vec![0x01; 32]; // Must match the key used in test_userdata creation
+
+    // Create valid null evidence
+    let null_evidence = nxcc_attestation::providers::null::NullAttestationEvidence {
+        userdata_hash: userdata_hash.to_vec(),
+        ephemeral_key: ephemeral_key.clone(),
+    };
+    let evidence_bytes = serde_json::to_vec(&null_evidence).unwrap();
 
     let attestation_bundle = AttestationBundle {
         raw_attestation: RawAttestation {
-            platform_type: "test".to_string(),
-            evidence: vec![0u8; 32], // Simple test evidence
+            platform_type: "null".to_string(),
+            evidence: evidence_bytes,
             certificates: None,
         },
         detached_userdata: userdata_cbor,
@@ -497,7 +506,7 @@ async fn test_execute_policy_with_attestation_claims() {
     let claims = satisfied_contexts[0].attestation_claims.as_ref().unwrap();
 
     // Verify key claims properties
-    assert_eq!(claims.eat_profile, "test-profile");
+    assert_eq!(claims.eat_profile, "urn:nxcc:profile:null-v1");
     assert_eq!(claims.dbgstat, 0); // Test provider uses production mode (debug disabled)
     assert!(!claims.measurements.is_empty());
 
@@ -519,7 +528,7 @@ async fn test_execute_policy_with_attestation_claims() {
     assert_eq!(sent_contexts.len(), 1);
     assert!(sent_contexts[0].attestation_claims.is_some());
     let sent_claims = sent_contexts[0].attestation_claims.as_ref().unwrap();
-    assert_eq!(sent_claims.eat_profile, "test-profile");
+    assert_eq!(sent_claims.eat_profile, "urn:nxcc:profile:null-v1");
     assert!(!sent_claims.measurements.is_empty());
 }
 
@@ -651,10 +660,18 @@ async fn test_execute_policy_verification_before_execution() {
     let good_userdata_hash =
         nxcc_attestation::user_data_binding::hash_userdata(&good_userdata_cbor);
 
+    // Create valid null evidence for the good attestation
+    let ephemeral_key = vec![0x01; 32]; // Must match the key used in test_userdata creation
+    let null_evidence = nxcc_attestation::providers::null::NullAttestationEvidence {
+        userdata_hash: good_userdata_hash.to_vec(),
+        ephemeral_key: ephemeral_key.clone(),
+    };
+    let evidence_bytes = serde_json::to_vec(&null_evidence).unwrap();
+
     let good_attestation = AttestationBundle {
         raw_attestation: RawAttestation {
-            platform_type: "test".to_string(),
-            evidence: vec![0u8; 32], // Simple test evidence
+            platform_type: "null".to_string(),
+            evidence: evidence_bytes,
             certificates: None,
         },
         detached_userdata: good_userdata_cbor,
@@ -735,5 +752,5 @@ async fn test_execute_policy_verification_before_execution() {
     assert!(satisfied_contexts[0].attestation_claims.is_some());
 
     let claims = satisfied_contexts[0].attestation_claims.as_ref().unwrap();
-    assert_eq!(claims.eat_profile, "test-profile");
+    assert_eq!(claims.eat_profile, "urn:nxcc:profile:null-v1");
 }

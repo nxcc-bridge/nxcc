@@ -31,9 +31,8 @@ check_cargo() {
 }
 
 build_binaries() {
-	echo "Building nxcc binaries with test-attestation feature..."
+	echo "Building nxcc binaries feature..."
 	cargo build --manifest-path "$SCRIPT_DIR/Cargo.toml" --target-dir "$SCRIPT_DIR/target" \
-		--features test-attestation \
 		-p nxcc-daemon -p nxcc-platform-enclave -p nxcc-workerd-vm >/dev/null
 }
 

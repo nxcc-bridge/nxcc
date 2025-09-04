@@ -723,4 +723,78 @@ mod tests {
             }
         }
     }
+
+    #[tokio::test]
+    async fn test_null_provider_fallback() {
+        use crate::providers::NullAttestationProvider;
+
+        // Create service with only null provider (simulating no TEE available)
+        let gateway_provider = Arc::new(MockGatewayProvider);
+        let mut service = AttestationService::new(gateway_provider);
+        service.register_provider("null".to_string(), Box::new(NullAttestationProvider::new()));
+
+        // Create a test X25519 public key (simulating KeyExchangeKeyPair.public_key().as_bytes())
+        let ephemeral_key = vec![0xCC; 32];
+        let bundle = service
+            .generate_attestation(&ephemeral_key)
+            .await
+            .map_err(|e| format!("Generation failed: {}", e))
+            .unwrap();
+
+        // Verify it's a null attestation
+        assert_eq!(bundle.raw_attestation.platform_type, "null");
+
+        // Verify the attestation can be verified
+        let claims = service
+            .verify_attestation(&bundle)
+            .await
+            .map_err(|e| format!("Verification failed: {}", e))
+            .unwrap();
+        assert_eq!(claims.eat_profile, "urn:nxcc:profile:null-v1");
+        assert_eq!(claims.hwmodel, Some("null".to_string()));
+        assert_eq!(claims.oemid, Some("nxcc-null".to_string()));
+        assert_eq!(claims.dbgstat, 0);
+
+        // Verify userdata integrity
+        assert!(
+            claims.eat_nonce.is_some(),
+            "Should have userdata hash in eat_nonce"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_null_provider_priority_after_tee() {
+        use crate::{providers::NullAttestationProvider, tdx::hardware::TdxInterface};
+
+        // Mock TDX interface that reports unavailable
+        struct UnavailableTdxInterface;
+        impl TdxInterface for UnavailableTdxInterface {
+            fn is_hardware_available(&self) -> bool {
+                false
+            }
+            fn generate_quote(&self, _report_data: &[u8]) -> anyhow::Result<Vec<u8>> {
+                Err(anyhow::anyhow!("Hardware not available"))
+            }
+        }
+
+        let gateway_provider = Arc::new(MockGatewayProvider);
+        let mut service = AttestationService::new(gateway_provider);
+
+        // Register unavailable TDX provider and null provider
+        let unavailable_tdx =
+            crate::providers::TdxQvlProvider::new_with_interface(Box::new(UnavailableTdxInterface));
+        service.register_provider("tdx".to_string(), Box::new(unavailable_tdx));
+        service.register_provider("null".to_string(), Box::new(NullAttestationProvider::new()));
+
+        // Generate attestation - should fallback to null provider
+        let ephemeral_key = vec![0xDD; 32];
+        let bundle = service.generate_attestation(&ephemeral_key).await.unwrap();
+
+        // Should have used null provider as fallback
+        assert_eq!(bundle.raw_attestation.platform_type, "null");
+
+        // Verify the attestation
+        let claims = service.verify_attestation(&bundle).await.unwrap();
+        assert_eq!(claims.eat_profile, "urn:nxcc:profile:null-v1");
+    }
 }

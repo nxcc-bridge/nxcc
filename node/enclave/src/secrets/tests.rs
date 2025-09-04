@@ -23,10 +23,21 @@ fn test_secret_id(id: u64) -> SecretId {
 // Helper to create a specific AttestationBundle
 fn test_attestation_bundle(detached_userdata: Vec<u8>) -> AttestationBundle {
     use nxcc_interface::types::attestation::RawAttestation;
+    
+    let userdata_hash = nxcc_attestation::user_data_binding::hash_userdata(&detached_userdata);
+    let ephemeral_key = vec![3; 32]; // Default test ephemeral key
+    
+    // Create valid null evidence
+    let null_evidence = nxcc_attestation::providers::null::NullAttestationEvidence {
+        userdata_hash: userdata_hash.to_vec(),
+        ephemeral_key: ephemeral_key.clone(),
+    };
+    let evidence_bytes = serde_json::to_vec(&null_evidence).unwrap();
+    
     AttestationBundle {
         raw_attestation: RawAttestation {
-            platform_type: "test".to_string(),
-            evidence: vec![0u8; 32], // Consistent measurement for tests
+            platform_type: "null".to_string(),
+            evidence: evidence_bytes,
             certificates: None,
         },
         detached_userdata,

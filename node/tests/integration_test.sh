@@ -50,9 +50,8 @@ echo "✅ Operator keys created for Alice and Bob"
 ANVIL_PID_1=""
 ANVIL_PID_2=""
 
-# Build binaries with test-attestation feature for integration testing
-echo "Building NXCC binaries with test-attestation feature..."
-cargo build --features test-attestation
+echo "Building NXCC binaries..."
+cargo build
 
 # Find binaries (assuming they are built in target/debug)
 DAEMON_BIN="$REPO_ROOT/target/$MODE/nxcc-daemon"

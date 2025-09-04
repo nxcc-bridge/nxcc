@@ -3,7 +3,8 @@ use std::{collections::HashMap, sync::Arc};
 use anyhow::Result;
 use async_trait::async_trait;
 use nxcc_attestation::{
-    AttestationProvider, AttestationService, GatewayProvider, providers::TdxQvlProvider,
+    AttestationProvider, AttestationService, GatewayProvider,
+    providers::{NullAttestationProvider, TdxQvlProvider},
     user_data_binding,
 };
 use nxcc_interface::{
@@ -14,105 +15,6 @@ use nxcc_interface::{
 };
 
 use crate::crypto::KeyExchangeKeyPair;
-
-/// Test provider for platform type "test" used in enclave tests
-struct TestAttestationProvider;
-
-#[async_trait]
-impl AttestationProvider for TestAttestationProvider {
-    fn platform_type(&self) -> &str {
-        "test"
-    }
-
-    fn max_user_data_size(&self) -> usize {
-        64
-    }
-
-    fn is_available(&self) -> bool {
-        true
-    }
-
-    async fn update_config(&mut self, _config_json: &str) -> Result<()> {
-        Ok(())
-    }
-
-    async fn generate_attestation(&self, _userdata_hash: &[u8]) -> Result<RawAttestation> {
-        Ok(RawAttestation {
-            platform_type: "test".to_string(),
-            evidence: vec![0u8; 32],
-            certificates: None,
-        })
-    }
-
-    async fn verify_attestation(&self, bundle: &AttestationBundle) -> Result<VerificationResult> {
-        if bundle.raw_attestation.platform_type != "test" {
-            return Ok(VerificationResult::Unsupported);
-        }
-
-        // Try to parse the userdata to detect invalid CBOR
-        match user_data_binding::UserData::from_cbor(&bundle.detached_userdata) {
-            Ok(_) => {
-                // For valid CBOR, return a basic verified result
-                let claims = Box::new(StandardizedClaims {
-                    // Core freshness and context
-                    iat: std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs(),
-                    eat_nonce: None,
-
-                    // Identity and provenance
-                    ueid: Some(vec![0x42; 32]), // Test UUID
-                    sueids: None,
-                    oemid: Some("test".to_string()),
-                    hwmodel: Some("test-model".to_string()),
-                    hwversion: Some("1.0".to_string()),
-
-                    // Debug and boot status
-                    dbgstat: 0, // Production (debug disabled)
-                    oemboot: None,
-
-                    // Software identity
-                    swname: None,
-                    swversion: None,
-                    manifests: None,
-
-                    // Measurements
-                    measurements: vec![nxcc_interface::types::attestation::Measurement {
-                        val: vec![0x42; 48], // Use 48 bytes for sha-384
-                        alg: "sha-384".to_string(),
-                        measurement_type: Some("application".to_string()),
-                        vendor: Some("test".to_string()),
-                        version: Some("1.0".to_string()),
-                    }],
-                    measres: None,
-
-                    // Execution structure
-                    submods: None,
-
-                    // Key binding
-                    cnf: None,
-                    intuse: None,
-
-                    // Lifecycle freshness
-                    uptime: None,
-                    bootcount: None,
-                    bootseed: None,
-
-                    // Profile selection
-                    eat_profile: "test-profile".to_string(),
-
-                    // Assurance artifacts
-                    dloas: None,
-                });
-                Ok(VerificationResult::Verified(claims))
-            }
-            Err(_) => Ok(VerificationResult::Failed(
-                "Failed to parse requester userdata".to_string(),
-            )),
-        }
-    }
-}
 
 pub struct PlatformAttestationManager {
     service: AttestationService,
@@ -129,27 +31,8 @@ impl PlatformAttestationManager {
         // Register TDX QVL provider
         service.register_provider("tdx".to_string(), Box::new(TdxQvlProvider::new()));
 
-        Ok(Self {
-            service,
-            ephemeral_kx_keypair,
-        })
-    }
-
-    #[cfg(feature = "test-attestation")]
-    pub fn new_with_test_providers(
-        ephemeral_kx_keypair: Arc<KeyExchangeKeyPair>,
-        gateway_provider: Arc<dyn GatewayProvider>,
-        enable_test_providers: bool,
-    ) -> Result<Self> {
-        let mut service = AttestationService::new(gateway_provider);
-
-        // Register TDX QVL provider
-        service.register_provider("tdx".to_string(), Box::new(TdxQvlProvider::new()));
-
-        // Register test provider if enabled by config
-        if enable_test_providers {
-            service.register_provider("test".to_string(), Box::new(TestAttestationProvider));
-        }
+        // Register null provider as fallback
+        service.register_provider("null".to_string(), Box::new(NullAttestationProvider::new()));
 
         Ok(Self {
             service,

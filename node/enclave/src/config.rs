@@ -23,12 +23,6 @@ pub struct EnclaveConfig {
     #[serde(default)]
     #[clap(flatten)]
     pub grpc: GrpcConfig,
-
-    /// Enable test attestation providers for integration testing
-    #[cfg(feature = "test-attestation")]
-    #[arg(long)]
-    #[serde(default)]
-    pub enable_test_providers: bool,
 }
 
 /// Configuration for the gRPC interface
@@ -121,16 +115,6 @@ impl EnclaveConfig {
         }
         // Only merge grpc config if any grpc arguments were provided
         figment = figment.merge(("grpc", cli_args.grpc));
-
-        #[cfg(feature = "test-attestation")]
-        {
-            // Check if --enable-test-providers was explicitly provided
-            use clap::Parser;
-            let args: Vec<String> = std::env::args().collect();
-            if args.iter().any(|arg| arg == "--enable-test-providers") {
-                figment = figment.merge(("enable_test_providers", true));
-            }
-        }
 
         // Extract the final configuration
         figment.extract()

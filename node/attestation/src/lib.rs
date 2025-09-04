@@ -93,10 +93,10 @@ impl AttestationService {
 
     /// Generate attestation (auto-detects platform)
     pub async fn generate_attestation(&self, ephemeral_key: &[u8]) -> Result<AttestationBundle> {
-        // Define platform priority. Real TEEs should come first.
+        // Define platform priority. Real TEEs should come first, null provider last.
         #[allow(unused_mut)]
-        let mut platform_priority = std::iter::once("tdx");
-        #[cfg(any(test, feature = "test"))]
+        let mut platform_priority = std::iter::once("tdx").chain(std::iter::once("null"));
+        #[cfg(test)]
         let mut platform_priority = platform_priority.chain(std::iter::once("test"));
 
         let provider = platform_priority.find_map(|platform_type| {
@@ -114,7 +114,13 @@ impl AttestationService {
             let detached_userdata = user_data_payload.to_cbor()?;
             let userdata_hash = user_data_binding::hash_userdata(&detached_userdata);
 
-            let raw_attestation = provider.generate_attestation(&userdata_hash).await?;
+            let raw_attestation = if provider.platform_type() == "null" {
+                // For null provider, create signature-based evidence using ephemeral key
+                self.generate_null_attestation(&userdata_hash, ephemeral_key)
+                    .await?
+            } else {
+                provider.generate_attestation(&userdata_hash).await?
+            };
 
             Ok(AttestationBundle {
                 raw_attestation,
@@ -128,7 +134,7 @@ impl AttestationService {
         }
     }
 
-    #[cfg(any(test, feature = "test"))]
+    #[cfg(test)]
     pub async fn generate_attestation_for_platform(
         &self,
         ephemeral_key: &[u8],
@@ -243,6 +249,35 @@ impl AttestationService {
             }
         }
         Ok(())
+    }
+
+    /// Generate null attestation with signature-based evidence
+    async fn generate_null_attestation(
+        &self,
+        userdata_hash: &[u8],
+        ephemeral_key: &[u8],
+    ) -> Result<RawAttestation> {
+        use serde_json;
+
+        if ephemeral_key.len() != 32 {
+            return Err(anyhow::anyhow!("Ephemeral key must be 32 bytes"));
+        }
+
+        // Create null evidence structure
+        let evidence = crate::providers::null::NullAttestationEvidence {
+            userdata_hash: userdata_hash.to_vec(),
+            ephemeral_key: ephemeral_key.to_vec(),
+        };
+
+        // Serialize evidence to JSON
+        let evidence_bytes = serde_json::to_vec(&evidence)
+            .map_err(|e| anyhow::anyhow!("Failed to serialize null evidence: {}", e))?;
+
+        Ok(RawAttestation {
+            platform_type: "null".to_string(),
+            evidence: evidence_bytes,
+            certificates: None,
+        })
     }
 
     /// Get access to the freshness service for configuration
