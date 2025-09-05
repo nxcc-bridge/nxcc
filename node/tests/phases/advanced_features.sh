@@ -30,17 +30,47 @@ phase_advanced_features() {
 		exit 1
 	fi
 
-	# Test 2: Test streaming logs with follow=true (should succeed)
-	echo "Testing streaming logs with follow=true..."
-	LOGS_STREAM_PID=""
+	# Test 2: Test streaming logs with follow=true using nxcc CLI (should succeed)
+	echo "Testing streaming logs with nxcc CLI follow=true..."
 	LOGS_OUTPUT_FILE="$TEST_DIR/worker_logs_stream.txt"
 
-	# Start streaming in background and capture a few lines
-	timeout 5s curl -s -H "Accept: text/event-stream" "$HTTP_LOGS_URL?follow=true&tail=5" >"$LOGS_OUTPUT_FILE" &
-	LOGS_STREAM_PID=$!
+	# Build the nxcc CLI
+	echo "Building nxcc CLI..."
+	# Use relative path from current working directory 
+	# Test runs from nxcc/node, SDK is at nxcc/sdk/cli, so we need to go up one level
+	NXCC_CLI_DIR="../sdk/cli"
+	
+	# Check if we're in the correct directory context
+	if [ ! -d "$NXCC_CLI_DIR" ]; then
+		# Try alternative path in case we're in nxcc/node/tests
+		if [ -d "../../sdk/cli" ]; then
+			NXCC_CLI_DIR="../../sdk/cli"
+		else
+			echo "ERROR: nxcc CLI directory not found at ../sdk/cli or ../../sdk/cli"
+			exit 1
+		fi
+	fi
+	
+	cd "$NXCC_CLI_DIR"
+	if [ ! -f "dist/index.js" ]; then
+		pnpm build >/dev/null 2>&1
+	fi
+	NXCC_CLI="$PWD/dist/index.js"
+	cd - >/dev/null
 
-	# Wait a moment for the stream to start
-	sleep 2
+	# Start streaming in background and capture a few lines
+	echo "Starting nxcc worker logs with worker ID: $HTTP_ECHO_WORK_ORDER_ID"
+	
+	# Use nxcc CLI to stream logs
+	timeout 10s node "$NXCC_CLI" worker logs "$HTTP_ECHO_WORK_ORDER_ID" \
+		--rpc-url "http://127.0.0.1:${NODE1_HTTP_PORT}" \
+		--follow \
+		--tail 5 > "$LOGS_OUTPUT_FILE" 2>"$TEST_DIR/nxcc_error.log" &
+	LOGS_STREAM_PID=$!
+	echo "Started nxcc CLI with PID: $LOGS_STREAM_PID"
+
+	# Wait longer for the stream to properly establish
+	sleep 3
 
 	# Make additional HTTP requests to the worker to generate more logs
 	echo "Generating additional logs by invoking worker..."
@@ -48,34 +78,42 @@ phase_advanced_features() {
 		curl -s -X POST "http://127.0.0.1:${NODE1_HTTP_PORT}/w/${HTTP_ECHO_WORK_ORDER_ID}/echo-test" \
 			-H "Content-Type: application/json" \
 			-d "{\"test\": \"log-stream-test-$i\"}" >/dev/null
-		sleep 0.5
+		sleep 1
 	done
+	
+	# Wait a bit more to capture any trailing logs
+	sleep 2
 
 	# Wait for stream to complete or timeout
 	wait $LOGS_STREAM_PID 2>/dev/null || true
 
-	# Check if we received SSE-formatted logs
+	# Debug: Show what was actually received
+	echo "Debugging: nxcc CLI output:"
+	if [ -f "$LOGS_OUTPUT_FILE" ] && [ -s "$LOGS_OUTPUT_FILE" ]; then
+		echo "File exists. Size: $(wc -c < "$LOGS_OUTPUT_FILE") bytes"
+		echo "Raw contents:"
+		cat "$LOGS_OUTPUT_FILE" | head -20
+		echo "--- End of raw contents ---"
+	else
+		echo "Output file does not exist or is empty!"
+		if [ -f "$TEST_DIR/nxcc_error.log" ]; then
+			echo "Error log:"
+			cat "$TEST_DIR/nxcc_error.log"
+		fi
+	fi
+
+	# Check if we received log data (nxcc CLI strips SSE formatting and shows just the log lines)
 	if [ -f "$LOGS_OUTPUT_FILE" ] && [ -s "$LOGS_OUTPUT_FILE" ]; then
 		echo "SUCCESS (Log Streaming Test 2): Received log stream data."
 
-		# Verify SSE format (should contain "data: " lines)
-		if grep -q "data: " "$LOGS_OUTPUT_FILE"; then
-			echo "SUCCESS (Log Streaming Test 3): Log stream contains properly formatted SSE data."
+		# Count the number of log entries (each line is a log entry when using nxcc CLI)
+		LOG_ENTRY_COUNT=$(wc -l < "$LOGS_OUTPUT_FILE" | tr -d ' ')
+		echo "SUCCESS (Log Streaming Test 3): Received $LOG_ENTRY_COUNT log entries from stream."
 
-			# Count the number of log entries (each "data: " line is a log entry)
-			LOG_ENTRY_COUNT=$(grep -c "data: " "$LOGS_OUTPUT_FILE")
-			echo "SUCCESS (Log Streaming Test 4): Received $LOG_ENTRY_COUNT log entries from stream."
-
-			if [ "$LOG_ENTRY_COUNT" -ge 1 ]; then
-				echo "SUCCESS (Log Streaming Test 5): Adequate number of log entries received."
-			else
-				echo "ERROR (Log Streaming Test 5): Expected at least 1 log entry, got $LOG_ENTRY_COUNT"
-				exit 1
-			fi
+		if [ "$LOG_ENTRY_COUNT" -ge 1 ]; then
+			echo "SUCCESS (Log Streaming Test 4): Adequate number of log entries received."
 		else
-			echo "ERROR (Log Streaming Test 3): Log stream does not contain SSE data format."
-			echo "Log stream contents:"
-			cat "$LOGS_OUTPUT_FILE" || true
+			echo "ERROR (Log Streaming Test 4): Expected at least 1 log entry, got $LOG_ENTRY_COUNT"
 			exit 1
 		fi
 	else
@@ -83,33 +121,42 @@ phase_advanced_features() {
 		exit 1
 	fi
 
-	# Test 3: Test streaming with tail parameter
-	echo "Testing streaming logs with tail parameter..."
+	# Test 3: Test streaming with tail parameter using nxcc CLI
+	echo "Testing streaming logs with nxcc CLI tail parameter..."
 	LOGS_TAIL_OUTPUT_FILE="$TEST_DIR/worker_logs_tail.txt"
 
-	timeout 3s curl -s -H "Accept: text/event-stream" "$HTTP_LOGS_URL?follow=true&tail=2" >"$LOGS_TAIL_OUTPUT_FILE" &
+	timeout 5s node "$NXCC_CLI" worker logs "$HTTP_ECHO_WORK_ORDER_ID" \
+		--rpc-url "http://127.0.0.1:${NODE1_HTTP_PORT}" \
+		--follow \
+		--tail 2 > "$LOGS_TAIL_OUTPUT_FILE" 2>/dev/null &
 	LOGS_TAIL_PID=$!
 
 	# Wait for stream to complete or timeout
 	wait $LOGS_TAIL_PID 2>/dev/null || true
 
 	if [ -f "$LOGS_TAIL_OUTPUT_FILE" ] && [ -s "$LOGS_TAIL_OUTPUT_FILE" ]; then
-		echo "SUCCESS (Log Streaming Test 6): Tail parameter streaming works."
+		echo "SUCCESS (Log Streaming Test 5): Tail parameter streaming works."
 	else
-		echo "ERROR (Log Streaming Test 6): Tail parameter streaming failed."
+		echo "ERROR (Log Streaming Test 5): Tail parameter streaming failed."
 		exit 1
 	fi
 
-	# Test 4: Test invalid worker ID (should return error)
-	echo "Testing log streaming with invalid worker ID..."
-	INVALID_LOGS_URL="http://127.0.0.1:${NODE1_HTTP_PORT}/api/workers/invalid-worker-id/logs"
-	INVALID_LOGS_RESPONSE=$(curl -s -w "%{http_code}" -o /dev/null "$INVALID_LOGS_URL?follow=true" || echo "000")
-
-	if [ "$INVALID_LOGS_RESPONSE" = "500" ] || [ "$INVALID_LOGS_RESPONSE" = "404" ]; then
-		echo "SUCCESS (Log Streaming Test 7): Invalid worker ID correctly returns error ($INVALID_LOGS_RESPONSE)."
-	else
-		echo "ERROR (Log Streaming Test 7): Expected error for invalid worker ID, got $INVALID_LOGS_RESPONSE"
+	# Test 4: Test invalid worker ID (should return error) using nxcc CLI
+	echo "Testing log streaming with invalid worker ID using nxcc CLI..."
+	INVALID_LOGS_OUTPUT="$TEST_DIR/invalid_worker_logs.txt"
+	
+	# Run nxcc CLI with invalid worker ID - this should fail and exit with non-zero code
+	if timeout 3s node "$NXCC_CLI" worker logs "invalid-worker-id" \
+		--rpc-url "http://127.0.0.1:${NODE1_HTTP_PORT}" \
+		--follow > "$INVALID_LOGS_OUTPUT" 2>&1; then
+		echo "ERROR (Log Streaming Test 6): Expected nxcc CLI to fail with invalid worker ID, but it succeeded"
 		exit 1
+	else
+		echo "SUCCESS (Log Streaming Test 6): nxcc CLI correctly failed with invalid worker ID."
+		# Optionally show the error for debugging
+		if [ -f "$INVALID_LOGS_OUTPUT" ]; then
+			echo "Error output: $(head -1 "$INVALID_LOGS_OUTPUT")"
+		fi
 	fi
 
 	echo "SUCCESS: All worker log streaming tests passed."

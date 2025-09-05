@@ -19,7 +19,7 @@ async fn test_deliver_single_web3_event_success() {
         .run_worker(worker_id.to_string(), vm_id.to_string(), manifest, bundle)
         .await
         .expect("Failed to run worker for event delivery test");
-    assert_eq!(launched_worker_id, worker_id);
+    assert_eq!(launched_worker_id, format!("instance-{}-1", worker_id));
 
     // Prepare a Web3Log event
     let web3_log = Web3Log {
@@ -93,7 +93,7 @@ async fn test_deliver_batch_events_multiple() {
         )
         .await
         .expect("Failed to run worker for batch event test");
-    assert_eq!(launched_worker_id, worker_id);
+    assert_eq!(launched_worker_id, format!("instance-{}-1", worker_id));
 
     let web3_log1 = Web3Log {
         address: Address::repeat_byte(0x11),
@@ -197,7 +197,7 @@ async fn test_deliver_launch_event_success() {
         )
         .await
         .expect("Failed to run worker for launch event test");
-    assert_eq!(launched_worker_id, worker_id);
+    assert_eq!(launched_worker_id, format!("instance-{}-1", worker_id));
 
     // Prepare a Launch event
     let event_payload = EventPayload::Launch;

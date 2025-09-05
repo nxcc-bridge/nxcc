@@ -109,6 +109,7 @@ impl WorkerdVmm {
     ) where
         R: AsyncReadExt + Unpin,
     {
+        debug!(?instance_id, output_type, "log_stream task started");
         let mut line = String::new();
         while let Ok(bytes_read) = reader.read_line(&mut line).await {
             if bytes_read == 0 {
@@ -124,7 +125,9 @@ impl WorkerdVmm {
             }
 
             // Write to new log buffer system
-            log_buffer.write_log(formatted_line.trim_end().to_string());
+            let log_line = formatted_line.trim_end().to_string();
+            debug!(?instance_id, "Writing to log buffer: {}", log_line);
+            log_buffer.write_log(log_line);
 
             match output_type {
                 "stdout" => info!(?instance_id, "stdout: {}", line.trim()),
@@ -359,6 +362,7 @@ impl VmRuntime for WorkerdVmm {
         let log_buffer = self.log_manager.register_worker(instance_id.clone());
 
         if let Some(stdout) = child_process.stdout.take() {
+            debug!(?instance_id, "Spawning stdout log stream task");
             tokio::spawn(WorkerdVmm::log_stream(
                 BufReader::new(stdout),
                 instance_id.clone(),
@@ -366,8 +370,11 @@ impl VmRuntime for WorkerdVmm {
                 logs_arc.clone(),
                 log_buffer.clone(),
             ));
+        } else {
+            debug!(?instance_id, "No stdout to capture");
         }
         if let Some(stderr) = child_process.stderr.take() {
+            debug!(?instance_id, "Spawning stderr log stream task");
             tokio::spawn(WorkerdVmm::log_stream(
                 BufReader::new(stderr),
                 instance_id.clone(),
@@ -375,6 +382,8 @@ impl VmRuntime for WorkerdVmm {
                 logs_arc.clone(),
                 log_buffer.clone(),
             ));
+        } else {
+            debug!(?instance_id, "No stderr to capture");
         }
 
         let worker_data = Arc::new(WorkerData {
@@ -686,6 +695,7 @@ impl VmRuntime for WorkerdVmm {
             None
         };
         if let Some(logs) = self.log_manager.get_worker_logs(&id, tail_lines_opt) {
+            debug!("Found {} historical logs for worker {}", logs.len(), id);
             for entry in logs {
                 // Convert Instant to Unix timestamp milliseconds
                 let timestamp_ms = SystemTime::now()
@@ -704,6 +714,7 @@ impl VmRuntime for WorkerdVmm {
                 }
             }
         } else {
+            debug!("No logs found for worker {}", id);
             // Worker not found
             return Err(WorkerdVmError::WorkerNotFound(id).into());
         }
@@ -711,8 +722,14 @@ impl VmRuntime for WorkerdVmm {
         // If follow is true and worker is active, stream new logs
         if follow {
             if let Some(mut streamer) = self.log_manager.create_log_streamer(&id) {
+                debug!(
+                    "Successfully created log streamer for worker {}, starting streaming task",
+                    id
+                );
                 tokio::spawn(async move {
+                    debug!("Log streaming task started for worker {}", id);
                     while let Some(entry) = streamer.next_log().await {
+                        debug!("Streaming new log for worker {}: {}", id, entry.line);
                         let timestamp_ms = SystemTime::now()
                             .duration_since(UNIX_EPOCH)
                             .unwrap_or_default()
@@ -728,7 +745,13 @@ impl VmRuntime for WorkerdVmm {
                             break;
                         }
                     }
+                    debug!("Log streaming task ended for worker {}", id);
                 });
+            } else {
+                warn!(
+                    "Failed to create log streamer for worker {} - worker may not be active",
+                    id
+                );
             }
         }
 

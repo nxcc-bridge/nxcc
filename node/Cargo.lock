@@ -4422,6 +4422,7 @@ dependencies = [
  "nxcc-vm-base",
  "once_cell",
  "rand 0.9.2",
+ "rustls",
  "serde",
  "serde_json",
  "sha2",

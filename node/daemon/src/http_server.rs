@@ -441,13 +441,20 @@ async fn worker_logs_handler(
     // Convert the gRPC stream to SSE events
     let sse_stream = log_stream.map(|result| match result {
         Ok(log_response) => {
+            info!(
+                "HTTP server received log from enclave: {}",
+                log_response.log_line
+            );
             Ok::<Event, axum::BoxError>(Event::default().data(log_response.log_line).event("log"))
         }
-        Err(e) => Ok::<Event, axum::BoxError>(
-            Event::default()
-                .data(format!("Error: {}", e))
-                .event("error"),
-        ),
+        Err(e) => {
+            error!("HTTP server received error from enclave log stream: {}", e);
+            Ok::<Event, axum::BoxError>(
+                Event::default()
+                    .data(format!("Error: {}", e))
+                    .event("error"),
+            )
+        }
     });
 
     Ok(Sse::new(sse_stream).keep_alive(

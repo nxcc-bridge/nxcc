@@ -3,6 +3,10 @@ name = "nxcc-workerd-vm"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "nxcc-workerd-vm"
+path = "src/main.rs"
+
 [dependencies]
 nxcc-vm-base = { path = "../base" }
 nxcc-interface = { path = "../../interface" }
@@ -65,3 +69,5 @@ hkdf = "0.12.4"
 hmac = "0.12.1"
 sha2 = "0.10.8"
 tracing-test = "0.2.5"
+tokio-stream = "0.1.17"
+rustls = { version = "0.23", features = ["aws_lc_rs"] }

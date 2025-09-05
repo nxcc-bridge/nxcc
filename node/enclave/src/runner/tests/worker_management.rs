@@ -12,13 +12,14 @@ async fn test_run_worker_success() {
     let bundle_code = vec![1, 2, 3];
     let bundle_obj = test_worker_bundle(bundle_code.clone());
     // launch_payload is no longer passed directly to run_worker
-    let expected_instance_id = "instance-test-worker-1-1"; // MockVmServiceClient format
+    let worker_id = "test-worker-1-1";
+    let expected_instance_id = "instance-test-worker-1-1-1"; // MockVmServiceClient format
 
     attach_mock_vm(&runner_service, vm_id, mock_client.clone()).await; // Clone needed if we inspect mock later
 
     let result = runner_service
         .run_worker(
-            expected_instance_id.to_string(),
+            worker_id.to_string(),
             vm_id.to_string(),
             manifest_obj.clone(),
             bundle_obj.clone(),
