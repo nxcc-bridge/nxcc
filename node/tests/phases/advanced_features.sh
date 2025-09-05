@@ -50,10 +50,10 @@ phase_advanced_features() {
 
 	# Build the nxcc CLI
 	echo "Building nxcc CLI..."
-	# Use relative path from current working directory 
+	# Use relative path from current working directory
 	# Test runs from nxcc/node, SDK is at nxcc/sdk/cli, so we need to go up one level
 	NXCC_CLI_DIR="../sdk/cli"
-	
+
 	# Check if we're in the correct directory context
 	if [ ! -d "$NXCC_CLI_DIR" ]; then
 		# Try alternative path in case we're in nxcc/node/tests
@@ -64,22 +64,22 @@ phase_advanced_features() {
 			exit 1
 		fi
 	fi
-	
-	cd "$NXCC_CLI_DIR"
+
+	cd "$NXCC_CLI_DIR" || return
 	if [ ! -f "dist/index.js" ]; then
 		pnpm build >/dev/null 2>&1
 	fi
 	NXCC_CLI="$PWD/dist/index.js"
-	cd - >/dev/null
+	cd - >/dev/null || return
 
 	# Start streaming in background and capture a few lines
 	echo "Starting nxcc worker logs with worker ID: $HTTP_ECHO_WORK_ORDER_ID"
-	
+
 	# Use nxcc CLI to stream logs
 	timeout 10s node "$NXCC_CLI" worker logs "$HTTP_ECHO_WORK_ORDER_ID" \
 		--rpc-url "http://127.0.0.1:${NODE1_HTTP_PORT}" \
 		--follow \
-		--tail 5 > "$LOGS_OUTPUT_FILE" 2>"$TEST_DIR/nxcc_error.log" &
+		--tail 5 >"$LOGS_OUTPUT_FILE" 2>"$TEST_DIR/nxcc_error.log" &
 	LOGS_STREAM_PID=$!
 	echo "Started nxcc CLI with PID: $LOGS_STREAM_PID"
 
@@ -94,7 +94,7 @@ phase_advanced_features() {
 			-d "{\"test\": \"log-stream-test-$i\"}" >/dev/null
 		sleep 1
 	done
-	
+
 	# Wait a bit more to capture any trailing logs
 	sleep 2
 
@@ -104,9 +104,9 @@ phase_advanced_features() {
 	# Debug: Show what was actually received
 	echo "Debugging: nxcc CLI output:"
 	if [ -f "$LOGS_OUTPUT_FILE" ] && [ -s "$LOGS_OUTPUT_FILE" ]; then
-		echo "File exists. Size: $(wc -c < "$LOGS_OUTPUT_FILE") bytes"
+		echo "File exists. Size: $(wc -c <"$LOGS_OUTPUT_FILE") bytes"
 		echo "Raw contents:"
-		cat "$LOGS_OUTPUT_FILE" | head -20
+		head -20 "$LOGS_OUTPUT_FILE"
 		echo "--- End of raw contents ---"
 	else
 		echo "Output file does not exist or is empty!"
@@ -121,7 +121,7 @@ phase_advanced_features() {
 		echo "SUCCESS (Log Streaming Test 2): Received log stream data."
 
 		# Count the number of log entries (each line is a log entry when using nxcc CLI)
-		LOG_ENTRY_COUNT=$(wc -l < "$LOGS_OUTPUT_FILE" | tr -d ' ')
+		LOG_ENTRY_COUNT=$(wc -l <"$LOGS_OUTPUT_FILE" | tr -d ' ')
 		echo "SUCCESS (Log Streaming Test 3): Received $LOG_ENTRY_COUNT log entries from stream."
 
 		if [ "$LOG_ENTRY_COUNT" -ge 1 ]; then
@@ -142,7 +142,7 @@ phase_advanced_features() {
 	timeout 5s node "$NXCC_CLI" worker logs "$HTTP_ECHO_WORK_ORDER_ID" \
 		--rpc-url "http://127.0.0.1:${NODE1_HTTP_PORT}" \
 		--follow \
-		--tail 2 > "$LOGS_TAIL_OUTPUT_FILE" 2>/dev/null &
+		--tail 2 >"$LOGS_TAIL_OUTPUT_FILE" 2>/dev/null &
 	LOGS_TAIL_PID=$!
 
 	# Wait for stream to complete or timeout
@@ -158,11 +158,11 @@ phase_advanced_features() {
 	# Test 4: Test invalid worker ID (should return error) using nxcc CLI
 	echo "Testing log streaming with invalid worker ID using nxcc CLI..."
 	INVALID_LOGS_OUTPUT="$TEST_DIR/invalid_worker_logs.txt"
-	
+
 	# Run nxcc CLI with invalid worker ID - this should fail and exit with non-zero code
 	if timeout 3s node "$NXCC_CLI" worker logs "invalid-worker-id" \
 		--rpc-url "http://127.0.0.1:${NODE1_HTTP_PORT}" \
-		--follow > "$INVALID_LOGS_OUTPUT" 2>&1; then
+		--follow >"$INVALID_LOGS_OUTPUT" 2>&1; then
 		echo "ERROR (Log Streaming Test 6): Expected nxcc CLI to fail with invalid worker ID, but it succeeded"
 		exit 1
 	else
@@ -264,6 +264,7 @@ phase_advanced_features() {
 
 	# 7d. Check for scheduled event execution in logs
 	echo "Checking for scheduled event execution in Alice's daemon logs..."
+	# shellcheck disable=SC2154  # alice_DAEMON_LOG is set by setup_node function
 	if grep -q "Firing scheduled event" "$alice_DAEMON_LOG"; then
 		SCHEDULED_EVENT_COUNT=$(grep -c "Firing scheduled event" "$alice_DAEMON_LOG")
 		echo "SUCCESS (Scheduled Events Test): Found $SCHEDULED_EVENT_COUNT scheduled event(s) in daemon logs."

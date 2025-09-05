@@ -6,7 +6,7 @@ phase_http_worker() {
 	# ==============================================================================
 	echo ""
 	echo "📡 === PHASE 4: HTTP Worker Testing with Attestation Policies ==="
-	
+
 	# 5a. Deploy the HTTP echo worker
 	# shellcheck disable=SC2154 # alice_DAEMON_SOCK is set by setup
 	HTTP_ECHO_WORK_ORDER_ID=$(deploy_http_echo_worker "$alice_DAEMON_SOCK" "main-test")
@@ -36,6 +36,7 @@ phase_http_worker() {
 		# shellcheck disable=SC2154  # alice_* and bob_* vars are set by setup_node
 		cat "$alice_DAEMON_LOG" || true
 		echo "Alice VM log:"
+		# shellcheck disable=SC2154  # alice_VM_LOG is set by setup_node function
 		cat "$alice_VM_LOG" || true
 		exit 1
 	fi

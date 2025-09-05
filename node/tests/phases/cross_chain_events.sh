@@ -109,6 +109,7 @@ phase_cross_chain_events() {
 	echo "Submitting event-listening work order to Alice and Bob..."
 	# shellcheck disable=SC2154  # alice_DAEMON_SOCK and bob_DAEMON_SOCK are set by setup_node
 	grpcurl_submit_work_order "$alice_DAEMON_SOCK" "$GRPCURL_SUBMIT_EVENT_WO_PAYLOAD_FILE"
+	# shellcheck disable=SC2154  # bob_DAEMON_SOCK is set by setup_node
 	grpcurl_submit_work_order "$bob_DAEMON_SOCK" "$GRPCURL_SUBMIT_EVENT_WO_PAYLOAD_FILE"
 
 	# 4c. Trigger ValueChanged on chain 1, check update on chain 2
@@ -143,11 +144,13 @@ phase_cross_chain_events() {
 		# shellcheck disable=SC2154  # alice_* and bob_* vars are set by setup_node
 		cat "$alice_DAEMON_LOG" || true
 		echo "Alice VM log:"
+		# shellcheck disable=SC2154  # alice_VM_LOG is set by setup_node function
 		cat "$alice_VM_LOG" || true
 		echo "Bob daemon log:"
 		# shellcheck disable=SC2154  # bob_DAEMON_LOG is set by setup_node function
 		cat "$bob_DAEMON_LOG" || true
 		echo "Bob VM log:"
+		# shellcheck disable=SC2154  # bob_VM_LOG is set by setup_node function
 		cat "$bob_VM_LOG" || true
 		exit 1
 	fi
@@ -185,11 +188,13 @@ phase_cross_chain_events() {
 		# shellcheck disable=SC2154  # alice_* and bob_* vars are set by setup_node
 		cat "$alice_DAEMON_LOG" || true
 		echo "Alice VM log:"
+		# shellcheck disable=SC2154  # alice_VM_LOG is set by setup_node function
 		cat "$alice_VM_LOG" || true
 		echo "Bob daemon log:"
 		# shellcheck disable=SC2154  # bob_DAEMON_LOG is set by setup_node function
 		cat "$bob_DAEMON_LOG" || true
 		echo "Bob VM log:"
+		# shellcheck disable=SC2154  # bob_VM_LOG is set by setup_node function
 		cat "$bob_VM_LOG" || true
 		exit 1
 	fi

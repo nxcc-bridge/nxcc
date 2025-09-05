@@ -1,7 +1,7 @@
 #!/bin/sh
 
 setup_nodes() {
-	local num_nodes="$1"
+	num_nodes="$1"
 	echo "🚀 === Setting up $num_nodes-Node Attestation Architecture ==="
 
 	if [ "$num_nodes" -ge 1 ]; then
@@ -52,8 +52,8 @@ setup_nodes() {
 	fi
 
 	if [ "$num_nodes" -gt 1 ]; then
-		local expected_peers=$((num_nodes - 1))
-		local http_ports=""
+		expected_peers=$((num_nodes - 1))
+		http_ports=""
 		if [ "$num_nodes" -ge 1 ]; then http_ports="$http_ports $NODE1_HTTP_PORT"; fi
 		if [ "$num_nodes" -ge 2 ]; then http_ports="$http_ports $NODE2_HTTP_PORT"; fi
 		if [ "$num_nodes" -ge 3 ]; then http_ports="$http_ports $NODE3_HTTP_PORT"; fi
@@ -74,6 +74,7 @@ setup_contracts() {
 	TEST_EVENTS_BYTECODE=$(jq -r .bytecode.object <"$SCRIPT_DIR/out/TestEvents.sol/TestEvents.json")
 	# shellcheck disable=SC2034  # TEST_EVENTS_ABI is extracted but may be used later in tests
 	TEST_EVENTS_ABI=$(jq .abi <"$SCRIPT_DIR/out/TestEvents.sol/TestEvents.json")
+	# shellcheck disable=SC2034  # Variable may be used by other test functions
 	TEST_EVENTS_ABI_STRING=$(jq -c .abi <"$SCRIPT_DIR/out/TestEvents.sol/TestEvents.json")
 	echo "Deploying contract to chain 1 ($ANVIL_CHAIN_ID_1)..."
 	DEPLOY_OUTPUT_1=$(cast send --json --rpc-url "$ANVIL_RPC_URL_1" --private-key "$DEPLOYER_PK" \

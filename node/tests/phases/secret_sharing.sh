@@ -81,6 +81,7 @@ phase_secret_sharing() {
 
 	# 1. Alice receives work order (generates secret)
 	echo "  • Alice receives work order (generates secret)..."
+	# shellcheck disable=SC2154  # alice_DAEMON_SOCK is set by setup_node function
 	grpcurl_submit_work_order "$alice_DAEMON_SOCK" "$GRPCURL_SUBMIT_ORIG_WO_PAYLOAD_FILE"
 
 	# Wait for Alice's worker to execute and log output
@@ -175,6 +176,7 @@ phase_secret_sharing() {
 	CHARLIE_DERIVED_BITS=""
 	CHARLIE_BLOCKED=false
 
+	# shellcheck disable=SC2034  # i is used for timing loop iterations
 	for i in $( # Poll for up to 15 seconds
 		seq 1 15
 	); do

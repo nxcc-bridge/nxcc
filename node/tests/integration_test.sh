@@ -36,15 +36,21 @@ trap cleanup EXIT INT TERM
 
 # --- Phase Dependencies ---
 # Define setup dependencies for each phase.
+# shellcheck disable=SC2034  # Used dynamically via eval in phase dependency resolution
 PHASE_DEPS_SECRET_SHARING="nodes_3"
+# shellcheck disable=SC2034  # Used dynamically via eval in phase dependency resolution
 PHASE_DEPS_CROSS_CHAIN_EVENTS="nodes_2 anvil contracts"
+# shellcheck disable=SC2034  # Used dynamically via eval in phase dependency resolution
 PHASE_DEPS_HTTP_WORKER="nodes_1"
+# shellcheck disable=SC2034  # Used dynamically via eval in phase dependency resolution
 PHASE_DEPS_ADVANCED_FEATURES="nodes_1"
+# shellcheck disable=SC2034  # Used dynamically via eval in phase dependency resolution
 PHASE_DEPS_SETUP="nodes_3" # The setup phase itself requires 3 nodes
 
 # --- Global Test Parameters ---
 TEST_DIR=""
 JS_WORKER_DIR="$SCRIPT_DIR/js_workers"
+# shellcheck disable=SC2034  # Used by phase files (phases/setup.sh)
 CONTRACTS_DIR="$SCRIPT_DIR/contracts"
 
 # Binaries
@@ -56,43 +62,68 @@ WORKERD_VM_BIN=""
 ALICE_OPERATOR_KEY=""
 BOB_OPERATOR_KEY=""
 
-# Anvil PIDs
+# Anvil PIDs - used by utils.sh for process management
+# shellcheck disable=SC2034  # Used by utils.sh functions
 ANVIL_PID_1=""
+# shellcheck disable=SC2034  # Used by utils.sh functions
 ANVIL_PID_2=""
 
-# Secret Sharing Parameters
+# Secret Sharing Parameters - used by phases/secret_sharing.sh
+# shellcheck disable=SC2034  # Used by phases/secret_sharing.sh
 SECRET_CHAIN_ID=0 # Mock chain
+# shellcheck disable=SC2034  # Used by phases/secret_sharing.sh
 SECRET_IDENTITY_ADDR="0x1111111111111111111111111111111111111111"
-SECRET_IDENTITY_ID_NUM="555"       # Use a simple numeric string for grpcurl
+# shellcheck disable=SC2034  # Used by phases/secret_sharing.sh
+SECRET_IDENTITY_ID_NUM="555" # Use a simple numeric string for grpcurl
+# shellcheck disable=SC2034  # Used by phases/secret_sharing.sh
 SECRET_NAME_IN_WORKER="THE_SECRET" # How the secret is named in the worker's env
 
-# Anvil configuration
+# Anvil configuration - used by phase files
+# shellcheck disable=SC2034  # Used by phase files
 ANVIL_RPC_URL_1="http://127.0.0.1:8545"
+# shellcheck disable=SC2034  # Used by phase files
 ANVIL_CHAIN_ID_1=31337
+# shellcheck disable=SC2034  # Used by phase files
 ANVIL_RPC_URL_2="http://127.0.0.1:8546"
+# shellcheck disable=SC2034  # Used by phase files
 ANVIL_CHAIN_ID_2=1338
+# shellcheck disable=SC2034  # Used by phase files
 ANVIL_WS_URL_1="ws://127.0.0.1:8545"
+# shellcheck disable=SC2034  # Used by phase files
 ANVIL_WS_URL_2="ws://127.0.0.1:8546"
-DEPLOYER_PK="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"      # Anvil default[0]
+# shellcheck disable=SC2034  # Used by phase files
+DEPLOYER_PK="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" # Anvil default[0]
+# shellcheck disable=SC2034  # Used by phase files
 WORKER_SENDER_PK="0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d" # Anvil default[1]
 
 # Path to the JS worker script for the test
 # shellcheck disable=SC2034  # TEST_WORKER_JS_PATH may be used by future tests
 TEST_WORKER_JS_PATH="$SCRIPT_DIR/policy/test_worker_integration.js"
+# shellcheck disable=SC2034  # Used by phase files
 DSSE_WORK_ORDER_PAYLOAD_TYPE="application/vnd.nxcc.workorderpayload.v1+json"
+# shellcheck disable=SC2034  # Used by phase files for worker content loading
 POLICY_WORKER_JS_BUNDLE_PATH=""
 EVENT_HANDLER_WORKER_JS_BUNDLE_PATH=""
 HTTP_ECHO_WORKER_JS_BUNDLE_PATH=""
 
-# Node configuration
-NODE1_NAME="alice"   # Trusted node
-NODE2_NAME="bob"     # Trusted node
+# Node configuration - used by phase files
+# shellcheck disable=SC2034  # Used by phases/setup.sh
+NODE1_NAME="alice" # Trusted node
+# shellcheck disable=SC2034  # Used by phases/setup.sh
+NODE2_NAME="bob" # Trusted node
+# shellcheck disable=SC2034  # Used by phases/setup.sh
 NODE3_NAME="charlie" # Untrusted node (will be blocked by attestation policy)
+# shellcheck disable=SC2034  # Used by phases/setup.sh
 NODE1_P2P_PORT=9001
+# shellcheck disable=SC2034  # Used by phases/setup.sh
 NODE2_P2P_PORT=9002
+# shellcheck disable=SC2034  # Used by phases/setup.sh
 NODE3_P2P_PORT=9003
+# shellcheck disable=SC2034  # Used by phases/setup.sh
 NODE1_HTTP_PORT=6922
+# shellcheck disable=SC2034  # Used by phases/setup.sh
 NODE2_HTTP_PORT=6923
+# shellcheck disable=SC2034  # Used by phases/setup.sh
 NODE3_HTTP_PORT=6924
 
 # --- Test Preparation ---
@@ -130,8 +161,12 @@ prepare_test_environment() {
 	echo "Building JS bundles..."
 	(cd "$JS_WORKER_DIR" && npm run build)
 
+	# These variables are used by phase files for worker content loading
+	# shellcheck disable=SC2034  # Used by phases/secret_sharing.sh
 	POLICY_WORKER_JS_BUNDLE_PATH="$JS_WORKER_DIR/dist/test_worker_integration.js"
+	# shellcheck disable=SC2034  # Used by phases/cross_chain_events.sh
 	EVENT_HANDLER_WORKER_JS_BUNDLE_PATH="$JS_WORKER_DIR/dist/event_handler_worker.js"
+	# shellcheck disable=SC2034  # Used by phases/advanced_features.sh
 	HTTP_ECHO_WORKER_JS_BUNDLE_PATH="$JS_WORKER_DIR/dist/http_echo_worker.js"
 }
 
@@ -156,7 +191,7 @@ main() {
 		exit 0
 	fi
 
-	phases_to_run="$@"
+	phases_to_run="$*"
 	run_all=false
 	if [ -z "$phases_to_run" ]; then
 		phases_to_run="setup secret_sharing cross_chain_events http_worker advanced_features"
@@ -176,6 +211,7 @@ main() {
 		eval "phase_deps=\$${phase_deps_var}"
 
 		# Check node requirements
+		# shellcheck disable=SC2154  # phase_deps is set by eval from dynamic variable name
 		if echo "$phase_deps" | grep -q "nodes_3"; then
 			if [ "$req_nodes" -lt 3 ]; then req_nodes=3; fi
 		elif echo "$phase_deps" | grep -q "nodes_2"; then
@@ -206,7 +242,7 @@ main() {
 		setup_contracts
 	fi
 
-	for phase in "$phases_to_run"; do
+	for phase in $phases_to_run; do
 		case "$phase" in
 		setup)
 			# The 'setup' phase is now implicitly handled by the dependency system.

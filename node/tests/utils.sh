@@ -14,6 +14,7 @@ start_anvils() {
 	anvil --port 8545 --chain-id "$ANVIL_CHAIN_ID_1" --silent &
 	ANVIL_PID_1=$!
 	# Wait for anvil to be ready
+	# shellcheck disable=SC2034  # i is used for timing loop iterations
 	for i in $(seq 1 10); do
 		if cast chain-id --rpc-url "$ANVIL_RPC_URL_1" >/dev/null 2>&1; then
 			echo "Anvil 1 started. Chain ID: $(cast chain-id --rpc-url "$ANVIL_RPC_URL_1")"
@@ -30,6 +31,7 @@ start_anvils() {
 	anvil --port 8546 --chain-id "$ANVIL_CHAIN_ID_2" --silent &
 	ANVIL_PID_2=$!
 	# Wait for anvil to be ready
+	# shellcheck disable=SC2034  # i is used for timing loop iterations
 	for i in $(seq 1 10); do
 		if cast chain-id --rpc-url "$ANVIL_RPC_URL_2" >/dev/null 2>&1; then
 			echo "Anvil 2 started. Chain ID: $(cast chain-id --rpc-url "$ANVIL_RPC_URL_2")"
