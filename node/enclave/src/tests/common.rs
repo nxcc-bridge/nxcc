@@ -54,10 +54,11 @@ pub fn test_env_report_for_client(client_kx_public_key: &[u8]) -> EnvReport {
     let userdata_hash = user_data_binding::hash_userdata(&detached_userdata);
 
     // Create valid null evidence
-    let null_evidence = nxcc_attestation::providers::null::NullAttestationEvidence {
-        userdata_hash: userdata_hash.to_vec(),
-        ephemeral_key: client_kx_public_key.to_vec(),
-    };
+    let null_evidence =
+        nxcc_attestation::providers::null::NullAttestationEvidence::new_deterministic(
+            userdata_hash.to_vec(),
+            client_kx_public_key.to_vec(),
+        );
     let evidence_bytes = serde_json::to_vec(&null_evidence).unwrap();
 
     EnvReport {

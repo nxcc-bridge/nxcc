@@ -66,10 +66,11 @@ pub fn test_policy_request(secret_ids: Vec<SecretId>) -> PolicyExecutionRequest 
                 nxcc_attestation::user_data_binding::hash_userdata(&detached_userdata);
 
             // Create valid null evidence
-            let null_evidence = nxcc_attestation::providers::null::NullAttestationEvidence {
-                userdata_hash: userdata_hash.to_vec(),
-                ephemeral_key: ephemeral_key.clone(),
-            };
+            let null_evidence =
+                nxcc_attestation::providers::null::NullAttestationEvidence::new_deterministic(
+                    userdata_hash.to_vec(),
+                    ephemeral_key.clone(),
+                );
             let evidence_bytes = serde_json::to_vec(&null_evidence).unwrap();
 
             EnvReport {

@@ -263,11 +263,11 @@ impl AttestationService {
             return Err(anyhow::anyhow!("Ephemeral key must be 32 bytes"));
         }
 
-        // Create null evidence structure
-        let evidence = crate::providers::null::NullAttestationEvidence {
-            userdata_hash: userdata_hash.to_vec(),
-            ephemeral_key: ephemeral_key.to_vec(),
-        };
+        // Create null evidence structure with randomization to expose determinism bugs
+        let evidence = crate::providers::null::NullAttestationEvidence::new(
+            userdata_hash.to_vec(),
+            ephemeral_key.to_vec(),
+        );
 
         // Serialize evidence to JSON
         let evidence_bytes = serde_json::to_vec(&evidence)

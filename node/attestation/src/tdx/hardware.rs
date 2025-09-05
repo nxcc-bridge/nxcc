@@ -328,76 +328,126 @@ impl TdxSimulator {
     }
 
     fn make_mock_quote(&self, report_data: &[u8]) -> Vec<u8> {
+        use rand::Rng;
+        
         let mut q = Vec::new();
+        let mut rng = rand::thread_rng();
 
         // Quote header (48 bytes)
         q.extend_from_slice(&self.cfg.quote_version.to_le_bytes()); // version (2 bytes)
         q.extend_from_slice(&[0x02, 0x00]); // att_key_type = ECDSA (2 bytes)
         q.extend_from_slice(&0x00000081u32.to_le_bytes()); // tee_type TDX (4 bytes)
-        q.extend_from_slice(&[0x00; 4]); // reserved (4 bytes)
-        q.extend_from_slice(&[0u8; 16]); // qe_vendor_id (16 bytes)
+        
+        // Randomize reserved (4 bytes)
+        let mut reserved = [0u8; 4];
+        rng.fill(&mut reserved[..]);
+        q.extend_from_slice(&reserved);
+        
+        // Randomize qe_vendor_id (16 bytes)
+        let mut qe_vendor_id = [0u8; 16];
+        rng.fill(&mut qe_vendor_id[..]);
+        q.extend_from_slice(&qe_vendor_id);
 
-        // first 20 bytes of report_data (20 bytes)
+        // first 20 bytes of report_data (20 bytes) - randomize unused portion
         let mut user20 = [0u8; 20];
         let n = user20.len().min(report_data.len());
         user20[..n].copy_from_slice(&report_data[..n]);
+        if n < 20 {
+            rng.fill(&mut user20[n..]);
+        }
         q.extend_from_slice(&user20);
 
         // Fake TD report body (584 bytes) - proper TDX structure
         let mut body = vec![0u8; 584];
 
-        // TCB SVN (16 bytes) at offset 0
-        body[0..16].copy_from_slice(&[0x01; 16]);
+        // Randomize TCB SVN (16 bytes) at offset 0
+        let mut tcb_svn = [0u8; 16];
+        rng.fill(&mut tcb_svn[..]);
+        body[0..16].copy_from_slice(&tcb_svn);
 
-        // MR_SEAM (48 bytes) at offset 16
-        body[16..64].copy_from_slice(&[0x33; 48]);
+        // Randomize MR_SEAM (48 bytes) at offset 16
+        let mut mr_seam = [0u8; 48];
+        rng.fill(&mut mr_seam[..]);
+        body[16..64].copy_from_slice(&mr_seam);
 
-        // MR_SIGNER_SEAM (48 bytes) at offset 64
-        body[64..112].copy_from_slice(&[0x44; 48]);
+        // Randomize MR_SIGNER_SEAM (48 bytes) at offset 64
+        let mut mr_signer_seam = [0u8; 48];
+        rng.fill(&mut mr_signer_seam[..]);
+        body[64..112].copy_from_slice(&mr_signer_seam);
 
-        // SEAM attributes (8 bytes) at offset 112
-        body[112..120].copy_from_slice(&[0x00; 8]);
+        // Randomize SEAM attributes (8 bytes) at offset 112
+        let mut seam_attrs = [0u8; 8];
+        rng.fill(&mut seam_attrs[..]);
+        body[112..120].copy_from_slice(&seam_attrs);
 
-        // TD attributes (8 bytes) at offset 120
+        // TD attributes (8 bytes) at offset 120 - randomize but preserve debug bit
         let mut td_attrs = [0u8; 8];
+        rng.fill(&mut td_attrs[..]);
         if self.cfg.debug_enabled {
             td_attrs[0] |= 0x01; // Set debug bit
+        } else {
+            td_attrs[0] &= !0x01; // Clear debug bit
         }
         body[120..128].copy_from_slice(&td_attrs);
 
-        // XFAM (8 bytes) at offset 128
-        body[128..136].copy_from_slice(&[0x03; 8]);
+        // Randomize XFAM (8 bytes) at offset 128
+        let mut xfam = [0u8; 8];
+        rng.fill(&mut xfam[..]);
+        body[128..136].copy_from_slice(&xfam);
 
-        // MRTD (48 bytes) at offset 136 - use configured value
-        body[136..184].copy_from_slice(&self.cfg.mrtd);
+        // MRTD (48 bytes) at offset 136 - randomize configured value or use random
+        let mut mrtd = [0u8; 48];
+        if self.cfg.mrtd == [0x42; 48] {
+            // If using default, randomize it
+            rng.fill(&mut mrtd[..]);
+        } else {
+            // Use configured value but add some randomness to non-critical bytes
+            mrtd.copy_from_slice(&self.cfg.mrtd);
+            // Randomize last few bytes to simulate measurement variations
+            rng.fill(&mut mrtd[44..]);
+        }
+        body[136..184].copy_from_slice(&mrtd);
 
-        // MR_CONFIG_ID (48 bytes) at offset 184
-        body[184..232].copy_from_slice(&[0x55; 48]);
+        // Randomize MR_CONFIG_ID (48 bytes) at offset 184
+        let mut mr_config_id = [0u8; 48];
+        rng.fill(&mut mr_config_id[..]);
+        body[184..232].copy_from_slice(&mr_config_id);
 
-        // MR_OWNER (48 bytes) at offset 232
-        body[232..280].copy_from_slice(&[0x66; 48]);
+        // Randomize MR_OWNER (48 bytes) at offset 232
+        let mut mr_owner = [0u8; 48];
+        rng.fill(&mut mr_owner[..]);
+        body[232..280].copy_from_slice(&mr_owner);
 
-        // MR_OWNER_CONFIG (48 bytes) at offset 280
-        body[280..328].copy_from_slice(&[0x77; 48]);
+        // Randomize MR_OWNER_CONFIG (48 bytes) at offset 280
+        let mut mr_owner_config = [0u8; 48];
+        rng.fill(&mut mr_owner_config[..]);
+        body[280..328].copy_from_slice(&mr_owner_config);
 
-        // RTMR 0-3 (4 * 48 bytes) at offset 328
-        body[328..376].copy_from_slice(&[0x11; 48]); // RTMR0
-        body[376..424].copy_from_slice(&[0x22; 48]); // RTMR1
-        body[424..472].copy_from_slice(&[0x33; 48]); // RTMR2
-        body[472..520].copy_from_slice(&[0x44; 48]); // RTMR3
+        // Randomize RTMR 0-3 (4 * 48 bytes) at offset 328
+        for i in 0..4 {
+            let mut rtmr = [0u8; 48];
+            rng.fill(&mut rtmr[..]);
+            let rtmr_offset = 328 + (i * 48);
+            body[rtmr_offset..rtmr_offset + 48].copy_from_slice(&rtmr);
+        }
 
         // Report data (64 bytes) at offset 520
         let mut rd64 = [0u8; 64];
         let m = rd64.len().min(report_data.len());
         rd64[..m].copy_from_slice(&report_data[..m]);
+        // Randomize unused portion of report data
+        if m < 64 {
+            rng.fill(&mut rd64[m..]);
+        }
         body[520..584].copy_from_slice(&rd64);
 
         q.extend_from_slice(&body);
 
-        // Signature data length + mock signature bytes
-        let sig = b"MOCK_TDX_SIGNATURE_DATA";
-        q.extend_from_slice(&(sig.len() as u32).to_le_bytes());
-        q.extend_from_slice(sig);
+        // Randomize signature data length + signature bytes
+        let mut sig_data = vec![0u8; 64 + rng.gen_range(0..128)]; // Random signature size
+        rng.fill(&mut sig_data[..]);
+        q.extend_from_slice(&(sig_data.len() as u32).to_le_bytes());
+        q.extend_from_slice(&sig_data);
 
         q
     }

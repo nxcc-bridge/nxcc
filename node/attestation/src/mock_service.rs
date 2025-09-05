@@ -53,25 +53,94 @@ impl MockTdxProvider {
 
     /// Generate a mock TDX quote with embedded user data
     pub fn generate_mock_quote(&self, user_data: &[u8]) -> Result<Vec<u8>> {
+        use rand::Rng;
+        
         // Use real TDX quote as base and modify the report data
         let base_quote = std::fs::read("test_data/real_tdx_quote.bin")
             .expect("Failed to load real TDX quote from test_data/real_tdx_quote.bin");
 
         let mut mock_quote = base_quote;
+        let mut rng = rand::thread_rng();
 
-        // Report data is at the end of TD Report structure
-        // Header(48) + TD Report starts with: TCB SVN(16) + MR SEAM(48) + MR SIGNER SEAM(48) +
-        // SEAM Attributes(8) + TD Attributes(8) + XFAM(8) + MRTD(48) + MR Config ID(48) +
-        // MR Owner(48) + MR Owner Config(48) + 4 RTMRs(48*4=192) = 520 bytes before report data
-        let report_data_offset = 48 + 520;
+        // Randomize QE Vendor ID in quote header (bytes 28-44, 16 bytes)
+        rng.fill(&mut mock_quote[28..44]);
+
+        // Randomize reserved fields in quote header (bytes 8-12, 4 bytes)
+        rng.fill(&mut mock_quote[8..12]);
+
+        // TD Report body starts at offset 48
+        let td_report_offset = 48;
+        
+        // Randomize TCB SVN (16 bytes) at offset 0 within TD report
+        rng.fill(&mut mock_quote[td_report_offset..td_report_offset + 16]);
+
+        // Randomize MR_SEAM (48 bytes) at offset 16
+        rng.fill(&mut mock_quote[td_report_offset + 16..td_report_offset + 64]);
+
+        // Randomize MR_SIGNER_SEAM (48 bytes) at offset 64
+        rng.fill(&mut mock_quote[td_report_offset + 64..td_report_offset + 112]);
+
+        // Randomize SEAM attributes (8 bytes) at offset 112
+        rng.fill(&mut mock_quote[td_report_offset + 112..td_report_offset + 120]);
+
+        // TD attributes at offset 120 - randomize but preserve debug bit from original
+        let original_debug_byte = mock_quote[td_report_offset + 120];
+        rng.fill(&mut mock_quote[td_report_offset + 120..td_report_offset + 128]);
+        // Preserve the original debug bit (bit 0 of first byte)
+        mock_quote[td_report_offset + 120] = (mock_quote[td_report_offset + 120] & !0x01) | (original_debug_byte & 0x01);
+
+        // Randomize XFAM (8 bytes) at offset 128
+        rng.fill(&mut mock_quote[td_report_offset + 128..td_report_offset + 136]);
+
+        // Randomize MRTD (48 bytes) at offset 136
+        rng.fill(&mut mock_quote[td_report_offset + 136..td_report_offset + 184]);
+
+        // Randomize MR_CONFIG_ID (48 bytes) at offset 184
+        rng.fill(&mut mock_quote[td_report_offset + 184..td_report_offset + 232]);
+
+        // Randomize MR_OWNER (48 bytes) at offset 232
+        rng.fill(&mut mock_quote[td_report_offset + 232..td_report_offset + 280]);
+
+        // Randomize MR_OWNER_CONFIG (48 bytes) at offset 280
+        rng.fill(&mut mock_quote[td_report_offset + 280..td_report_offset + 328]);
+
+        // Randomize RTMRs (4 * 48 bytes) at offset 328
+        for i in 0..4 {
+            let rtmr_offset = td_report_offset + 328 + (i * 48);
+            rng.fill(&mut mock_quote[rtmr_offset..rtmr_offset + 48]);
+        }
+
+        // Report data is at offset 520 within TD report
+        let report_data_offset = td_report_offset + 520;
         let mut report_data = [0u8; 64];
 
         // Copy user data up to 64 bytes
         let copy_len = std::cmp::min(user_data.len(), 64);
         report_data[..copy_len].copy_from_slice(&user_data[..copy_len]);
+        // Randomize the remaining bytes
+        if copy_len < 64 {
+            rng.fill(&mut report_data[copy_len..]);
+        }
 
         // Update the quote with new report data
         mock_quote[report_data_offset..report_data_offset + 64].copy_from_slice(&report_data);
+
+        // Randomize the signature data at the end (after the TD report body)
+        // Find signature length field and randomize signature content
+        if mock_quote.len() > td_report_offset + 584 + 4 {
+            let sig_len_offset = td_report_offset + 584;
+            let sig_len = u32::from_le_bytes([
+                mock_quote[sig_len_offset],
+                mock_quote[sig_len_offset + 1],
+                mock_quote[sig_len_offset + 2],
+                mock_quote[sig_len_offset + 3],
+            ]) as usize;
+            
+            if sig_len > 0 && mock_quote.len() >= sig_len_offset + 4 + sig_len {
+                let sig_data_offset = sig_len_offset + 4;
+                rng.fill(&mut mock_quote[sig_data_offset..sig_data_offset + sig_len]);
+            }
+        }
 
         Ok(mock_quote)
     }

@@ -1,7 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use crate::{
     user_data_binding, AttestationBundle, AttestationProvider, Measurement, RawAttestation,
@@ -15,6 +14,35 @@ pub struct NullAttestationEvidence {
     pub userdata_hash: Vec<u8>,
     /// Ephemeral key used for this attestation (for verification)
     pub ephemeral_key: Vec<u8>,
+    /// Random nonce to make each attestation unique (exposes determinism bugs)
+    #[serde(default)]
+    pub nonce: Option<Vec<u8>>,
+}
+
+impl NullAttestationEvidence {
+    /// Create new null attestation evidence with random nonce
+    pub fn new(userdata_hash: Vec<u8>, ephemeral_key: Vec<u8>) -> Self {
+        use rand::Rng;
+        
+        let mut rng = rand::thread_rng();
+        let mut random_nonce = vec![0u8; 32];
+        rng.fill(&mut random_nonce[..]);
+        
+        Self {
+            userdata_hash,
+            ephemeral_key,
+            nonce: Some(random_nonce),
+        }
+    }
+    
+    /// Create null attestation evidence without nonce (for tests that need deterministic behavior)
+    pub fn new_deterministic(userdata_hash: Vec<u8>, ephemeral_key: Vec<u8>) -> Self {
+        Self {
+            userdata_hash,
+            ephemeral_key,
+            nonce: None,
+        }
+    }
 }
 
 /// Null attestation provider for systems without TEE hardware.
@@ -56,10 +84,22 @@ impl NullAttestationProvider {
 
     /// Create standardized claims for null attestation
     fn create_null_claims(&self, userdata_hash: &[u8]) -> StandardizedClaims {
+        use rand::Rng;
+        
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
+
+        let mut rng = rand::thread_rng();
+
+        // Randomize platform measurement to expose determinism bugs
+        let mut platform_measurement = vec![0u8; 32];
+        rng.fill(&mut platform_measurement[..]);
+        
+        // Randomize application measurement to expose determinism bugs  
+        let mut app_measurement = vec![0u8; 48];
+        rng.fill(&mut app_measurement[..]);
 
         StandardizedClaims {
             // Core freshness and context
@@ -82,17 +122,17 @@ impl NullAttestationProvider {
             swversion: Some("1.0".to_string()),
             manifests: None,
 
-            // Measurements - provide measurements that match test expectations
+            // Measurements - randomized to expose determinism bugs
             measurements: vec![
                 Measurement {
-                    val: Sha256::digest(b"nxcc-null-platform").to_vec(),
+                    val: platform_measurement, // Randomized instead of static hash
                     alg: "sha-256".to_string(),
                     measurement_type: Some("platform".to_string()),
                     vendor: Some("nxcc".to_string()),
                     version: Some("1.0".to_string()),
                 },
                 Measurement {
-                    val: vec![0x42; 48], // 48 bytes for sha-384 to match test expectations
+                    val: app_measurement, // Randomized instead of static bytes
                     alg: "sha-384".to_string(),
                     measurement_type: Some("application".to_string()),
                     vendor: Some("nxcc-null".to_string()),
@@ -255,11 +295,11 @@ mod tests {
         let userdata_cbor = user_data.to_cbor().unwrap();
         let userdata_hash = user_data_binding::hash_userdata(&userdata_cbor);
 
-        // Create null evidence (simplified approach)
-        let evidence = NullAttestationEvidence {
-            userdata_hash: userdata_hash.to_vec(),
-            ephemeral_key: ephemeral_key_bytes.to_vec(),
-        };
+        // Create null evidence (deterministic for testing)
+        let evidence = NullAttestationEvidence::new_deterministic(
+            userdata_hash.to_vec(),
+            ephemeral_key_bytes.to_vec(),
+        );
         let evidence_bytes = serde_json::to_vec(&evidence).unwrap();
 
         let bundle = AttestationBundle {

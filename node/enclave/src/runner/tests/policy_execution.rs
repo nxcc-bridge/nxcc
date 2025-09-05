@@ -433,10 +433,11 @@ async fn test_execute_policy_with_attestation_claims() {
     let ephemeral_key = vec![0x01; 32]; // Must match the key used in test_userdata creation
 
     // Create valid null evidence
-    let null_evidence = nxcc_attestation::providers::null::NullAttestationEvidence {
-        userdata_hash: userdata_hash.to_vec(),
-        ephemeral_key: ephemeral_key.clone(),
-    };
+    let null_evidence =
+        nxcc_attestation::providers::null::NullAttestationEvidence::new_deterministic(
+            userdata_hash.to_vec(),
+            ephemeral_key.clone(),
+        );
     let evidence_bytes = serde_json::to_vec(&null_evidence).unwrap();
 
     let attestation_bundle = AttestationBundle {
@@ -662,10 +663,11 @@ async fn test_execute_policy_verification_before_execution() {
 
     // Create valid null evidence for the good attestation
     let ephemeral_key = vec![0x01; 32]; // Must match the key used in test_userdata creation
-    let null_evidence = nxcc_attestation::providers::null::NullAttestationEvidence {
-        userdata_hash: good_userdata_hash.to_vec(),
-        ephemeral_key: ephemeral_key.clone(),
-    };
+    let null_evidence =
+        nxcc_attestation::providers::null::NullAttestationEvidence::new_deterministic(
+            good_userdata_hash.to_vec(),
+            ephemeral_key.clone(),
+        );
     let evidence_bytes = serde_json::to_vec(&null_evidence).unwrap();
 
     let good_attestation = AttestationBundle {
