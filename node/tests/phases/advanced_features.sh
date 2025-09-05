@@ -20,13 +20,27 @@ phase_advanced_features() {
 
 	HTTP_LOGS_URL="http://127.0.0.1:${NODE1_HTTP_PORT}/api/workers/${HTTP_ECHO_WORK_ORDER_ID}/logs"
 
-	# Test 1: Get logs without streaming (should fail as not implemented)
-	echo "Testing non-streaming logs (expected to fail)..."
-	HTTP_LOGS_RESPONSE=$(curl -s -w "%{http_code}" -o /dev/null "$HTTP_LOGS_URL?follow=false" || echo "000")
-	if [ "$HTTP_LOGS_RESPONSE" = "500" ]; then
-		echo "SUCCESS (Log Streaming Test 1): Non-streaming correctly returns 500 (not implemented)."
+	# Test 1: Get static logs without streaming (should succeed)
+	echo "Testing static logs (expected to succeed)..."
+	STATIC_LOGS_OUTPUT="$TEST_DIR/worker_static_logs.json"
+	HTTP_LOGS_RESPONSE=$(curl -s -w "%{http_code}" -o "$STATIC_LOGS_OUTPUT" "$HTTP_LOGS_URL?follow=false" || echo "000")
+	if [ "$HTTP_LOGS_RESPONSE" = "200" ]; then
+		echo "SUCCESS (Log Streaming Test 1): Static logs correctly returns 200."
+		# Verify the response is valid JSON with expected fields
+		if jq -e '.logs and .worker_id and .total_lines != null and .is_streaming == false' "$STATIC_LOGS_OUTPUT" >/dev/null 2>&1; then
+			echo "SUCCESS (Log Streaming Test 1a): Static logs response has correct JSON structure."
+			STATIC_LOG_COUNT=$(jq -r '.total_lines' "$STATIC_LOGS_OUTPUT")
+			echo "SUCCESS (Log Streaming Test 1b): Retrieved $STATIC_LOG_COUNT static log lines."
+		else
+			echo "ERROR (Log Streaming Test 1a): Static logs response has incorrect JSON structure."
+			echo "Response contents:"
+			cat "$STATIC_LOGS_OUTPUT" 2>/dev/null || true
+			exit 1
+		fi
 	else
-		echo "ERROR (Log Streaming Test 1): Expected 500 for non-streaming, got $HTTP_LOGS_RESPONSE"
+		echo "ERROR (Log Streaming Test 1): Expected 200 for static logs, got $HTTP_LOGS_RESPONSE"
+		echo "Response contents:"
+		cat "$STATIC_LOGS_OUTPUT" 2>/dev/null || true
 		exit 1
 	fi
 

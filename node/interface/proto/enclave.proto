@@ -100,6 +100,9 @@ service Runner {
   /// Actively probes a worker to check its liveness.
   rpc CheckWorkerStatus (CheckWorkerStatusRequest) returns (CheckWorkerStatusResponse);
 
+  /// Gets static logs from a worker instance.
+  rpc GetWorkerLogs (GetWorkerLogsRequest) returns (GetWorkerLogsResponse);
+
   /// Streams logs from a worker instance.
   rpc StreamWorkerLogs (StreamWorkerLogsRequest) returns (stream vm.StreamWorkerLogsResponse);
 }
@@ -230,6 +233,18 @@ message CheckWorkerStatusResponse {
   vm.WorkerStatus status = 1;
   // A descriptive message about the status.
   string status_message = 2;
+}
+
+// --- GetWorkerLogs Messages ---
+
+message GetWorkerLogsRequest {
+  /// The unique identifier of the worker instance whose logs are requested.
+  string worker_id = 1;
+}
+
+message GetWorkerLogsResponse {
+  /// The complete log output for the worker.
+  string logs = 1;
 }
 
 // --- StreamWorkerLogs Messages ---

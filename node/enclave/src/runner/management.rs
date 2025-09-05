@@ -301,6 +301,32 @@ impl RunnerService {
         None
     }
 
+    /// Gets static logs from a worker via its VM.
+    pub async fn get_worker_logs(&self, worker_id: String) -> Result<String, RunnerError> {
+        info!("Requesting to get logs for worker '{}'", worker_id);
+
+        let vm_id = self
+            .get_worker_vm_id(&worker_id)
+            .await
+            .ok_or_else(|| RunnerError::WorkerNotFound(worker_id.clone()))?;
+
+        let mut vms_guard = self.vms.write().await;
+        let client = vms_guard
+            .get_mut(&vm_id)
+            .ok_or_else(|| RunnerError::VmNotAttached(vm_id.clone()))?;
+
+        match client.get_worker_logs(worker_id.clone()).await {
+            Ok(logs) => {
+                info!("Successfully retrieved logs for worker '{}'", worker_id);
+                Ok(logs)
+            }
+            Err(e) => {
+                error!("Failed to get logs for worker '{}': {}", worker_id, e);
+                Err(RunnerError::VmConnection(e))
+            }
+        }
+    }
+
     /// Streams logs from a worker via its VM.
     pub async fn stream_worker_logs(
         &self,

@@ -401,24 +401,55 @@ struct WorkerLogsQuery {
     follow: bool,
 }
 
-/// Handles worker log streaming via Server-Sent Events
+/// Handles worker log retrieval (static or streaming)
 async fn worker_logs_handler(
     State(state): State<Arc<AppState>>,
     Path(worker_id): Path<String>,
     Query(params): Query<WorkerLogsQuery>,
-) -> Result<impl IntoResponse, ApiError> {
+) -> Result<Response, ApiError> {
     info!(
         "Received worker logs request for worker_id: {} with params: tail={:?}, follow={}",
         worker_id, params.tail_lines, params.follow
     );
 
-    // If follow is false, return static logs
+    // If follow is false, return static logs as JSON
     if !params.follow {
-        // For non-streaming requests, we would typically get logs and return them as JSON
-        // But since we want to support streaming, let's redirect to SSE even for static logs
-        return Err(ApiError::from(
-            "Non-streaming logs not implemented yet. Use follow=true for streaming.",
-        ));
+        info!("Retrieving static logs for worker_id: {}", worker_id);
+
+        // Get static logs from the enclave
+        match state
+            .enclave_client
+            .get_worker_logs(worker_id.clone())
+            .await
+        {
+            Ok(logs) => {
+                // Parse the logs and return as JSON array
+                let log_lines: Vec<&str> = logs.lines().collect();
+
+                // Apply tail limit if specified
+                let limited_logs = if let Some(tail) = params.tail_lines {
+                    if tail > 0 && log_lines.len() > tail as usize {
+                        &log_lines[log_lines.len() - tail as usize..]
+                    } else {
+                        &log_lines
+                    }
+                } else {
+                    &log_lines
+                };
+
+                return Ok(Json(serde_json::json!({
+                    "logs": limited_logs,
+                    "worker_id": worker_id,
+                    "total_lines": limited_logs.len(),
+                    "is_streaming": false
+                }))
+                .into_response());
+            }
+            Err(e) => {
+                error!("Failed to get static logs for worker {}: {}", worker_id, e);
+                return Err(ApiError::from(format!("Failed to retrieve logs: {}", e)));
+            }
+        }
     }
 
     // Create a stream from the enclave
@@ -457,11 +488,13 @@ async fn worker_logs_handler(
         }
     });
 
-    Ok(Sse::new(sse_stream).keep_alive(
-        axum::response::sse::KeepAlive::new()
-            .interval(std::time::Duration::from_secs(15))
-            .text("keep-alive"),
-    ))
+    Ok(Sse::new(sse_stream)
+        .keep_alive(
+            axum::response::sse::KeepAlive::new()
+                .interval(std::time::Duration::from_secs(15))
+                .text("keep-alive"),
+        )
+        .into_response())
 }
 
 /// Configures and starts the HTTP server.

@@ -94,6 +94,17 @@ impl VmClient {
         }
     }
 
+    pub async fn get_worker_logs(&mut self, worker_id: String) -> Result<String, ClientError> {
+        match self {
+            VmClient::Real(client) => client.get_worker_logs(worker_id).await,
+            #[cfg(test)]
+            VmClient::Mock(_client) => {
+                // For testing, return a simple log string
+                Ok(format!("Mock log for worker {}", worker_id))
+            }
+        }
+    }
+
     pub async fn stream_worker_logs(
         &mut self,
         worker_id: String,

@@ -7,9 +7,10 @@ use nxcc_interface::{
             CheckWorkerStatusRequest, CheckWorkerStatusResponse, DeliverBatchEventsRequest,
             DeliverBatchEventsResponse, DetachVmRequest, ExecutePolicyRequest,
             ExecutePolicyResponse, GenerateSecretsRequest, GetReportRequest, GetSecretsRequest,
-            GetSecretsResponse, InvokeHttpWorkerRequest, InvokeHttpWorkerResponse,
-            PutSecretsRequest, PutSecretsResponse, RunWorkerRequest, RunWorkerResponse,
-            SecretStatus, StreamWorkerLogsRequest, TerminateWorkerRequest,
+            GetSecretsResponse, GetWorkerLogsRequest, GetWorkerLogsResponse,
+            InvokeHttpWorkerRequest, InvokeHttpWorkerResponse, PutSecretsRequest,
+            PutSecretsResponse, RunWorkerRequest, RunWorkerResponse, SecretStatus,
+            StreamWorkerLogsRequest, TerminateWorkerRequest,
             runner_server::{Runner, RunnerServer},
             secrets_server::{Secrets as SecretsServerTrait, SecretsServer},
         },
@@ -450,6 +451,21 @@ impl Runner for EnclaveRunnerGrpcService {
                 status: status.into(),
                 status_message,
             })),
+            Err(e) => Err(map_runner_error(e)),
+        }
+    }
+
+    async fn get_worker_logs(
+        &self,
+        request: Request<GetWorkerLogsRequest>,
+    ) -> Result<Response<GetWorkerLogsResponse>, Status> {
+        let req = request.into_inner();
+        debug!(
+            "gRPC GetWorkerLogs request for worker_id '{}'",
+            req.worker_id
+        );
+        match self.runner.get_worker_logs(req.worker_id).await {
+            Ok(logs) => Ok(Response::new(GetWorkerLogsResponse { logs })),
             Err(e) => Err(map_runner_error(e)),
         }
     }

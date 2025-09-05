@@ -23,6 +23,7 @@ use tonic::{
     transport::{Channel, Endpoint, Uri},
 };
 use tower::service_fn;
+use tracing::error;
 
 use crate::error::AppError;
 
@@ -323,6 +324,20 @@ impl EnclaveClient {
                 )
             })?;
         Ok((status, resp.status_message))
+    }
+
+    pub async fn get_worker_logs(&self, worker_id: String) -> Result<String, String> {
+        let req = nxcc_interface::proto::enclave::GetWorkerLogsRequest {
+            worker_id: worker_id.clone(),
+        };
+        let mut client = self.runner();
+        match client.get_worker_logs(req).await {
+            Ok(response) => Ok(response.into_inner().logs),
+            Err(e) => {
+                error!("Failed to get worker logs for {}: {}", worker_id, e);
+                Err(e.to_string())
+            }
+        }
     }
 
     pub async fn stream_worker_logs(
