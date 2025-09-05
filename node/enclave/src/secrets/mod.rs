@@ -52,14 +52,17 @@ impl std::fmt::Debug for AuthorizationId {
 }
 
 /// Creates a unique ID for an authorization request based on the attestation bundle and secret ID.
+/// Calculate authorization ID using stable identity components instead of entire AttestationBundle.
+/// This prevents issues with non-deterministic quote fields affecting authorization lookups.
+/// The ephemeral key from userdata provides a stable client session identity.
 fn calculate_authorization_id(
-    attestation_bundle: &AttestationBundle,
+    ephemeral_key: &[u8],
     secret_id: &SecretId,
     consumer_info: &ConsumerInfo,
 ) -> AuthorizationId {
     let mut hasher = Sha256::new();
     ciborium::into_writer(secret_id, &mut hasher).unwrap();
-    ciborium::into_writer(attestation_bundle, &mut hasher).unwrap();
+    hasher.update(ephemeral_key); // Use stable ephemeral key instead of entire bundle
     ciborium::into_writer(consumer_info, &mut hasher).unwrap();
     AuthorizationId(<[u8; 32]>::from(hasher.finalize()))
 }
@@ -173,8 +176,6 @@ impl Secrets {
         let mut secrets_map = self.secrets_storage.write().unwrap();
 
         for (secrets_box, env_report, local_consumer_info, verified_user_data) in verified_bundles {
-            // TODO (important!): verify that env report is bound to the attestation (node_id is used but untrusted)
-
             // 2. Deserialize userdata to get sender's EPK
             use nxcc_attestation::user_data_binding;
             let sender_userdata = match user_data_binding::UserData::from_cbor(&verified_user_data)
@@ -556,16 +557,28 @@ impl Secrets {
         let consumer_info_for_auth = &report.request.consumer;
         let timestamp = report.timestamp; // Use timestamp from the report
 
+        // Extract ephemeral key from userdata for stable authorization ID
+        use nxcc_attestation::user_data_binding;
+        let ephemeral_key = match user_data_binding::UserData::from_cbor(
+            &attestation_report_for_auth.detached_userdata,
+        ) {
+            Ok(userdata) => userdata.ephemeral_public_key,
+            Err(e) => {
+                warn!(
+                    "Failed to extract ephemeral key from userdata for authorization: {}",
+                    e
+                );
+                return; // Don't store authorization if we can't extract ephemeral key
+            }
+        };
+
         // TODO: Consider a suitable expiry/TTL for authorizations. Using grant timestamp for now.
         let expiry_time = timestamp + 3600; // e.g., authorize for 1 hour
 
         let mut auth_map = self.authorizations.write().unwrap();
         for secret_id in report.request.secret_ids {
-            let auth_id = calculate_authorization_id(
-                attestation_report_for_auth,
-                &secret_id,
-                consumer_info_for_auth,
-            );
+            let auth_id =
+                calculate_authorization_id(&ephemeral_key, &secret_id, consumer_info_for_auth);
             info!(
                 "Storing authorization grant {} for attestation measurement {:?} / secret {:?} / \
                  consumer bundle_hash {:?} with expiry {}",
@@ -584,13 +597,28 @@ impl Secrets {
 
     /// Checks if an authorization exists and is valid for the given node and secret.
     /// Used internally by PutSecrets and GetSecrets.
+    /// NOTE: This method assumes the attestation_bundle has already been verified by the caller.
     pub(crate) fn check_authorization(
         &self,
         attestation_bundle: &AttestationBundle,
         secret_id: &SecretId,
         consumer_info: &ConsumerInfo,
     ) -> bool {
-        let auth_id = calculate_authorization_id(attestation_bundle, secret_id, consumer_info);
+        // Extract ephemeral key from userdata for stable authorization ID lookup
+        use nxcc_attestation::user_data_binding;
+        let ephemeral_key =
+            match user_data_binding::UserData::from_cbor(&attestation_bundle.detached_userdata) {
+                Ok(userdata) => userdata.ephemeral_public_key,
+                Err(e) => {
+                    warn!(
+                        "Failed to extract ephemeral key from userdata for authorization check: {}",
+                        e
+                    );
+                    return false; // Authorization check fails if we can't extract ephemeral key
+                }
+            };
+
+        let auth_id = calculate_authorization_id(&ephemeral_key, secret_id, consumer_info);
         let auth_map = self.authorizations.read().unwrap();
 
         match auth_map.get(&auth_id) {

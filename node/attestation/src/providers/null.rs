@@ -23,18 +23,18 @@ impl NullAttestationEvidence {
     /// Create new null attestation evidence with random nonce
     pub fn new(userdata_hash: Vec<u8>, ephemeral_key: Vec<u8>) -> Self {
         use rand::Rng;
-        
+
         let mut rng = rand::thread_rng();
         let mut random_nonce = vec![0u8; 32];
         rng.fill(&mut random_nonce[..]);
-        
+
         Self {
             userdata_hash,
             ephemeral_key,
             nonce: Some(random_nonce),
         }
     }
-    
+
     /// Create null attestation evidence without nonce (for tests that need deterministic behavior)
     pub fn new_deterministic(userdata_hash: Vec<u8>, ephemeral_key: Vec<u8>) -> Self {
         Self {
@@ -85,7 +85,7 @@ impl NullAttestationProvider {
     /// Create standardized claims for null attestation
     fn create_null_claims(&self, userdata_hash: &[u8]) -> StandardizedClaims {
         use rand::Rng;
-        
+
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -96,8 +96,8 @@ impl NullAttestationProvider {
         // Randomize platform measurement to expose determinism bugs
         let mut platform_measurement = vec![0u8; 32];
         rng.fill(&mut platform_measurement[..]);
-        
-        // Randomize application measurement to expose determinism bugs  
+
+        // Randomize application measurement to expose determinism bugs
         let mut app_measurement = vec![0u8; 48];
         rng.fill(&mut app_measurement[..]);
 

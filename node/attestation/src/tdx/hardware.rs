@@ -329,7 +329,7 @@ impl TdxSimulator {
 
     fn make_mock_quote(&self, report_data: &[u8]) -> Vec<u8> {
         use rand::Rng;
-        
+
         let mut q = Vec::new();
         let mut rng = rand::thread_rng();
 
@@ -337,12 +337,12 @@ impl TdxSimulator {
         q.extend_from_slice(&self.cfg.quote_version.to_le_bytes()); // version (2 bytes)
         q.extend_from_slice(&[0x02, 0x00]); // att_key_type = ECDSA (2 bytes)
         q.extend_from_slice(&0x00000081u32.to_le_bytes()); // tee_type TDX (4 bytes)
-        
+
         // Randomize reserved (4 bytes)
         let mut reserved = [0u8; 4];
         rng.fill(&mut reserved[..]);
         q.extend_from_slice(&reserved);
-        
+
         // Randomize qe_vendor_id (16 bytes)
         let mut qe_vendor_id = [0u8; 16];
         rng.fill(&mut qe_vendor_id[..]);

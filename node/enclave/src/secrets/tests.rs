@@ -308,7 +308,7 @@ async fn test_authorization_determinism_bug_e2e() {
     // Step 2: Generate a fresh attestation to compare
     let fresh_attestation = secrets.get_report().await.unwrap(); // AttestationBundle_B
 
-    // Debug: Check if attestations are actually different due to randomization
+    // Verify randomization is working (attestations should have different hashes)
     let policy_hash = {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
@@ -321,12 +321,9 @@ async fn test_authorization_determinism_bug_e2e() {
         ciborium::into_writer(&fresh_attestation, &mut hasher).unwrap();
         hasher.finalize()
     };
-
-    println!("🔍 Debug: Policy attestation hash: {:x}", policy_hash);
-    println!("🔍 Debug: Fresh attestation hash:  {:x}", fresh_hash);
-    println!(
-        "🔍 Debug: Hashes are different: {}",
-        policy_hash != fresh_hash
+    assert_ne!(
+        policy_hash, fresh_hash,
+        "Attestation randomization should produce different hashes"
     );
 
     // Step 3: Later, generate_secrets() is called
@@ -337,38 +334,17 @@ async fn test_authorization_determinism_bug_e2e() {
         .await;
 
     // The bug: generate_secrets should succeed (same client, valid authorization)
-    // But it fails because the fresh attestation doesn't match the stored authorization hash
-    // The bug: generate_secrets() returns Ok but silently skips secret generation
-    // due to authorization failure caused by different attestation hashes
-    if result.is_ok() {
-        println!("🚨 BUG EXPOSED: generate_secrets returned Ok but authorization failed silently!");
-        println!("   - Policy execution stored authorization with AttestationBundle_A");
-        println!("   - generate_secrets created fresh AttestationBundle_C with different hash");
-        println!("   - Authorization lookup failed silently, no secrets generated");
+    // Verify that the authorization determinism bug is fixed:
+    // Even though fresh attestation has different quote hash, authorization should work
+    // because it now uses stable ephemeral key instead of entire AttestationBundle
+    result.expect("generate_secrets should succeed");
 
-        let secrets_map = secrets.secrets_storage.read().unwrap();
-        let secret_was_generated = secrets_map.contains_key(&secret_id);
-
-        if !secret_was_generated {
-            println!("   ✓ Confirmed: No secret was generated due to authorization hash mismatch");
-            println!("   ✓ This demonstrates the calculate_authorization_id determinism bug");
-            // Currently expecting no secret due to the bug
-            assert!(
-                !secret_was_generated,
-                "Secret should NOT be generated due to authorization bug"
-            );
-        } else {
-            println!("   ❌ Unexpected: Secret WAS generated despite different hashes");
-            println!("   ❌ This suggests the bug might be fixed or test logic is wrong");
-            panic!("Secret was generated unexpectedly - bug may be fixed?");
-        }
-    } else {
-        println!(
-            "❌ generate_secrets returned error: {:?}",
-            result.as_ref().err()
-        );
-        panic!("Unexpected error from generate_secrets");
-    }
+    let secrets_map = secrets.secrets_storage.read().unwrap();
+    assert!(
+        secrets_map.contains_key(&secret_id),
+        "Secret should be generated despite different attestation hashes - authorization uses \
+         stable ephemeral key"
+    );
 }
 
 #[test]
@@ -411,8 +387,8 @@ fn test_authorization_expiry() {
     ));
 
     // Manually check the authorizations map
-    let auth_id =
-        calculate_authorization_id(&client_attestation, &secret_id, &ConsumerInfo::default());
+    let ephemeral_key = client_kx.public_key().as_bytes(); // Extract the same ephemeral key used in userdata
+    let auth_id = calculate_authorization_id(ephemeral_key, &secret_id, &ConsumerInfo::default());
     let auth_map = secrets.authorizations.read().unwrap();
     assert!(auth_map.contains_key(&auth_id)); // Should be present
     assert!(*auth_map.get(&auth_id).unwrap() < Utc::now().timestamp() as u64); // But expired

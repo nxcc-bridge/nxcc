@@ -54,7 +54,7 @@ impl MockTdxProvider {
     /// Generate a mock TDX quote with embedded user data
     pub fn generate_mock_quote(&self, user_data: &[u8]) -> Result<Vec<u8>> {
         use rand::Rng;
-        
+
         // Use real TDX quote as base and modify the report data
         let base_quote = std::fs::read("test_data/real_tdx_quote.bin")
             .expect("Failed to load real TDX quote from test_data/real_tdx_quote.bin");
@@ -70,7 +70,7 @@ impl MockTdxProvider {
 
         // TD Report body starts at offset 48
         let td_report_offset = 48;
-        
+
         // Randomize TCB SVN (16 bytes) at offset 0 within TD report
         rng.fill(&mut mock_quote[td_report_offset..td_report_offset + 16]);
 
@@ -87,7 +87,8 @@ impl MockTdxProvider {
         let original_debug_byte = mock_quote[td_report_offset + 120];
         rng.fill(&mut mock_quote[td_report_offset + 120..td_report_offset + 128]);
         // Preserve the original debug bit (bit 0 of first byte)
-        mock_quote[td_report_offset + 120] = (mock_quote[td_report_offset + 120] & !0x01) | (original_debug_byte & 0x01);
+        mock_quote[td_report_offset + 120] =
+            (mock_quote[td_report_offset + 120] & !0x01) | (original_debug_byte & 0x01);
 
         // Randomize XFAM (8 bytes) at offset 128
         rng.fill(&mut mock_quote[td_report_offset + 128..td_report_offset + 136]);
@@ -135,7 +136,7 @@ impl MockTdxProvider {
                 mock_quote[sig_len_offset + 2],
                 mock_quote[sig_len_offset + 3],
             ]) as usize;
-            
+
             if sig_len > 0 && mock_quote.len() >= sig_len_offset + 4 + sig_len {
                 let sig_data_offset = sig_len_offset + 4;
                 rng.fill(&mut mock_quote[sig_data_offset..sig_data_offset + sig_len]);
