@@ -51,7 +51,7 @@ if [ "$APP_VERBOSE" = "true" ]; then
 fi
 
 if [ -f "$CONFIG_PATH" ]; then
-	daemon_cli_args="$daemon_cli_args --config $CONFIG_PATH"
+	daemon_cli_args="$daemon_cli_args --config-path $CONFIG_PATH"
 else
 	if [ -n "$DAEMON_GRPC_ADDR" ]; then
 		daemon_cli_args="$daemon_cli_args --mode tcp --tcp-addr $DAEMON_GRPC_ADDR"

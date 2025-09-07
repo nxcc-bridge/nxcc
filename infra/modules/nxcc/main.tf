@@ -72,7 +72,8 @@ resource "google_service_account" "nxcc_nodes" {
 resource "google_project_iam_member" "nxcc_node_roles" {
   for_each = toset([
     "roles/compute.viewer",
-    "roles/secretmanager.secretAccessor"
+    "roles/secretmanager.secretAccessor",
+    "roles/artifactregistry.reader"
   ])
 
   project = var.project_id
@@ -117,7 +118,7 @@ resource "google_secret_manager_secret" "operator_key" {
 
 resource "google_secret_manager_secret_version" "operator_key" {
   secret      = google_secret_manager_secret.operator_key.id
-  secret_data = var.operator_keys.gcp != "" ? var.operator_keys.gcp : base64encode(random_bytes.operator_private_key[0].hex)
+  secret_data = var.operator_keys.gcp != "" ? var.operator_keys.gcp : random_bytes.operator_private_key[0].base64
 }
 
 # VPC Network
@@ -229,7 +230,7 @@ resource "google_compute_instance" "workers" {
   }
 
   scheduling {
-    on_host_maintenance = startswith(each.value.machine_type, "c3-standard") ? "TERMINATE" : "MIGRATE"
+    on_host_maintenance = each.value.ephemeral || startswith(each.value.machine_type, "c3-standard") ? "TERMINATE" : "MIGRATE"
     automatic_restart   = !each.value.ephemeral
     preemptible         = each.value.ephemeral
   }

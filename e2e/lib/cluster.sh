@@ -40,7 +40,7 @@ setup_staging_cluster() {
 
 	# Deploy to staging environment using Terraform
 	verbose_log "Deploying NXCC to staging environment..."
-	(cd "$project_root" && ./infra/infra.sh deploy create staging)
+	(cd "$project_root" && E2E_BUILD_MODE="${E2E_BUILD_MODE:-debug}" ./infra/infra.sh deploy create staging)
 
 	# Wait for deployment to be ready using terraform readiness check
 	verbose_log "Waiting for staging deployment to be ready..."
@@ -88,7 +88,7 @@ setup_prod_cluster() {
 
 	# Deploy to production environment using Terraform
 	verbose_log "Deploying NXCC to production environment..."
-	(cd "$project_root" && ./infra/infra.sh deploy create production)
+	(cd "$project_root" && E2E_BUILD_MODE="${E2E_BUILD_MODE:-release}" ./infra/infra.sh deploy create production)
 
 	# Wait for deployment to be ready using terraform readiness check
 	verbose_log "Waiting for production deployment to be ready..."

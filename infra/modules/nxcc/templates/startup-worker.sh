@@ -39,6 +39,18 @@ if ! command -v docker &>/dev/null; then
 	systemctl start docker
 fi
 
+# Configure Docker for GCP Artifact Registry authentication (if using GCP registry)
+if [[ "$DOCKER_IMAGE" == *"pkg.dev"* ]]; then
+	echo "Configuring Docker authentication for GCP Artifact Registry..."
+	gcloud auth configure-docker --quiet
+	# For specific regions, also configure regional endpoints
+	if [[ "$DOCKER_IMAGE" == *"europe-west4-docker.pkg.dev"* ]]; then
+		gcloud auth configure-docker europe-west4-docker.pkg.dev --quiet
+	elif [[ "$DOCKER_IMAGE" == *"us-central1-docker.pkg.dev"* ]]; then
+		gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+	fi
+fi
+
 # Pull NXCC Docker image
 echo "Pulling NXCC Docker image: $DOCKER_IMAGE"
 docker pull "$DOCKER_IMAGE"

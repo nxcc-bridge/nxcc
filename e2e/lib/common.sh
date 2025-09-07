@@ -332,8 +332,8 @@ get_worker_endpoints() {
 
 	cd "$target_dir" || error "Failed to change to terraform directory: $target_dir"
 
-	# Extract worker endpoints as JSON
-	tofu output -json worker_endpoints 2>/dev/null || echo "{}"
+	# Extract worker endpoints from monitoring_targets as JSON
+	tofu output -json monitoring_targets 2>/dev/null | jq -r '.worker_endpoints // {}' 2>/dev/null || echo "{}"
 }
 
 # Get first available worker URL from terraform outputs

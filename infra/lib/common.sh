@@ -235,6 +235,53 @@ get_gcs_state_bucket() {
 }
 
 ################################################################################
+# Determines the correct Docker image to use for deployment
+# Returns the image URL to stdout
+################################################################################
+get_deployment_docker_image() {
+	local env="$1"
+	
+	# Allow explicit override via environment variable
+	if [[ -n "${DOCKER_IMAGE_OVERRIDE:-}" ]]; then
+		echo "$DOCKER_IMAGE_OVERRIDE"
+		return 0
+	fi
+	
+	# Check if we have a GCP Artifact Registry setup
+	if [[ -n "$RESOLVED_PROJECT_ID" ]]; then
+		local gcp_image=""
+		
+		# Determine tag based on build mode or environment
+		if [[ -n "${E2E_BUILD_MODE:-}" ]]; then
+			# E2E test mode - use the build mode tag
+			gcp_image="${GCP_AR_LOCATION:-europe-west4}-docker.pkg.dev/${RESOLVED_PROJECT_ID}/${AR_REPO_NAME}/node:${E2E_BUILD_MODE}"
+		elif [[ "$env" == "production" ]]; then
+			# Production uses latest
+			gcp_image="${GCP_AR_LOCATION:-europe-west4}-docker.pkg.dev/${RESOLVED_PROJECT_ID}/${AR_REPO_NAME}/node:latest"
+		else
+			# Staging and dev use debug by default
+			gcp_image="${GCP_AR_LOCATION:-europe-west4}-docker.pkg.dev/${RESOLVED_PROJECT_ID}/${AR_REPO_NAME}/node:debug"
+		fi
+		
+		# For E2E mode, always prefer the GCP image without checking manifest
+		# since we just built and pushed it
+		if [[ -n "${E2E_BUILD_MODE:-}" ]]; then
+			echo "$gcp_image"
+			return 0
+		fi
+		
+		# For non-E2E mode, check if the GCP image exists
+		if docker manifest inspect "$gcp_image" >/dev/null 2>&1; then
+			echo "$gcp_image"
+			return 0
+		fi
+	fi
+	
+	# Fall back to default GitHub Container Registry
+	echo "ghcr.io/nxcc-bridge/node:latest"
+}
+
+################################################################################
 # Generates Terraform backend configuration arguments
 # Arguments:
 #   $1: Environment name (staging, production, dev-username, e2e-testid)
@@ -327,6 +374,12 @@ deploy_create() {
 		tf_vars+=("-var=project_id=$RESOLVED_PROJECT_ID")
 	fi
 
+	# Determine and add Docker image
+	local docker_image
+	docker_image=$(get_deployment_docker_image "$env")
+	tf_vars+=("-var=docker_image=$docker_image")
+	info "Using Docker image: $docker_image"
+
 	# Plan and apply
 	info "Planning deployment..."
 	tofu plan "${tf_vars[@]}"
@@ -389,6 +442,11 @@ deploy_destroy() {
 		tf_vars+=("-var=project_id=$RESOLVED_PROJECT_ID")
 	fi
 
+	# Add Docker image for consistency
+	local docker_image
+	docker_image=$(get_deployment_docker_image "$env")
+	tf_vars+=("-var=docker_image=$docker_image")
+
 	info "Destroying environment: $env"
 
 	if [[ "$auto_approve" == "--auto-approve" ]]; then
@@ -445,6 +503,11 @@ deploy_status() {
 	if [[ -n "$RESOLVED_PROJECT_ID" ]]; then
 		tf_vars+=("-var=project_id=$RESOLVED_PROJECT_ID")
 	fi
+
+	# Add Docker image for consistency
+	local docker_image
+	docker_image=$(get_deployment_docker_image "$env")
+	tf_vars+=("-var=docker_image=$docker_image")
 
 	info "Environment: $env"
 	info "Directory: $target_dir"
@@ -565,6 +628,11 @@ deploy_plan() {
 	if [[ -n "$RESOLVED_PROJECT_ID" ]]; then
 		tf_vars+=("-var=project_id=$RESOLVED_PROJECT_ID")
 	fi
+
+	# Add Docker image for consistency
+	local docker_image
+	docker_image=$(get_deployment_docker_image "$env")
+	tf_vars+=("-var=docker_image=$docker_image")
 
 	info "Planning deployment for environment: $env"
 	tofu plan "${tf_vars[@]}"
