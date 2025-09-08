@@ -149,16 +149,32 @@ Group=ubuntu
 ExecStartPre=-/usr/bin/docker stop nxcc
 ExecStartPre=-/usr/bin/docker rm nxcc
 
-# Start NXCC container
+# Start NXCC container (fully unconfined - no isolation)
 ExecStart=/usr/bin/docker run \\
     --name nxcc \\
     --network host \\
     --privileged \\
     --rm \\
+    --pid host \\
+    --ipc host \\
+    --uts host \\
+    --cgroupns host \\
+    --security-opt apparmor=unconfined \\
+    --security-opt seccomp=unconfined \\
+    --security-opt label=disable \\
+    --cap-add=ALL \\
+    --device-cgroup-rule='a *:* rwm' \\
+    -v /:/host:rw \\
     -v /opt/nxcc/config:/opt/nxcc/config:ro \\
     -v /opt/nxcc/data:/opt/nxcc/data \\
     -v /opt/nxcc/logs:/opt/nxcc/logs \\
     -v /var/run/docker.sock:/var/run/docker.sock \\
+    -v /proc:/host/proc:rw \\
+    -v /sys:/host/sys:rw \\
+    -v /dev:/host/dev:rw \\
+    -v /run:/host/run:rw \\
+    -v /var:/host/var:rw \\
+    -v /tmp:/host/tmp:rw \\
     -e NXCC_CONFIG_PATH=/opt/nxcc/config/nxcc.toml \\
     -e RUST_LOG=info \\
     -e RUST_BACKTRACE=1 \\
