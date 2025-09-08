@@ -240,17 +240,17 @@ get_gcs_state_bucket() {
 ################################################################################
 get_deployment_docker_image() {
 	local env="$1"
-	
+
 	# Allow explicit override via environment variable
 	if [[ -n "${DOCKER_IMAGE_OVERRIDE:-}" ]]; then
 		echo "$DOCKER_IMAGE_OVERRIDE"
 		return 0
 	fi
-	
+
 	# Check if we have a GCP Artifact Registry setup
 	if [[ -n "$RESOLVED_PROJECT_ID" ]]; then
 		local gcp_image=""
-		
+
 		# Determine tag based on build mode or environment
 		if [[ -n "${E2E_BUILD_MODE:-}" ]]; then
 			# E2E test mode - use the build mode tag
@@ -262,21 +262,21 @@ get_deployment_docker_image() {
 			# Staging and dev use debug by default
 			gcp_image="${GCP_AR_LOCATION:-europe-west4}-docker.pkg.dev/${RESOLVED_PROJECT_ID}/${AR_REPO_NAME}/node:debug"
 		fi
-		
+
 		# For E2E mode, always prefer the GCP image without checking manifest
 		# since we just built and pushed it
 		if [[ -n "${E2E_BUILD_MODE:-}" ]]; then
 			echo "$gcp_image"
 			return 0
 		fi
-		
+
 		# For non-E2E mode, check if the GCP image exists
 		if docker manifest inspect "$gcp_image" >/dev/null 2>&1; then
 			echo "$gcp_image"
 			return 0
 		fi
 	fi
-	
+
 	# Fall back to default GitHub Container Registry
 	echo "ghcr.io/nxcc-bridge/node:latest"
 }

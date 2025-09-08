@@ -11,9 +11,9 @@ echo "Starting NXCC seed node startup at $(date)"
 DOCKER_IMAGE="${docker_image}"
 # shellcheck disable=SC2034,SC2154
 NODE_TYPE="${node_type}"
-# shellcheck disable=SC2154
+# shellcheck disable=SC2034,SC2154
 ENVIRONMENT="${environment}"
-# shellcheck disable=SC2154
+# shellcheck disable=SC2034,SC2154
 NAMESPACE="${namespace}"
 # shellcheck disable=SC2154
 OPERATOR_KEY="${operator_key}"
@@ -81,7 +81,6 @@ if [[ -n "$OPERATOR_KEY" ]]; then
 else
 	echo "No operator key provided - seed will participate without operator signatures"
 fi
-
 
 # Create systemd service
 cat >/etc/systemd/system/nxcc.service <<EOF
