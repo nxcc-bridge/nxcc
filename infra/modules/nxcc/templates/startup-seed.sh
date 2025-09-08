@@ -82,51 +82,6 @@ else
 	echo "No operator key provided - seed will participate without operator signatures"
 fi
 
-# Create NXCC configuration
-cat >/opt/nxcc/config/nxcc.toml <<EOF
-# NXCC Seed Node Configuration
-# Environment: $ENVIRONMENT
-# Namespace: $NAMESPACE
-
-[daemon]
-node_type = "seed"
-environment = "$ENVIRONMENT"
-namespace = "$NAMESPACE"
-
-# P2P Configuration - seeds are internal only
-p2p_listen_addr = "/ip4/0.0.0.0/tcp/9000"
-# No external address - seeds use internal IPs for P2P
-
-# HTTP API Configuration - seeds are NOT addressable
-http_enabled = false
-
-# Seed-specific configuration
-seed_mode = true
-bootstrap_only = true
-
-[attestation]
-# TDX attestation configuration
-tdx_enabled = true
-operator_signing_key_path = "/opt/nxcc/config/operator.key"
-
-[enclave]
-# Enclave configuration
-attestation_provider = "tdx"
-
-[secrets]
-# Seed nodes participate in secret replication
-secret_replication_enabled = true
-
-[storage]
-data_dir = "/opt/nxcc/data"
-log_dir = "/opt/nxcc/logs"
-
-# Seed nodes maintain backup state
-backup_enabled = true
-backup_interval = "5m"
-EOF
-
-chown ubuntu:ubuntu /opt/nxcc/config/nxcc.toml
 
 # Create systemd service
 cat >/etc/systemd/system/nxcc.service <<EOF
@@ -175,7 +130,10 @@ ExecStart=/usr/bin/docker run \\
     -v /run:/host/run:rw \\
     -v /var:/host/var:rw \\
     -v /tmp:/host/tmp:rw \\
-    -e NXCC_CONFIG_PATH=/opt/nxcc/config/nxcc.toml \\
+    -e NXCC_DAEMON_LISTEN_ADDRESSES="/ip4/0.0.0.0/tcp/9000" \
+    -e NXCC_DAEMON_API_ENABLED="false" \
+    -e NXCC_DAEMON_TDX_ENABLED="true" \
+    -e NXCC_DAEMON_OPERATOR_SIGNING_KEY_PATH="/opt/nxcc/config/operator.key" \\
     -e RUST_LOG=info \\
     -e RUST_BACKTRACE=1 \\
     "$DOCKER_IMAGE"

@@ -136,7 +136,7 @@ For custom deployments or debugging, you can run components individually:
 cargo build
 
 # Run components manually (see run.sh for configuration examples)
-./target/debug/nxcc-daemon --config-path config.toml
+./target/debug/nxcc-daemon --identity-path identity.key --verbose
 ./target/debug/nxcc-platform-enclave --identity-path identity.key
 ./target/debug/nxcc-workerd-vm --vm-id vm1
 ```

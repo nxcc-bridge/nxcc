@@ -539,16 +539,25 @@ pub async fn start_http_server(
 
         // Conditionally add CORS layer to the API router
         if !config.api_cors_allowed_origins.is_empty() {
-            let origins = config
-                .api_cors_allowed_origins
-                .iter()
-                .map(|s| s.parse().expect("Invalid CORS origin"))
-                .collect::<Vec<_>>();
+            let cors = if config.api_cors_allowed_origins.contains(&"*".to_string()) {
+                // Use AllowOrigin::any() for wildcard origins
+                CorsLayer::new()
+                    .allow_origin(tower_http::cors::Any)
+                    .allow_methods(Any)
+                    .allow_headers(Any)
+            } else {
+                // Parse specific origins for non-wildcard case
+                let origins = config
+                    .api_cors_allowed_origins
+                    .iter()
+                    .map(|s| s.parse().expect("Invalid CORS origin"))
+                    .collect::<Vec<_>>();
 
-            let cors = CorsLayer::new()
-                .allow_origin(origins)
-                .allow_methods(Any)
-                .allow_headers(Any);
+                CorsLayer::new()
+                    .allow_origin(origins)
+                    .allow_methods(Any)
+                    .allow_headers(Any)
+            };
             api_router = api_router.layer(cors);
         }
         app = app.nest("/api", api_router);

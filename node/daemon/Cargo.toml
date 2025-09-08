@@ -7,7 +7,7 @@ edition = "2024"
 anyhow = "1.0.97"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.5.32", features = ["derive", "env"] }
-figment = { version = "0.10.19", features = ["toml", "env"] }
+figment = { version = "0.10.19", features = ["toml", "env", "test"] }
 futures = "0.3.31"
 libp2p = { version = "0.56.0", features = ["tokio", "tcp", "noise", "yamux", "mdns", "identify", "macros", "ping", "kad", "gossipsub"] }
 prost = "0.14.1"

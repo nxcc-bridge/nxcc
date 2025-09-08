@@ -19,7 +19,7 @@ use vmm::WorkerdVmm;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
-    let config = config::Config::load().expect("Config load failed");
+    let config = config::Config::load();
 
     let log_level = if config.base.verbose {
         Level::DEBUG

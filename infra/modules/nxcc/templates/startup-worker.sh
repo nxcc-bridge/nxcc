@@ -82,43 +82,6 @@ else
 	echo "No operator key provided - attestations will not include operator signatures"
 fi
 
-# Create NXCC configuration
-cat >/opt/nxcc/config/nxcc.toml <<EOF
-# NXCC Worker Node Configuration
-# Environment: $ENVIRONMENT
-# Namespace: $NAMESPACE
-
-[daemon]
-node_type = "worker"
-environment = "$ENVIRONMENT"
-namespace = "$NAMESPACE"
-
-# P2P Configuration
-p2p_listen_addr = "/ip4/0.0.0.0/tcp/9000"
-p2p_external_addr = "/ip4/$(curl -s https://ipv4.icanhazip.com)/tcp/9000"
-
-# HTTP API Configuration (workers are addressable)
-http_listen_addr = "0.0.0.0:6922"
-http_enabled = true
-
-# Security
-tls_enabled = false  # TODO: Enable TLS in production
-
-[attestation]
-# TDX attestation configuration
-tdx_enabled = true
-operator_signing_key_path = "/opt/nxcc/config/operator.key"
-
-[enclave]
-# Enclave configuration
-attestation_provider = "tdx"
-
-[storage]
-data_dir = "/opt/nxcc/data"
-log_dir = "/opt/nxcc/logs"
-EOF
-
-chown ubuntu:ubuntu /opt/nxcc/config/nxcc.toml
 
 # Create systemd service
 cat >/etc/systemd/system/nxcc.service <<EOF
@@ -167,7 +130,11 @@ ExecStart=/usr/bin/docker run \\
     -v /run:/host/run:rw \\
     -v /var:/host/var:rw \\
     -v /tmp:/host/tmp:rw \\
-    -e NXCC_CONFIG_PATH=/opt/nxcc/config/nxcc.toml \\
+    -e NXCC_DAEMON_LISTEN_ADDRESSES="/ip4/0.0.0.0/tcp/9000" \
+    -e NXCC_DAEMON_HTTP_LISTEN_ADDR="0.0.0.0:6922" \
+    -e NXCC_DAEMON_API_ENABLED="true" \
+    -e NXCC_DAEMON_TDX_ENABLED="true" \
+    -e NXCC_DAEMON_OPERATOR_SIGNING_KEY_PATH="/opt/nxcc/config/operator.key" \\
     -e RUST_LOG=info \\
     -e RUST_BACKTRACE=1 \\
     "$DOCKER_IMAGE"

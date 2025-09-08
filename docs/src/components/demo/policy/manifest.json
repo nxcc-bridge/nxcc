@@ -1,8 +1,0 @@
-{
-  "userdata": {
-    "description": "Demo policy that accepts all authorization requests",
-    "version": "1.0.0",
-    "demo": true
-  },
-  "identities": []
-}

@@ -15,13 +15,7 @@ use tracing_subscriber::{EnvFilter, FmtSubscriber as Subscriber, fmt::format::Fm
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let config = match EnclaveConfig::load() {
-        Ok(cfg) => cfg,
-        Err(e) => {
-            eprintln!("Failed to load enclave configuration: {}", e);
-            return Err(e.into());
-        }
-    };
+    let config = EnclaveConfig::load();
 
     // Set up logging with the appropriate level based on verbose flag
     let log_level = if config.verbose {

@@ -5,78 +5,79 @@ set -e
 
 # --- Configuration ---
 # Use environment variables for configuration, with sensible defaults.
+# Components now use clap-only configuration with component-specific prefixes.
 APP_VERBOSE="${NXCC_ALL_VERBOSE:-false}"
-DAEMON_GRPC_ADDR="${DAEMON_GRPC_TARGET_ADDR:-}"
-DAEMON_P2P_ADDR="${DAEMON_P2P_LISTEN_ADDR:-/ip4/0.0.0.0/tcp/9000}"
 DAEMON_UDS_PATH="/run/nxcc/daemon.sock"
-ENCLAVE_UDS_PATH="${ENCLAVE_UDS_SOCKET:-/run/nxcc/enclave.sock}"
-WORKERD_VM_UDS_PATH="${WORKERD_UDS_SOCKET:-/run/nxcc/workerd.sock}"
+ENCLAVE_UDS_PATH="${NXCC_ENCLAVE_GRPC_UDS_PATH:-/run/nxcc/enclave.sock}"
+WORKERD_VM_UDS_PATH="${NXCC_WORKERD_SERVER_UDS_PATH:-/run/nxcc/workerd.sock}"
 WORKERD_BIN_PATH="${WORKERD_BIN_PATH_ABS:-/usr/local/bin/workerd}"
-IDENTITY_PATH="${NXCC_IDENTITY_PATH:-}"
-POLICY_CACHE_DIR="${NXCC_POLICY_CACHE_DIR:-}"
-CONFIG_PATH="${NXCC_CONFIG_PATH:-config.toml}"
 DAEMON_EXTRA_ARGS="${NXCC_DAEMON_EXTRA_ARGS:-}"
+DUMP_CONFIG="${NXCC_DAEMON_DUMP_CONFIG:-false}"
 
-# --- Start VM ---
-vm_cli_args="--server-mode uds --server-uds-path $WORKERD_VM_UDS_PATH --workerd-path $WORKERD_BIN_PATH"
+# Export environment variables for the components to use
+# Daemon configuration (NXCC_DAEMON_ prefix)
+export NXCC_DAEMON_UDS_PATH="$DAEMON_UDS_PATH"
+export NXCC_DAEMON_ENCLAVE_UDS_PATH="$ENCLAVE_UDS_PATH"
+export NXCC_DAEMON_DEFAULT_VM_UDS_PATH="$WORKERD_VM_UDS_PATH"
 if [ "$APP_VERBOSE" = "true" ]; then
-	vm_cli_args="$vm_cli_args --verbose"
+	export NXCC_DAEMON_VERBOSE="true"
 fi
-echo "Starting nxcc-workerd-vm with args: $vm_cli_args"
-# shellcheck disable=SC2086
-nxcc-workerd-vm $vm_cli_args &
 
-# --- Start Enclave ---
-enclave_cli_args="--grpc-mode uds --grpc-uds-path $ENCLAVE_UDS_PATH"
+# Enclave configuration (NXCC_ENCLAVE_ prefix)
+export NXCC_ENCLAVE_GRPC_UDS_PATH="$ENCLAVE_UDS_PATH"
 if [ "$APP_VERBOSE" = "true" ]; then
-	enclave_cli_args="$enclave_cli_args --verbose"
+	export NXCC_ENCLAVE_VERBOSE="true"
 fi
-echo "Starting nxcc-platform-enclave with args: $enclave_cli_args"
-# shellcheck disable=SC2086
-nxcc-platform-enclave $enclave_cli_args &
 
-# Wait for dependent services to be ready before starting the daemon.
-echo "Waiting for VM and enclave sockets..."
-while ! [ -S "$WORKERD_VM_UDS_PATH" ] || ! [ -S "$ENCLAVE_UDS_PATH" ]; do
-	sleep 0.1
-done
-echo "VM and enclave are ready."
+# VM configuration (NXCC_WORKERD_ prefix for workerd VM)
+export NXCC_WORKERD_SERVER_UDS_PATH="$WORKERD_VM_UDS_PATH"
+export NXCC_WORKERD_WORKERD_PATH="$WORKERD_BIN_PATH"
+if [ "$APP_VERBOSE" = "true" ]; then
+	export NXCC_WORKERD_VERBOSE="true"
+fi
+
+# If dump config mode, skip starting VM and enclave
+if [ "$DUMP_CONFIG" != "true" ]; then
+	# --- Start VM ---
+	# VM configuration is now handled via environment variables
+	echo "Starting nxcc-workerd-vm (configured via environment variables)"
+	nxcc-workerd-vm &
+
+	# --- Start Enclave ---
+	# Enclave configuration is now handled via environment variables
+	echo "Starting nxcc-platform-enclave (configured via environment variables)"
+	nxcc-platform-enclave &
+
+	# Wait for dependent services to be ready before starting the daemon.
+	echo "Waiting for VM and enclave sockets..."
+	while ! [ -S "$WORKERD_VM_UDS_PATH" ] || ! [ -S "$ENCLAVE_UDS_PATH" ]; do
+		sleep 0.1
+	done
+	echo "VM and enclave are ready."
+fi
 
 # --- Start Daemon ---
-# It is assumed that the daemon will automatically attach the VM specified via
-# --default-vm-uds-path once the socket is available.
+# Daemon configuration is now handled via environment variables with clap
 daemon_cli_args=""
-if [ "$APP_VERBOSE" = "true" ]; then
-	daemon_cli_args="$daemon_cli_args --verbose"
-fi
 
-if [ -f "$CONFIG_PATH" ]; then
-	daemon_cli_args="$daemon_cli_args --config-path $CONFIG_PATH"
-else
-	if [ -n "$DAEMON_GRPC_ADDR" ]; then
-		daemon_cli_args="$daemon_cli_args --mode tcp --tcp-addr $DAEMON_GRPC_ADDR"
-	else
-		daemon_cli_args="$daemon_cli_args --mode uds --uds-path $DAEMON_UDS_PATH"
-	fi
-	daemon_cli_args="$daemon_cli_args --listen-addresses $DAEMON_P2P_ADDR"
-	daemon_cli_args="$daemon_cli_args --http-listen-addr 0.0.0.0:6922"
-	daemon_cli_args="$daemon_cli_args --enclave-uds-path $ENCLAVE_UDS_PATH"
-	daemon_cli_args="$daemon_cli_args --default-vm-uds-path $WORKERD_VM_UDS_PATH"
-	if [ -n "$IDENTITY_PATH" ]; then
-		daemon_cli_args="$daemon_cli_args --identity-path $IDENTITY_PATH"
-	fi
-	if [ -n "$POLICY_CACHE_DIR" ]; then
-		daemon_cli_args="$daemon_cli_args --policy-cache-dir $POLICY_CACHE_DIR"
-	fi
-fi
-
+# Pass through extra daemon arguments if specified
 if [ -n "$DAEMON_EXTRA_ARGS" ]; then
 	daemon_cli_args="$daemon_cli_args $DAEMON_EXTRA_ARGS"
 fi
 
-echo "Starting nxcc-daemon with args:$daemon_cli_args"
-# shellcheck disable=SC2086
-nxcc-daemon $daemon_cli_args &
+# Add --dump-config if in dump config mode
+if [ "$DUMP_CONFIG" = "true" ]; then
+	daemon_cli_args="$daemon_cli_args --dump-config"
+fi
 
-echo "All components started. Waiting for processes to exit..."
-wait
+echo "Starting nxcc-daemon (configured via environment variables)${daemon_cli_args:+ with extra args:$daemon_cli_args}"
+# shellcheck disable=SC2086
+if [ "$DUMP_CONFIG" = "true" ]; then
+	# In dump config mode, run daemon directly and exit
+	nxcc-daemon $daemon_cli_args
+else
+	# Normal mode - run in background and wait
+	nxcc-daemon $daemon_cli_args &
+	echo "All components started. Waiting for processes to exit..."
+	wait
+fi

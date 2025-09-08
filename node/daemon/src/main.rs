@@ -34,7 +34,13 @@ const EVENT_BATCH_SIZE: usize = 100;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let config = Config::load()?;
+    let config = Config::load();
+
+    // Dump config and exit early if requested
+    if config.dump_config {
+        println!("{}", serde_json::to_string(&config)?);
+        return Ok(());
+    }
 
     let log_level = if config.verbose {
         Level::DEBUG

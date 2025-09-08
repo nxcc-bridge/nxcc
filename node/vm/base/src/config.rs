@@ -23,14 +23,12 @@ pub enum ConfigConversionError {
 #[derive(Parser, Debug, Clone, Serialize, Deserialize)]
 #[command(author, version, about, long_about = None)]
 #[group(skip)]
-#[derive(Default)]
 pub struct Config {
     /// Enable verbose logging
-    #[arg(short, long, default_value_t = false)]
+    #[arg(short, long, default_value_t = false, env = "NXCC_VM_VERBOSE")]
     pub verbose: bool,
 
     /// Server configuration
-    #[serde(default)]
     #[clap(flatten)]
     pub server: VmServerConfig,
 }
@@ -39,44 +37,56 @@ pub struct Config {
 #[derive(Args, Debug, Clone, Serialize, Deserialize)]
 pub struct VmServerConfig {
     /// Server mode: "uds", "vsock", or "tcp"
-    #[clap(long = "server-mode", default_value_t = default_server_mode())]
-    #[serde(default = "default_server_mode")]
+    #[clap(long = "server-mode", default_value_t = default_server_mode(), env = "NXCC_VM_SERVER_MODE")]
     pub mode: String,
 
     /// When using UDS: the path to the Unix Domain Socket
-    #[clap(long = "server-uds-path", default_value_t = default_uds_path())]
-    #[serde(default = "default_uds_path")]
+    #[clap(
+        long = "server-uds-path",
+        default_value = "/tmp/vm_service.sock",
+        env = "NXCC_VM_SERVER_UDS_PATH"
+    )]
     pub uds_path: String,
 
     /// When using vsock: the vsock CID to listen on
-    #[clap(long = "server-vsock-cid", default_value_t = default_vsock_cid())]
-    #[serde(default = "default_vsock_cid")]
+    #[clap(
+        long = "server-vsock-cid",
+        default_value_t = 3,
+        env = "NXCC_VM_SERVER_VSOCK_CID"
+    )]
     pub vsock_cid: u32,
 
     /// When using vsock: the vsock port to listen on
-    #[clap(long = "server-vsock-port", default_value_t = default_vsock_port())]
-    #[serde(default = "default_vsock_port")]
+    #[clap(
+        long = "server-vsock-port",
+        default_value_t = 5000,
+        env = "NXCC_VM_SERVER_VSOCK_PORT"
+    )]
     pub vsock_port: u32,
 
     /// When using TCP: the address to listen on (e.g., "127.0.0.1:8080")
-    #[clap(long = "server-tcp-addr", default_value_t = default_tcp_addr())]
-    #[serde(default = "default_tcp_addr")]
+    #[clap(
+        long = "server-tcp-addr",
+        default_value = "127.0.0.1:8080",
+        env = "NXCC_VM_SERVER_TCP_ADDR"
+    )]
     pub tcp_addr: String,
 }
 
 impl Default for VmServerConfig {
     fn default() -> Self {
-        Self {
-            mode: default_server_mode(),
-            uds_path: default_uds_path(),
-            vsock_cid: default_vsock_cid(),
-            vsock_port: default_vsock_port(),
-            tcp_addr: default_tcp_addr(),
+        // Create a temporary parser wrapper to get clap defaults
+        #[derive(clap::Parser)]
+        struct TempWrapper {
+            #[clap(flatten)]
+            server: VmServerConfig,
         }
+
+        TempWrapper::try_parse_from(&[""]).unwrap().server
     }
 }
 
-// Default value functions
+// Default value function - needed for complex feature-based defaults
 fn default_server_mode() -> String {
     #[cfg(feature = "uds")]
     return "uds".to_string();
@@ -91,20 +101,20 @@ fn default_server_mode() -> String {
     return "none".to_string();
 }
 
-fn default_uds_path() -> String {
-    "/tmp/vm_service.sock".to_string()
+impl Default for Config {
+    fn default() -> Self {
+        use clap::Parser;
+        // Parse with empty arguments to get clap's default values
+        Config::try_parse_from(&[""]).unwrap()
+    }
 }
 
-fn default_vsock_cid() -> u32 {
-    3 // VMADDR_CID_ANY
-}
-
-fn default_vsock_port() -> u32 {
-    5000
-}
-
-fn default_tcp_addr() -> String {
-    "127.0.0.1:8080".to_string()
+impl Config {
+    /// Load configuration from environment variables and CLI arguments using clap.
+    /// Environment variables use the NXCC_VM_ prefix.
+    pub fn load() -> Self {
+        Config::parse()
+    }
 }
 
 impl TryFrom<&VmServerConfig> for crate::server::ServerConfig {
