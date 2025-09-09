@@ -11,8 +11,13 @@
 set -e
 set -o pipefail
 
-# The root directory of the library scripts, relative to this script's location.
-LIB_DIR="$(dirname "$0")/lib"
+# Resolve absolute path to this script's directory (the infra dir) and export it
+# so that sourced libraries can reliably reference files regardless of cwd.
+INFRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+export INFRA_DIR
+
+# The root directory of the library scripts, under the infra directory.
+LIB_DIR="${INFRA_DIR}/lib"
 
 # Source all the functional components.
 # common.sh must be first as others depend on it.

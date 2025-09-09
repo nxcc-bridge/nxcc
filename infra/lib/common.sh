@@ -3,6 +3,13 @@
 # Common variables, helpers, and identity functions for the infra scripts.
 # This script is intended to be sourced, not executed directly.
 
+# Ensure INFRA_DIR is defined if not provided by the entrypoint script
+if [[ -z "${INFRA_DIR:-}" ]]; then
+  # common.sh is in infra/lib → go up one directory to infra
+  INFRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  export INFRA_DIR
+fi
+
 # --- Configuration ---
 # GCP CI/CD and GKE Cluster Config
 readonly SERVICE_ACCOUNT_NAME="nxcc-ci-cd-runner"
@@ -317,7 +324,7 @@ get_backend_configs() {
 ################################################################################
 deploy_create() {
 	local env="$1"
-	local env_dir="infra/environments"
+	local env_dir="${INFRA_DIR}/environments"
 	local target_dir=""
 
 	info "Deploying NXCC infrastructure for environment: $env"
@@ -403,7 +410,7 @@ deploy_create() {
 deploy_destroy() {
 	local env="$1"
 	local auto_approve="${2:-}"
-	local env_dir="infra/environments"
+	local env_dir="${INFRA_DIR}/environments"
 	local target_dir=""
 
 	# Determine environment directory (same logic as deploy_create)
@@ -465,7 +472,7 @@ deploy_destroy() {
 ################################################################################
 deploy_status() {
 	local env="$1"
-	local env_dir="infra/environments"
+	local env_dir="${INFRA_DIR}/environments"
 	local target_dir=""
 
 	# Determine environment directory (same logic as deploy_create)
@@ -575,7 +582,7 @@ deploy_status() {
 ################################################################################
 deploy_plan() {
 	local env="$1"
-	local env_dir="infra/environments"
+	local env_dir="${INFRA_DIR}/environments"
 	local target_dir=""
 
 	# Determine environment directory (same logic as deploy_create)
