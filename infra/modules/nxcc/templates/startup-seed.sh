@@ -66,7 +66,7 @@ if [[ -n "$OPERATOR_KEY" ]]; then
 		# OPERATOR_KEY is a secret name, fetch from Secret Manager
 		echo "Fetching operator key from Secret Manager: $OPERATOR_KEY"
 		if command -v gcloud &>/dev/null; then
-			gcloud secrets versions access latest --secret="$OPERATOR_KEY" | base64 -d >/opt/nxcc/config/operator.key
+			gcloud secrets versions access latest --secret="$OPERATOR_KEY" >/opt/nxcc/config/operator.key
 		else
 			echo "ERROR: gcloud CLI not available for secret access"
 			exit 1
