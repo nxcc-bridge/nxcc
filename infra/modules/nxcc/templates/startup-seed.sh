@@ -17,6 +17,8 @@ ENVIRONMENT="${environment}"
 NAMESPACE="${namespace}"
 # shellcheck disable=SC2154
 OPERATOR_KEY="${operator_key}"
+# shellcheck disable=SC2154
+BOOTSTRAP_PEERS="${bootstrap_peers}"
 
 # Update system and install required packages
 apt-get update
@@ -129,10 +131,11 @@ ExecStart=/usr/bin/docker run \\
     -v /run:/host/run:rw \\
     -v /var:/host/var:rw \\
     -v /tmp:/host/tmp:rw \\
-    -e NXCC_DAEMON_LISTEN_ADDRESSES="/ip4/0.0.0.0/tcp/9000" \
-    -e NXCC_DAEMON_API_ENABLED="false" \
-    -e NXCC_DAEMON_TDX_ENABLED="true" \
+    -e NXCC_DAEMON_LISTEN_ADDRESSES="/ip4/0.0.0.0/tcp/9000" \\
+    -e NXCC_DAEMON_API_ENABLED="false" \\
+    -e NXCC_DAEMON_TDX_ENABLED="true" \\
     -e NXCC_DAEMON_OPERATOR_SIGNING_KEY_PATH="/opt/nxcc/config/operator.key" \\
+    -e NXCC_DAEMON_BOOTSTRAP_PEERS="$BOOTSTRAP_PEERS" \\
     -e RUST_LOG=info \\
     -e RUST_BACKTRACE=1 \\
     "$DOCKER_IMAGE"

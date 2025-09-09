@@ -386,6 +386,7 @@ deploy_create() {
 	docker_image=$(get_deployment_docker_image "$env")
 	tf_vars+=("-var=docker_image=$docker_image")
 	info "Using Docker image: $docker_image"
+	
 
 	# Plan and apply
 	info "Planning deployment..."

@@ -72,6 +72,10 @@ module "nxcc" {
   # Production security - restricted SSH access
   allowed_ssh_cidrs = var.allowed_ssh_cidrs
 
+  # Bootstrap peers for production network
+  # Configure additional bootstrap peers for cross-network connectivity
+  bootstrap_peers = []
+
   operator_keys = {
     gcp = var.operator_key_gcp # Production operator key from Secret Manager
   }

@@ -140,6 +140,12 @@ variable "ssh_keys" {
   sensitive   = true
 }
 
+variable "bootstrap_peers" {
+  description = "Bootstrap peers to connect to (libp2p multiaddr format, e.g. '/ip4/127.0.0.1/tcp/53842/p2p/12D3KooWAVCVEkRyXCvAg9mCvLtX9pLzGkcpf7M7TuD7s1S7AYqA')"
+  type        = list(string)
+  default     = []
+}
+
 # Local validation and computed values
 locals {
   # TDX-supported regions (as of 2024)

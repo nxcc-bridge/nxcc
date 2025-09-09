@@ -254,11 +254,12 @@ resource "google_compute_instance" "workers" {
   }
 
   metadata_startup_script = templatefile("${path.module}/templates/startup-worker.sh", {
-    docker_image = var.docker_image
-    node_type    = "worker"
-    environment  = var.environment
-    namespace    = var.namespace
-    operator_key = google_secret_manager_secret.operator_key.secret_id # Secret name for retrieval
+    docker_image              = var.docker_image
+    node_type                 = "worker"
+    environment               = var.environment
+    namespace                 = var.namespace
+    operator_key              = google_secret_manager_secret.operator_key.secret_id # Secret name for retrieval
+    bootstrap_peers  = join(",", var.bootstrap_peers)
   })
 
   metadata = {
@@ -318,11 +319,12 @@ resource "google_compute_instance" "seeds" {
   }
 
   metadata_startup_script = templatefile("${path.module}/templates/startup-seed.sh", {
-    docker_image = var.docker_image
-    node_type    = "seed"
-    environment  = var.environment
-    namespace    = var.namespace
-    operator_key = google_secret_manager_secret.operator_key.secret_id # Secret name for retrieval
+    docker_image              = var.docker_image
+    node_type                 = "seed"
+    environment               = var.environment
+    namespace                 = var.namespace
+    operator_key              = google_secret_manager_secret.operator_key.secret_id # Secret name for retrieval
+    bootstrap_peers  = join(",", var.bootstrap_peers)
   })
 
   metadata = {

@@ -36,6 +36,9 @@ module "nxcc" {
   # Dev-friendly SSH access
   allowed_ssh_cidrs = ["0.0.0.0/0"]
 
+  # Bootstrap peers for dev network
+  bootstrap_peers = []
+
   operator_keys = {
     gcp = var.operator_key_gcp # Dev can use test keys
   }

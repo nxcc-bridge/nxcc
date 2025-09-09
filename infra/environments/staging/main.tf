@@ -44,6 +44,10 @@ module "nxcc" {
   # Allow access for staging testing
   allowed_ssh_cidrs = ["0.0.0.0/0"] # Open for testing
 
+  # Bootstrap peers for staging network
+  # Add external bootstrap peers here if connecting to other networks
+  bootstrap_peers = []
+
   operator_keys = {
     gcp = var.operator_key_gcp
   }

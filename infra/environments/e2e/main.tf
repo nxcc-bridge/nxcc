@@ -53,6 +53,9 @@ module "nxcc" {
   # Open SSH for CI/test runners
   allowed_ssh_cidrs = ["0.0.0.0/0"]
 
+  # Bootstrap peers for E2E test network
+  bootstrap_peers = []
+
   operator_keys = {
     gcp = var.operator_key_gcp
   }
