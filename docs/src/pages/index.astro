@@ -862,7 +862,7 @@ const pricingTiers = [
         };
 
         // Try to play as soon as the player reports ready
-        const onMessage = (ev) => {
+        const onMessage = (ev: MessageEvent) => {
           try {
             const data =
               typeof ev.data === "string" ? JSON.parse(ev.data) : ev.data;

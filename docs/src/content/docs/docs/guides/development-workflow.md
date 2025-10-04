@@ -322,9 +322,9 @@ curl http://localhost:6922/api/work-orders
 
 ## Next Steps
 
-- **[Policy Development](./policy-development.md)** - Learn to write authorization policies
-- **[Blockchain Events](./blockchain-events.md)** - React to on-chain events
-- **[Infrastructure Management](../reference/infra-management.md)** - Deploy to production
+- **[Policy Development](/docs/guides/policy-development/)** - Learn to write authorization policies
+- **[Blockchain Events](/docs/guides/blockchain-events/)** - React to on-chain events
+- **[Infrastructure Management](/docs/reference/infra-management/)** - Deploy to production
 
 ## Development Tips
 

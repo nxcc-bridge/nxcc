@@ -444,9 +444,9 @@ ipfs add policy-bundle.json
 
 ## Next Steps
 
-- **[Identity Management](../reference/identities-and-policies.md)** - Learn about identity NFTs and on-chain management
-- **[Worker Runtime](../reference/worker-runtime.md)** - Understand the execution environment
-- **[Development Workflow](./development-workflow.md)** - Master local testing and debugging
+- **[Identity Management](/docs/reference/identities-and-policies/)** - Learn about identity NFTs and on-chain management
+- **[Worker Runtime](/docs/reference/worker-runtime/)** - Understand the execution environment
+- **[Development Workflow](/docs/guides/development-workflow/)** - Master local testing and debugging
 
 ## Common Pitfalls
 

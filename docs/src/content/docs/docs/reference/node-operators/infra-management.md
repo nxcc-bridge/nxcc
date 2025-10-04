@@ -498,6 +498,6 @@ ls infra/k8s/manifests/
 
 ## Next Steps
 
-- **[Running a Node](./running-a-node.md)** - Learn about local development node setup
-- **[Local Development Workflow](../guides/development-workflow.md)** - Master the development cycle
-- **[CLI Reference](./cli.md)** - Understand the developer CLI tools
+- **[Running a Node](/docs/reference/node-operators/running-a-node/)** - Learn about local development node setup
+- **[Local Development Workflow](/docs/guides/development-workflow/)** - Master the development cycle
+- **[CLI Reference](/docs/reference/cli/)** - Understand the developer CLI tools

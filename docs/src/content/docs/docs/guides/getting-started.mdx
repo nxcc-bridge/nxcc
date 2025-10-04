@@ -3,20 +3,97 @@ title: Getting Started with nXCC
 description: Build your first cross-chain worker in 10 minutes
 ---
 
+import { Tabs, TabItem, Steps } from "@astrojs/starlight/components";
+
 Welcome to nXCC! This guide will get you up and running with your first cross-chain worker in just a few steps.
 
 ## Quick Start
 
-The fastest way to try nXCC is using our all-in-one local setup:
+Pick the runtime that matches your setup.
 
-```bash
-# Clone the repo and start everything
-git clone https://github.com/nxcc-bridge/nxcc.git
-cd nxcc/node
-./run.sh
-```
+<Tabs syncKey="quickstart">
 
-That's it! You now have a local nXCC node running at `http://localhost:6922`.
+<TabItem label="Docker (recommended)">
+
+<Steps>
+
+1. Run the container with matching ports and env vars so the HTTP API and libp2p are reachable:
+
+   ```bash
+   docker run --rm \
+     -e NXCC_DAEMON_HTTP_LISTEN_ADDR=0.0.0.0:6922 \
+     -e NXCC_DAEMON_LISTEN_ADDRESSES=/ip4/0.0.0.0/tcp/9000 \
+     -p 6922:6922 \
+     -p 9000:9000 \
+     ghcr.io/nxcc-bridge/node:latest
+   ```
+
+2. Access the node at `http://localhost:6922` (HTTP API) while keeping port `9000` open for libp2p peers.
+
+</Steps>
+
+</TabItem>
+
+<TabItem label="Native (macOS & Linux)">
+
+<Steps>
+
+1. Install the prerequisites: Rust 1.89+, Cargo, and Node.js 18+.
+2. Install Cloudflare's `workerd` runtime so the binary is on `PATH` or referenced via `NXCC_WORKERD_BINARY_PATH`.
+
+   <Tabs syncKey="workerd">
+
+   <TabItem label="macOS (x86_64 / arm64)">
+
+   ```bash
+   brew install cloudflare/workers/workerd
+   ```
+
+   </TabItem>
+
+   <TabItem label="Linux x86_64">
+
+   ```bash
+   BASE=https://github.com/cloudflare/workerd/releases/latest/download
+   curl -fsSLo workerd.gz "$BASE/workerd-linux-64.gz"
+   gunzip workerd.gz
+   chmod +x workerd
+   sudo mv workerd /usr/local/bin/
+   ```
+
+   </TabItem>
+
+   <TabItem label="Linux arm64 (aarch64)">
+
+   ```bash
+   BASE=https://github.com/cloudflare/workerd/releases/latest/download
+   curl -fsSLo workerd.gz "$BASE/workerd-linux-arm64.gz"
+   gunzip workerd.gz
+   chmod +x workerd
+   sudo mv workerd /usr/local/bin/
+   ```
+
+   </TabItem>
+
+   </Tabs>
+
+   Prefer a custom location? Place the binary anywhere and export `NXCC_WORKERD_BINARY_PATH=/path/to/workerd` (or `WORKERD_BIN_PATH`) before continuing.
+
+3. Start the local node:
+
+   ```bash
+   git clone https://github.com/nxcc-bridge/nxcc.git
+   cd nxcc/node
+   ./run.sh
+   ```
+
+</Steps>
+
+The node now serves the HTTP API at `http://localhost:6922` and libp2p on `127.0.0.1:9001`.
+
+</TabItem>
+
+</Tabs>
 
 ## Your First Worker
 
@@ -117,14 +194,6 @@ Workers are event-driven. Currently, the CLI automatically adds a `launch` event
 
 For production blockchain integration, you would typically use the work order API to create workers that listen to specific on-chain events.
 
-### Use Docker for Production
-
-For production deployments:
-
-```bash
-docker run -p 6922:6922 ghcr.io/nxcc-bridge/node:latest
-```
-
 ## Core Concepts
 
 **Workers**: JavaScript/TypeScript code that runs in secure environments and can:
@@ -142,21 +211,21 @@ docker run -p 6922:6922 ghcr.io/nxcc-bridge/node:latest
 
 Follow our progressive tutorial series:
 
-1. **[Blockchain Events](./blockchain-events.md)** ← Start here next
+1. **[Blockchain Events](/docs/guides/blockchain-events/)** ← Start here next
    Build workers that react to on-chain events across multiple blockchains
 
-2. **[Identities & Policies](./identities-policies.md)**  
+2. **[Identities & Policies](/docs/guides/identities-policies/)**  
    Add secure credential management and access controls
 
 ## Reference Docs
 
-- **[Core Concepts](../reference/core-concepts.md)** - System architecture deep dive
-- **[Worker Runtime](../reference/worker-runtime.md)** - Complete JavaScript API reference
-- **[CLI Reference](../reference/cli.md)** - All CLI commands and options
+- **[Core Concepts](/docs/reference/core-concepts/)** - System architecture deep dive
+- **[Worker Runtime](/docs/reference/worker-runtime/)** - Complete JavaScript API reference
+- **[CLI Reference](/docs/reference/cli/)** - All CLI commands and options
 
 ## Need Help?
 
-- 📖 [Full Documentation](../reference/)
+- 📖 [Full Documentation](/docs/reference/)
 - 🐛 [GitHub Issues](https://github.com/nxcc-bridge/nxcc/issues)
 - 💬 [Community Discord](https://discord.gg/nxcc)
 

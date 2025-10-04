@@ -118,4 +118,4 @@ While other protocols add more validators to increase security (and decrease eff
 
 ---
 
-_Ready to experience the performance difference? [Get started](../guides/getting-started.md) with nXCC today._
+_Ready to experience the performance difference? [Get started](/docs/guides/getting-started/) with nXCC today._

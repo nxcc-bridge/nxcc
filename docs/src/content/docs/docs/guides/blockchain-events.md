@@ -15,7 +15,7 @@ A worker that:
 
 ## Prerequisites
 
-- Complete the [Getting Started](./getting-started.md) guide
+- Complete the [Getting Started](/docs/guides/getting-started/) guide
 - nXCC node running locally (`./run.sh`)
 - Basic understanding of blockchain events
 
@@ -325,8 +325,8 @@ Example manifest with multiple event types:
 
 ## Next Steps
 
-- **[Identities and Policies](./identities-policies.md)** - Learn secure credential management
-- **[Worker Runtime Reference](../reference/worker-runtime.md)** - Complete API documentation
+- **[Identities and Policies](/docs/guides/identities-policies/)** - Learn secure credential management
+- **[Worker Runtime Reference](/docs/reference/worker-runtime/)** - Complete API documentation
 
 ## Common Patterns
 

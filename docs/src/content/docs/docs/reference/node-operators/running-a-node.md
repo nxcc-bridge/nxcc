@@ -125,7 +125,7 @@ The TDX development environment includes:
 - **Comprehensive testing**: Built-in connectivity and functionality tests
 - **Developer-friendly**: Automated setup and teardown for rapid iteration
 
-For complete details on all commands and options, see the [Infrastructure Management Reference](./infra-management.md).
+For complete details on all commands and options, see the [Infrastructure Management Reference](/docs/reference/infra-management/).
 
 ## Manual Setup (Advanced)
 

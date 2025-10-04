@@ -23,7 +23,7 @@ Without identities, workers store secrets in plaintext configuration (like API k
 
 ## Prerequisites
 
-- Complete [Getting Started](./getting-started.md) and [Blockchain Events](./blockchain-events.md)
+- Complete [Getting Started](/docs/guides/getting-started/) and [Blockchain Events](/docs/guides/blockchain-events/)
 - Understanding of smart contracts and NFTs
 - Local nXCC node running
 
@@ -432,8 +432,8 @@ export default policy(async (requests) => {
 
 ## Next Steps
 
-- **[Worker Runtime Reference](../reference/worker-runtime.md)** - Complete API docs
-- **[CLI Reference](../reference/cli.md)** - All CLI commands
+- **[Worker Runtime Reference](/docs/reference/worker-runtime/)** - Complete API docs
+- **[CLI Reference](/docs/reference/cli/)** - All CLI commands
 
 ## Common Identity Patterns
 

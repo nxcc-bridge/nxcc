@@ -25,7 +25,9 @@
     "vue": "^3.5.18"
   },
   "devDependencies": {
+    "@astrojs/check": "^0.9.4",
     "prettier": "^3.6.2",
-    "prettier-plugin-astro": "^0.14.1"
+    "prettier-plugin-astro": "^0.14.1",
+    "typescript": "^5.9.3"
   }
 }

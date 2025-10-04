@@ -574,4 +574,4 @@ import { worker, type WorkerContext } from "@nxcc/sdk";
 - Verify the policy bundle is accessible via the identity's tokenURI
 - Check policy logs for authorization decisions
 
-For more troubleshooting help, see the [Development Workflow](../guides/development-workflow.md) guide.
+For more troubleshooting help, see the [Development Workflow](/docs/guides/development-workflow/) guide.
