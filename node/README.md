@@ -39,6 +39,25 @@ nXCC is built as a multi-process system with secure communication channels:
 
 - Rust 1.89.0+ with edition 2024
 - Docker (recommended for deployment)
+- Cloudflare `workerd` runtime for the JavaScript VM:
+  - macOS (x86_64 / arm64): `brew install cloudflare/workers/workerd`
+  - Linux x86_64:
+    ```bash
+    BASE=https://github.com/cloudflare/workerd/releases/latest/download
+    curl -fsSLo workerd.gz "$BASE/workerd-linux-64.gz"
+    gunzip workerd.gz
+    chmod +x workerd
+    sudo mv workerd /usr/local/bin/
+    ```
+  - Linux arm64 (aarch64):
+    ```bash
+    BASE=https://github.com/cloudflare/workerd/releases/latest/download
+    curl -fsSLo workerd.gz "$BASE/workerd-linux-arm64.gz"
+    gunzip workerd.gz
+    chmod +x workerd
+    sudo mv workerd /usr/local/bin/
+    ```
+  - If you keep the binary elsewhere, export `NXCC_WORKERD_BINARY_PATH=/path/to/workerd` (or `WORKERD_BIN_PATH`) before running `./run.sh`.
 - Intel TDX/SGX hardware (for production attestation)
 
 ### Development
@@ -51,6 +70,7 @@ cargo build
 cargo test
 
 # Start local node (all components)
+# Requires workerd on PATH or NXCC_WORKERD_BINARY_PATH to be set
 ./run.sh
 
 # Start multi-node cluster
@@ -63,8 +83,13 @@ cargo test
 # Build production image
 docker build -t nxcc-node .
 
-# Run containerized node
-docker run -p 9000:9000 -p 50051:50051 nxcc-node
+# Run containerized node with matching ports
+docker run --rm \
+  -e NXCC_DAEMON_HTTP_LISTEN_ADDR=0.0.0.0:6922 \
+  -e NXCC_DAEMON_LISTEN_ADDRESSES=/ip4/0.0.0.0/tcp/9000 \
+  -p 6922:6922 \
+  -p 9000:9000 \
+  nxcc-node
 ```
 
 ## Development Workflow

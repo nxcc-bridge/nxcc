@@ -52,33 +52,20 @@ nXCC uses a multi-process architecture where JavaScript workers execute inside t
 
 ## 🚀 Quick Start
 
-### Using Docker (Recommended)
+Start a node with Docker:
 
 ```bash
-# Pull the latest image
-docker pull ghcr.io/nxcc-bridge/node:latest
-
-# Run a local node
-docker run -p 3000:3000 -p 9000:9000 ghcr.io/nxcc-bridge/node:latest
-
-# Deploy your first worker
-curl -X POST http://localhost:3000/workers \
-  -H "Content-Type: application/json" \
-  -d '{"code": "export default { async handle(request) { return new Response(\"Hello nXCC!\"); } }"}'
+docker run --rm \
+  -e NXCC_DAEMON_HTTP_LISTEN_ADDR=0.0.0.0:6922 \
+  -e NXCC_DAEMON_LISTEN_ADDRESSES=/ip4/0.0.0.0/tcp/9000 \
+  -p 6922:6922 \
+  -p 9000:9000 \
+  ghcr.io/nxcc-bridge/node:latest
 ```
 
-### Building from Source
+That exposes the HTTP API at `http://localhost:6922` and keeps port `9000` open for libp2p peers, so every CLI example in the docs works immediately.
 
-```bash
-# Clone and build
-git clone https://github.com/nxcc-bridge/nxcc.git
-cd nxcc/node && cargo build --release
-
-# Start local node
-./run.sh
-```
-
-**📚 [View complete getting started guide →](docs/src/content/docs/docs/guides/getting-started.md)**
+Prefer a native setup? Follow the full walkthrough in the [Getting Started guide](https://nxcc.org/docs/guides/getting-started/).
 
 ## 💡 Use Cases
 
@@ -151,10 +138,10 @@ cd ../benchmarks && ./run.sh
 
 ## 📚 Documentation
 
-- **[📖 Getting Started Guide](docs/src/content/docs/docs/guides/getting-started.md)** - Getting started with nXCC development
-- **[🏗️ Core Concepts](docs/src/content/docs/docs/reference/core-concepts.md)** - System design and component interaction
-- **[🔧 CLI Reference](docs/src/content/docs/docs/reference/cli.md)** - Command-line interface documentation
-- **[🚀 Running a Node](docs/src/content/docs/docs/reference/running-a-node.md)** - Node deployment instructions
+- **[📖 Getting Started Guide](https://nxcc.org/docs/guides/getting-started/)** - Getting started with nXCC development
+- **[🏗️ Core Concepts](https://nxcc.org/docs/reference/developers/core-concepts/)** - System design and component interaction
+- **[🔧 CLI Reference](https://nxcc.org/docs/reference/developers/cli/)** - Command-line interface documentation
+- **[🚀 Running a Node](https://nxcc.org/docs/reference/node-operators/running-a-node/)** - Node deployment instructions
 - **[🧪 Testing Guide](node/tests/README.md)** - Testing strategies and best practices
 - **[⚡ Performance Analysis](benchmarks/README.md)** - Benchmark results and optimization tips
 
