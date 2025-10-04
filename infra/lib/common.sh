@@ -5,9 +5,9 @@
 
 # Ensure INFRA_DIR is defined if not provided by the entrypoint script
 if [[ -z "${INFRA_DIR:-}" ]]; then
-  # common.sh is in infra/lib → go up one directory to infra
-  INFRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-  export INFRA_DIR
+	# common.sh is in infra/lib → go up one directory to infra
+	INFRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+	export INFRA_DIR
 fi
 
 # --- Configuration ---
@@ -386,7 +386,6 @@ deploy_create() {
 	docker_image=$(get_deployment_docker_image "$env")
 	tf_vars+=("-var=docker_image=$docker_image")
 	info "Using Docker image: $docker_image"
-	
 
 	# Plan and apply
 	info "Planning deployment..."
