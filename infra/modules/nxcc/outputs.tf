@@ -23,18 +23,36 @@ output "subnets" {
 
 output "worker_instances" {
   description = "Information about worker instances"
-  value = {
-    for name, instance in google_compute_instance.workers : name => {
-      name         = instance.name
-      internal_ip  = instance.network_interface[0].network_ip
-      external_ip  = instance.network_interface[0].access_config[0].nat_ip
-      zone         = instance.zone
-      region       = var.workers[index(var.workers.*.name, name)].region
-      machine_type = instance.machine_type
-      tee_enabled  = startswith(instance.machine_type, "c3-standard")
-      addressable  = true # All workers are addressable
+  value = merge(
+    # Bootstrap worker (if exists)
+    length(google_compute_instance.bootstrap_worker) > 0 ? {
+      (var.workers[0].name) = {
+        name         = google_compute_instance.bootstrap_worker[0].name
+        internal_ip  = google_compute_instance.bootstrap_worker[0].network_interface[0].network_ip
+        external_ip  = google_compute_instance.bootstrap_worker[0].network_interface[0].access_config[0].nat_ip
+        zone         = google_compute_instance.bootstrap_worker[0].zone
+        region       = var.workers[0].region
+        machine_type = google_compute_instance.bootstrap_worker[0].machine_type
+        tee_enabled  = startswith(google_compute_instance.bootstrap_worker[0].machine_type, "c3-standard")
+        addressable  = true
+        is_bootstrap = true
+      }
+    } : {},
+    # Regular workers (after bootstrap)
+    {
+      for name, instance in google_compute_instance.workers : name => {
+        name         = instance.name
+        internal_ip  = instance.network_interface[0].network_ip
+        external_ip  = instance.network_interface[0].access_config[0].nat_ip
+        zone         = instance.zone
+        region       = var.workers[index(var.workers.*.name, name)].region
+        machine_type = instance.machine_type
+        tee_enabled  = startswith(instance.machine_type, "c3-standard")
+        addressable  = true
+        is_bootstrap = false
+      }
     }
-  }
+  )
 }
 
 output "seed_instances" {
@@ -55,22 +73,35 @@ output "seed_instances" {
 output "p2p_bootstrap_nodes" {
   description = "List of P2P bootstrap node addresses for network initialization"
   value = concat(
-    # Worker nodes (external IPs for cross-region P2P)
-    [for instance in google_compute_instance.workers : "${instance.network_interface[0].access_config[0].nat_ip}:9000"],
-    # Seed nodes (internal IPs for VPC P2P)
-    [for instance in google_compute_instance.seeds : "${instance.network_interface[0].network_ip}:9000"]
+    # Bootstrap worker node (internal IP + peer ID for VPC P2P discovery)
+    local.bootstrap_peer_multiaddrs,
+    # External bootstrap peers (provided by operator)
+    var.bootstrap_peers,
+    # Note: Additional worker and seed multiaddrs would require their peer IDs too
+    # For now, they can discover each other through the bootstrap worker
   )
 }
 
 output "worker_endpoints" {
   description = "HTTP API endpoints for worker nodes"
-  value = {
-    for name, instance in google_compute_instance.workers : name => {
-      http_url     = "http://${instance.network_interface[0].access_config[0].nat_ip}:6922"
-      internal_url = "http://${instance.network_interface[0].network_ip}:6922"
-      ip_address   = instance.network_interface[0].access_config[0].nat_ip
+  value = merge(
+    # Bootstrap worker endpoint (if exists)
+    length(google_compute_instance.bootstrap_worker) > 0 ? {
+      (var.workers[0].name) = {
+        http_url     = "http://${google_compute_instance.bootstrap_worker[0].network_interface[0].access_config[0].nat_ip}:6922"
+        internal_url = "http://${google_compute_instance.bootstrap_worker[0].network_interface[0].network_ip}:6922"
+        ip_address   = google_compute_instance.bootstrap_worker[0].network_interface[0].access_config[0].nat_ip
+      }
+    } : {},
+    # Regular worker endpoints
+    {
+      for name, instance in google_compute_instance.workers : name => {
+        http_url     = "http://${instance.network_interface[0].access_config[0].nat_ip}:6922"
+        internal_url = "http://${instance.network_interface[0].network_ip}:6922"
+        ip_address   = instance.network_interface[0].access_config[0].nat_ip
+      }
     }
-  }
+  )
 }
 
 output "service_account" {
@@ -85,10 +116,16 @@ output "service_account" {
 output "ssh_commands" {
   description = "SSH commands to connect to instances"
   value = merge(
+    # Bootstrap worker SSH command (if exists)
+    length(google_compute_instance.bootstrap_worker) > 0 ? {
+      "bootstrap-worker-${var.workers[0].name}" = "gcloud compute ssh ${google_compute_instance.bootstrap_worker[0].name} --zone=${google_compute_instance.bootstrap_worker[0].zone}"
+    } : {},
+    # Regular worker SSH commands
     {
       for name, instance in google_compute_instance.workers :
       "worker-${name}" => "gcloud compute ssh ${instance.name} --zone=${instance.zone}"
     },
+    # Seed SSH commands
     {
       for name, instance in google_compute_instance.seeds :
       "seed-${name}" => "gcloud compute ssh ${instance.name} --zone=${instance.zone}"
@@ -116,12 +153,26 @@ output "deployment_summary" {
 # Outputs for monitoring and automation
 output "worker_internal_ips" {
   description = "Internal IP addresses of worker nodes"
-  value       = [for instance in google_compute_instance.workers : instance.network_interface[0].network_ip]
+  value = concat(
+    # Bootstrap worker internal IP (if exists)
+    length(google_compute_instance.bootstrap_worker) > 0 ? [
+      google_compute_instance.bootstrap_worker[0].network_interface[0].network_ip
+    ] : [],
+    # Regular worker internal IPs
+    [for instance in google_compute_instance.workers : instance.network_interface[0].network_ip]
+  )
 }
 
 output "worker_external_ips" {
   description = "External IP addresses of worker nodes"
-  value       = [for instance in google_compute_instance.workers : instance.network_interface[0].access_config[0].nat_ip]
+  value = concat(
+    # Bootstrap worker external IP (if exists)
+    length(google_compute_instance.bootstrap_worker) > 0 ? [
+      google_compute_instance.bootstrap_worker[0].network_interface[0].access_config[0].nat_ip
+    ] : [],
+    # Regular worker external IPs
+    [for instance in google_compute_instance.workers : instance.network_interface[0].access_config[0].nat_ip]
+  )
 }
 
 output "seed_internal_ips" {
@@ -132,7 +183,13 @@ output "seed_internal_ips" {
 output "all_instance_names" {
   description = "All instance names for bulk operations"
   value = concat(
+    # Bootstrap worker name (if exists)
+    length(google_compute_instance.bootstrap_worker) > 0 ? [
+      google_compute_instance.bootstrap_worker[0].name
+    ] : [],
+    # Regular worker names
     [for instance in google_compute_instance.workers : instance.name],
+    # Seed names
     [for instance in google_compute_instance.seeds : instance.name]
   )
 }
@@ -140,15 +197,28 @@ output "all_instance_names" {
 # Output for load balancer setup (future use)
 output "addressable_instance_groups" {
   description = "Instance information for load balancer configuration"
-  value = {
-    for name, instance in google_compute_instance.workers : name => {
-      instance_name = instance.name
-      zone          = instance.zone
-      region        = var.workers[index(var.workers.*.name, name)].region
-      internal_ip   = instance.network_interface[0].network_ip
-      external_ip   = instance.network_interface[0].access_config[0].nat_ip
+  value = merge(
+    # Bootstrap worker (if exists)
+    length(google_compute_instance.bootstrap_worker) > 0 ? {
+      (var.workers[0].name) = {
+        instance_name = google_compute_instance.bootstrap_worker[0].name
+        zone          = google_compute_instance.bootstrap_worker[0].zone
+        region        = var.workers[0].region
+        internal_ip   = google_compute_instance.bootstrap_worker[0].network_interface[0].network_ip
+        external_ip   = google_compute_instance.bootstrap_worker[0].network_interface[0].access_config[0].nat_ip
+      }
+    } : {},
+    # Regular workers
+    {
+      for name, instance in google_compute_instance.workers : name => {
+        instance_name = instance.name
+        zone          = instance.zone
+        region        = var.workers[index(var.workers.*.name, name)].region
+        internal_ip   = instance.network_interface[0].network_ip
+        external_ip   = instance.network_interface[0].access_config[0].nat_ip
+      }
     }
-  }
+  )
 }
 
 # Operator Key Management Outputs
@@ -187,4 +257,22 @@ output "operator_key_management" {
     key_size      = "32_bytes"
   }
   sensitive = true
+}
+
+# Bootstrap peer information for dynamic P2P network setup
+output "bootstrap_peer_multiaddr" {
+  description = "Libp2p multiaddr of the bootstrap worker for P2P network discovery"
+  value       = length(local.bootstrap_peer_multiaddrs) > 0 ? local.bootstrap_peer_multiaddrs[0] : ""
+}
+
+output "bootstrap_worker_info" {
+  description = "Information about the bootstrap worker node"
+  value = length(google_compute_instance.bootstrap_worker) > 0 ? {
+    name          = google_compute_instance.bootstrap_worker[0].name
+    internal_ip   = google_compute_instance.bootstrap_worker[0].network_interface[0].network_ip
+    external_ip   = google_compute_instance.bootstrap_worker[0].network_interface[0].access_config[0].nat_ip
+    zone          = google_compute_instance.bootstrap_worker[0].zone
+    peer_id       = local.bootstrap_peer_id
+    p2p_multiaddr = length(local.bootstrap_peer_multiaddrs) > 0 ? local.bootstrap_peer_multiaddrs[0] : ""
+  } : {}
 }

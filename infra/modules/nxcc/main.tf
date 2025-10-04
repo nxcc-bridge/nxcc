@@ -12,6 +12,10 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.5"
     }
+    external = {
+      source  = "hashicorp/external"
+      version = "~> 2.3"
+    }
   }
 }
 
@@ -209,11 +213,108 @@ resource "google_compute_firewall" "nxcc_internal" {
   description = "Allow all internal communication within NXCC VPC"
 }
 
-# Worker Instances
+# Bootstrap Worker (first node to provide P2P discovery)
+resource "google_compute_instance" "bootstrap_worker" {
+  # Only create if there are workers defined
+  count = length(var.workers) > 0 ? 1 : 0
+
+  name         = "nxcc-${local.name_prefix}-${var.workers[0].name}"
+  machine_type = var.workers[0].machine_type
+  zone         = "${var.workers[0].region}-${var.workers[0].zone != null ? var.workers[0].zone : "a"}"
+
+  # TDX configuration - enable for c3-standard instances, disable for others (e2e tests)
+  dynamic "confidential_instance_config" {
+    for_each = startswith(var.workers[0].machine_type, "c3-standard") ? [1] : []
+    content {
+      enable_confidential_compute = true
+      confidential_instance_type  = "TDX"
+    }
+  }
+
+  scheduling {
+    on_host_maintenance = var.workers[0].ephemeral || startswith(var.workers[0].machine_type, "c3-standard") ? "TERMINATE" : "MIGRATE"
+    automatic_restart   = !var.workers[0].ephemeral
+    preemptible         = var.workers[0].ephemeral
+  }
+
+  boot_disk {
+    initialize_params {
+      image = var.node_image
+      size  = var.workers[0].disk_size
+      type  = startswith(var.workers[0].machine_type, "c3-") ? "pd-ssd" : (var.workers[0].ephemeral ? "pd-standard" : "pd-ssd")
+    }
+  }
+
+  network_interface {
+    network    = google_compute_network.nxcc_vpc.name
+    subnetwork = google_compute_subnetwork.regional_subnets[var.workers[0].region].name
+
+    # Bootstrap worker gets external IP
+    access_config {
+      # Ephemeral external IP
+    }
+  }
+
+  metadata_startup_script = templatefile("${path.module}/templates/startup-worker.sh", {
+    docker_image    = var.docker_image
+    node_type       = "bootstrap-worker"
+    environment     = var.environment
+    namespace       = var.namespace
+    operator_key    = google_secret_manager_secret.operator_key.name
+    bootstrap_peers = join(",", var.bootstrap_peers) # Only external bootstrap peers
+  })
+
+  metadata = {
+    ssh-keys = var.ssh_keys != "" ? var.ssh_keys : "ubuntu:${file("~/.ssh/id_rsa.pub")}"
+  }
+
+  service_account {
+    email  = google_service_account.nxcc_nodes.email
+    scopes = ["cloud-platform"]
+  }
+
+  tags = ["nxcc-${local.name_prefix}", "nxcc-worker", "nxcc-p2p", "nxcc-addressable", "nxcc-bootstrap"]
+
+  labels = {
+    environment = var.environment
+    namespace   = var.namespace
+    node_type   = "bootstrap-worker"
+    region      = var.workers[0].region
+    addressable = "true"
+    ephemeral   = tostring(var.workers[0].ephemeral)
+    tee_enabled = startswith(var.workers[0].machine_type, "c3-standard") ? "tdx" : "none"
+  }
+}
+
+# External data source to get peer ID from bootstrap worker's HTTP API
+data "external" "bootstrap_peer_id" {
+  count = length(google_compute_instance.bootstrap_worker) > 0 ? 1 : 0
+
+  program = ["bash", "${path.module}/scripts/get_peer_id.sh", google_compute_instance.bootstrap_worker[0].network_interface[0].access_config[0].nat_ip]
+
+  depends_on = [google_compute_instance.bootstrap_worker]
+}
+
+# Local to build bootstrap peer list
+locals {
+  # Get peer ID from external data source (if available)
+  bootstrap_peer_id = length(google_compute_instance.bootstrap_worker) > 0 ? data.external.bootstrap_peer_id[0].result.peer_id : ""
+
+  # Create bootstrap peer multiaddr with peer ID
+  bootstrap_peer_multiaddrs = length(google_compute_instance.bootstrap_worker) > 0 && local.bootstrap_peer_id != "" ? [
+    "/ip4/${google_compute_instance.bootstrap_worker[0].network_interface[0].network_ip}/tcp/9000/p2p/${local.bootstrap_peer_id}"
+  ] : []
+
+  # Combine external bootstrap peers with our internal bootstrap peer
+  all_bootstrap_peers = concat(var.bootstrap_peers, local.bootstrap_peer_multiaddrs)
+}
+
+# Remaining Worker Instances (after bootstrap)
 resource "google_compute_instance" "workers" {
   for_each = {
     for idx, worker in var.workers :
     worker.name => worker
+    if idx > 0 # Skip first worker (already created as bootstrap)
   }
 
   name         = "nxcc-${local.name_prefix}-${each.key}"
@@ -254,13 +355,16 @@ resource "google_compute_instance" "workers" {
   }
 
   metadata_startup_script = templatefile("${path.module}/templates/startup-worker.sh", {
-    docker_image              = var.docker_image
-    node_type                 = "worker"
-    environment               = var.environment
-    namespace                 = var.namespace
-    operator_key              = google_secret_manager_secret.operator_key.secret_id # Secret name for retrieval
-    bootstrap_peers  = join(",", var.bootstrap_peers)
+    docker_image    = var.docker_image
+    node_type       = "worker"
+    environment     = var.environment
+    namespace       = var.namespace
+    operator_key    = google_secret_manager_secret.operator_key.name
+    bootstrap_peers = join(",", local.all_bootstrap_peers)
   })
+
+  # Ensure bootstrap worker is ready before creating other workers
+  depends_on = [google_compute_instance.bootstrap_worker]
 
   metadata = {
     ssh-keys = var.ssh_keys != "" ? var.ssh_keys : "ubuntu:${file("~/.ssh/id_rsa.pub")}"
@@ -319,13 +423,16 @@ resource "google_compute_instance" "seeds" {
   }
 
   metadata_startup_script = templatefile("${path.module}/templates/startup-seed.sh", {
-    docker_image              = var.docker_image
-    node_type                 = "seed"
-    environment               = var.environment
-    namespace                 = var.namespace
-    operator_key              = google_secret_manager_secret.operator_key.secret_id # Secret name for retrieval
-    bootstrap_peers  = join(",", var.bootstrap_peers)
+    docker_image    = var.docker_image
+    node_type       = "seed"
+    environment     = var.environment
+    namespace       = var.namespace
+    operator_key    = google_secret_manager_secret.operator_key.name
+    bootstrap_peers = join(",", local.all_bootstrap_peers)
   })
+
+  # Ensure bootstrap worker is ready before creating seeds
+  depends_on = [google_compute_instance.bootstrap_worker]
 
   metadata = {
     ssh-keys = var.ssh_keys != "" ? var.ssh_keys : "ubuntu:${file("~/.ssh/id_rsa.pub")}"
