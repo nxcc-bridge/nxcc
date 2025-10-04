@@ -128,6 +128,10 @@ NODE3_HTTP_PORT=6924
 
 # --- Test Preparation ---
 prepare_test_environment() {
+	if ! ensure_node_runtime_deps; then
+		exit 1
+	fi
+
 	TEST_DIR=$(create_tmp_dir "nxcc-comprehensive-test")
 	echo "🚀 === NXCC Comprehensive Integration Test ==="
 	echo "📁 Test directory: $TEST_DIR"
@@ -145,8 +149,6 @@ prepare_test_environment() {
 	DAEMON_BIN="$REPO_ROOT/target/$MODE/nxcc-daemon"
 	ENCLAVE_BIN="$REPO_ROOT/target/$MODE/nxcc-platform-enclave"
 	WORKERD_VM_BIN="$REPO_ROOT/target/$MODE/nxcc-workerd-vm"
-
-	check_grpcurl
 
 	if [ ! -f "$DAEMON_BIN" ] || [ ! -f "$ENCLAVE_BIN" ] || [ ! -f "$WORKERD_VM_BIN" ]; then
 		echo "One or more binaries not found. Build first."

@@ -1,6 +1,111 @@
 #!/bin/sh
 # shellcheck disable=SC3043  # 'local' is not POSIX but widely supported
 
+command_exists() {
+	command -v "$1" >/dev/null 2>&1
+}
+
+ensure_grpcurl() {
+	if command_exists grpcurl; then
+		return 0
+	fi
+	echo "Error: grpcurl command not found. Install it from https://github.com/fullstorydev/grpcurl or your package manager." >&2
+	return 1
+}
+
+resolve_path() {
+	case "$1" in
+	~/*)
+		echo "$HOME/${1#~/}"
+		;;
+	*)
+		echo "$1"
+		;;
+	esac
+}
+
+ensure_workerd() {
+	configured_path="${NXCC_WORKERD_BINARY_PATH:-${WORKERD_BIN_PATH:-}}"
+	if [ -n "$configured_path" ]; then
+		resolved_configured_path=$(resolve_path "$configured_path")
+		if [ -x "$resolved_configured_path" ]; then
+			export NXCC_WORKERD_BINARY_PATH="$resolved_configured_path"
+			if [ -z "${WORKERD_BIN_PATH:-}" ]; then
+				export WORKERD_BIN_PATH="$resolved_configured_path"
+			fi
+			return 0
+		fi
+		echo "Error: workerd binary configured at '$configured_path' is not executable." >&2
+		return 1
+	fi
+
+	resolved_workerd=$(command -v workerd 2>/dev/null || true)
+	if [ -n "$resolved_workerd" ]; then
+		export NXCC_WORKERD_BINARY_PATH="$resolved_workerd"
+		if [ -z "${WORKERD_BIN_PATH:-}" ]; then
+			export WORKERD_BIN_PATH="$resolved_workerd"
+		fi
+		return 0
+	fi
+
+	os_hint="See https://github.com/cloudflare/workerd/releases for installation instructions."
+	case "$(uname -s)" in
+	Darwin)
+		os_hint="macOS via Homebrew: brew install cloudflare/workers/workerd"
+		;;
+	Linux)
+		os_hint="Linux: curl -fsSLo workerd.gz https://github.com/cloudflare/workerd/releases/latest/download/workerd-linux-64.gz; gunzip workerd.gz; chmod +x workerd; sudo mv workerd /usr/local/bin/ (use workerd-linux-arm64.gz on arm64)"
+		;;
+	esac
+
+	cat >&2 <<EOF
+Error: Cloudflare's workerd runtime is required but was not found on PATH.
+
+Install options:
+  - $os_hint
+  - Prefer containers? Use the packaged image: docker build -t nxcc-node node && docker run --rm nxcc-node
+
+To use a custom workerd binary, set NXCC_WORKERD_BINARY_PATH=/path/to/workerd (or WORKERD_BIN_PATH) before running this script.
+EOF
+	return 1
+}
+
+ensure_rust_toolchain() {
+	missing_tools=""
+	if ! command_exists cargo; then
+		missing_tools="cargo"
+	fi
+	if ! command_exists rustc; then
+		if [ -n "$missing_tools" ]; then
+			missing_tools="$missing_tools, rustc"
+		else
+			missing_tools="rustc"
+		fi
+	fi
+
+	if [ -n "$missing_tools" ]; then
+		echo "Warning: Rust toolchain not detected (missing: $missing_tools)." >&2
+		echo "Hint: install Rust via rustup (https://rustup.rs/) to provide cargo and rustc on PATH." >&2
+		return 1
+	fi
+
+	return 0
+}
+
+ensure_node_runtime_deps() {
+	missing=0
+	if ! ensure_rust_toolchain; then
+		missing=1
+	fi
+	if ! ensure_grpcurl; then
+		missing=1
+	fi
+	if ! ensure_workerd; then
+		missing=1
+	fi
+	return $missing
+}
+
 # Generate an Ed25519 private key file for operator signing
 generate_operator_key() {
 	key_path="$1"

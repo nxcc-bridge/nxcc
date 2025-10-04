@@ -11,10 +11,11 @@ ENCLAVE_PROTO="enclave.proto" # Needed for CheckSecrets on enclave
 
 # Function to check if grpcurl is available
 check_grpcurl() {
-	if ! command -v grpcurl >/dev/null 2>&1; then
-		echo "Error: grpcurl command not found. Please install it."
+	if ! command -v ensure_grpcurl >/dev/null 2>&1; then
+		echo "Error: ensure_grpcurl helper not found. Source tests/utils.sh before grpcurl helpers." >&2
 		exit 1
 	fi
+	ensure_grpcurl
 }
 
 # Function to call Daemon's AttachVm

@@ -12,23 +12,8 @@ TESTS_DIR="$SCRIPT_DIR/tests"
 # shellcheck disable=SC1091  # utils.sh is sourced dynamically
 . "$TESTS_DIR/utils.sh"
 
-# Minimal grpcurl helpers
 PROTO_DIR="$SCRIPT_DIR/interface/proto"
 DAEMON_PROTO="daemon.proto"
-
-check_grpcurl() {
-	if ! command -v grpcurl >/dev/null 2>&1; then
-		echo "Error: grpcurl command not found. Please install it." >&2
-		exit 1
-	fi
-}
-
-check_cargo() {
-	if ! command -v cargo >/dev/null 2>&1; then
-		echo "Error: cargo command not found. Please install Rust and Cargo." >&2
-		exit 1
-	fi
-}
 
 build_binaries() {
 	echo "Building nxcc binaries feature..."
@@ -59,15 +44,16 @@ grpcurl_attach_vm() {
 NUM_NODES="${1:-1}"
 MODE="debug"
 
+if ! ensure_node_runtime_deps; then
+	exit 1
+fi
+
 RUN_DIR=$(create_tmp_dir "nxcc-run")
 echo "Run directory: $RUN_DIR"
 
 daemon_bin="$SCRIPT_DIR/target/$MODE/nxcc-daemon"
 enclave_bin="$SCRIPT_DIR/target/$MODE/nxcc-platform-enclave"
 vm_bin="$SCRIPT_DIR/target/$MODE/nxcc-workerd-vm"
-
-check_grpcurl
-check_cargo
 build_binaries
 
 if [ ! -f "$daemon_bin" ] || [ ! -f "$enclave_bin" ] || [ ! -f "$vm_bin" ]; then
