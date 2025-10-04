@@ -1,6 +1,6 @@
 {
   "name": "@nxcc/cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "CLI for interacting with nXCC nodes",
   "main": "dist/index.js",
   "bin": {
