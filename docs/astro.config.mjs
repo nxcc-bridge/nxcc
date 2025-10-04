@@ -19,7 +19,17 @@ export default defineConfig({
       },
       expressiveCode: {
         themes: ["everforest-light", "everforest-dark"],
-        frames: false,
+        defaultProps: {
+          overridesByLang: {
+            "bash,sh,zsh,shell,shellsession,console": { frame: "code" },
+          },
+        },
+        styleOverrides: {
+          frames: {
+            frameBoxShadowCssValue: "none",
+            terminalTitlebarDotsOpacity: "0",
+          },
+        },
       },
       social: [
         {
