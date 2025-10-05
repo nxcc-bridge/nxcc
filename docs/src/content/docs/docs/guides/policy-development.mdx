@@ -3,6 +3,8 @@ title: Policy Development Tutorial
 description: Learn to write authorization policies that control access to secrets and identities.
 ---
 
+import { Tabs, TabItem } from "@astrojs/starlight/components";
+
 Policies are the gatekeepers of the nXCC platform. They're special workers that authorize access to identity secrets by evaluating attestation data and other context. This tutorial covers writing effective policies from simple allow-all rules to sophisticated attestation-based authorization.
 
 ## What Are Policies?
@@ -42,6 +44,9 @@ export default policy((requests) => {
 
 ### 2. Build and Deploy the Policy
 
+<Tabs syncKey="policy-build">
+<TabItem label="npm">
+
 ```bash
 # Build the TypeScript
 npm run build
@@ -51,6 +56,22 @@ nxcc bundle policies/manifest.template.json --out policies/policy-bundle.json
 
 # The policy bundle can be deployed to IPFS, served via HTTP, or used as data: URL
 ```
+
+</TabItem>
+<TabItem label="pnpm">
+
+```bash
+# Build the TypeScript
+pnpm run build
+
+# Create a policy bundle
+nxcc bundle policies/manifest.template.json --out policies/policy-bundle.json
+
+# The policy bundle can be deployed to IPFS, served via HTTP, or used as data: URL
+```
+
+</TabItem>
+</Tabs>
 
 ### 3. Link Policy to an Identity
 
@@ -408,6 +429,9 @@ console.log("Policy decision:", decisions[0]);
 
 ### Policy Bundle Creation
 
+<Tabs syncKey="policy-bundle">
+<TabItem label="npm">
+
 ```bash
 # Build and bundle your policy
 npm run build
@@ -416,6 +440,21 @@ nxcc bundle policies/manifest.template.json --out policy-bundle.json
 # Sign the bundle (optional but recommended)
 nxcc bundle policies/manifest.template.json --out policy-bundle.json --signer 0x...
 ```
+
+</TabItem>
+<TabItem label="pnpm">
+
+```bash
+# Build and bundle your policy
+pnpm run build
+nxcc bundle policies/manifest.template.json --out policy-bundle.json
+
+# Sign the bundle (optional but recommended)
+nxcc bundle policies/manifest.template.json --out policy-bundle.json --signer 0x...
+```
+
+</TabItem>
+</Tabs>
 
 ### Policy Updates
 

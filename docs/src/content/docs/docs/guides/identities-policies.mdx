@@ -3,6 +3,8 @@ title: Identities and Policies
 description: Learn to create secure on-chain identities and governance policies for your workers
 ---
 
+import { Tabs, TabItem } from "@astrojs/starlight/components";
+
 Ready to level up your workers with secure credential management? This tutorial covers nXCC's identity system - the foundation for production-ready applications.
 
 ## What You'll Learn
@@ -59,10 +61,24 @@ export IDENTITY_CONTRACT=0x... # Use the deployed address
 
 ### 1. Mint an Identity NFT
 
-```bash
-# Install nXCC CLI if you haven't
-npm install -g @nxcc/cli
+<Tabs syncKey="identity-cli">
+<TabItem label="npm">
 
+```bash
+npm install -g @nxcc/cli
+```
+
+</TabItem>
+<TabItem label="pnpm">
+
+```bash
+pnpm add -g @nxcc/cli
+```
+
+</TabItem>
+</Tabs>
+
+```bash
 # Create identity
 nxcc identity create 31337 $IDENTITY_CONTRACT \
   --signer 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \

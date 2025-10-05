@@ -28,15 +28,6 @@ export async function initCommand(dir?: string) {
     await copyTemplate("policy/manifest.template.json", policiesDir, "manifest.template.json");
     await copyTemplate("project_tsconfig.json", projectDir, "tsconfig.json");
     await copyTemplate("project_package.json", projectDir, "package.json");
-
-    console.log("Project initialized successfully.");
-    console.log("\nNext steps:");
-    console.log(`1. cd into your new project directory${dir ? ` (${dir})` : ""}.`);
-    console.log("2. Run `npm install` to install dependencies.");
-    console.log("3. Edit `workers/my-worker.ts` and `workers/manifest.template.json`.");
-    console.log("4. Customize `policies/default-policy.ts` for your authorization requirements.");
-    console.log("5. Run `npm run build` to compile your worker and policy.");
-    console.log("6. Use `nxcc bundle` and `nxcc worker deploy` to deploy your worker and policy.");
   } catch (error) {
     console.error("Failed to initialize project:", error);
     process.exit(1);

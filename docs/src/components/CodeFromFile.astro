@@ -1,0 +1,48 @@
+---
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { Code } from "@astrojs/starlight/components";
+
+interface CodeFromFileProps {
+  file: string;
+  lang?: string;
+  title?: string;
+  trim?: boolean;
+  [key: string]: unknown;
+}
+
+const {
+  file,
+  lang,
+  title,
+  trim = false,
+  ...rest
+} = Astro.props as CodeFromFileProps;
+
+if (!file || typeof file !== "string") {
+  throw new Error("<CodeFromFile /> requires a string `file` prop");
+}
+
+const docsDir = fileURLToPath(new URL("../..", import.meta.url));
+const repoRoot = path.resolve(docsDir, "..");
+const resolvedPath = path.resolve(repoRoot, file);
+
+const maybeAddWatchFile = (Astro as { addWatchFile?: (path: string) => void })
+  .addWatchFile;
+if (typeof maybeAddWatchFile === "function") {
+  maybeAddWatchFile(resolvedPath);
+}
+
+let code = fs.readFileSync(resolvedPath, "utf-8");
+if (trim) {
+  code = code.trim();
+}
+
+const inferredLang = path.extname(resolvedPath).slice(1) || "txt";
+const codeLang =
+  typeof lang === "string" && lang.length > 0 ? lang : inferredLang;
+const codeTitle = typeof title === "string" && title.length > 0 ? title : file;
+---
+
+<Code code={code} lang={codeLang} title={codeTitle} {...rest} />

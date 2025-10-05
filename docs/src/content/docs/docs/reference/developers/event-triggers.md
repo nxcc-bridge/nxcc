@@ -32,8 +32,6 @@ The `events` array in your work order contains a list of event trigger objects. 
 }
 ```
 
-Note: Currently, the CLI automatically adds a `launch` event when deploying. Other events need to be specified when creating the work order.
-
 ### `launch`
 
 The `launch` event triggers your worker exactly once, immediately after it has been successfully deployed and started by the nXCC node. This is useful for initialization tasks or for starting long-running processes like a polling loop.

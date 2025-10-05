@@ -3,13 +3,28 @@ title: SDK Reference
 description: Complete API reference for the @nxcc/sdk package.
 ---
 
+import { Tabs, TabItem } from "@astrojs/starlight/components";
+
 The `@nxcc/sdk` provides TypeScript utilities for building workers and policies on the nXCC platform. This reference covers all functions, types, and utilities available in the SDK.
 
 ## Installation
 
+<Tabs syncKey="sdk-install">
+<TabItem label="npm">
+
 ```bash
 npm install @nxcc/sdk
 ```
+
+</TabItem>
+<TabItem label="pnpm">
+
+```bash
+pnpm add @nxcc/sdk
+```
+
+</TabItem>
+</Tabs>
 
 The SDK is automatically included in projects created with `nxcc init`.
 
@@ -551,9 +566,22 @@ export default policy((requests) => {
 
 **SDK not found**:
 
+<Tabs syncKey="sdk-install-troubleshoot">
+<TabItem label="npm">
+
 ```bash
 npm install @nxcc/sdk
 ```
+
+</TabItem>
+<TabItem label="pnpm">
+
+```bash
+pnpm add @nxcc/sdk
+```
+
+</TabItem>
+</Tabs>
 
 **TypeScript errors**:
 

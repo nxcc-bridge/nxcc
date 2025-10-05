@@ -3,6 +3,8 @@ title: Building Event-Driven Workers
 description: Learn to create workers that react to blockchain events across multiple chains
 ---
 
+import { Tabs, TabItem } from "@astrojs/starlight/components";
+
 Now that you've created your first worker, let's build something more powerful: workers that automatically respond to blockchain events.
 
 ## What You'll Build
@@ -25,11 +27,26 @@ A worker that:
 
 Create a new project for your event-driven worker:
 
+<Tabs syncKey="event-worker-deps">
+<TabItem label="npm">
+
 ```bash
 mkdir event-worker && cd event-worker
 nxcc init .
 npm install viem
 ```
+
+</TabItem>
+<TabItem label="pnpm">
+
+```bash
+mkdir event-worker && cd event-worker
+nxcc init .
+pnpm add viem
+```
+
+</TabItem>
+</Tabs>
 
 ### 2. Write the Event Handler
 
@@ -110,10 +127,24 @@ Create `workers/event-manifest.json`:
 
 ### 4. Build and Deploy
 
+<Tabs syncKey="event-worker-build">
+<TabItem label="npm">
+
 ```bash
 npm run build
 nxcc worker deploy workers/event-manifest.json --rpc-url http://localhost:6922
 ```
+
+</TabItem>
+<TabItem label="pnpm">
+
+```bash
+pnpm run build
+nxcc worker deploy workers/event-manifest.json --rpc-url http://localhost:6922
+```
+
+</TabItem>
+</Tabs>
 
 ## Testing with Local Blockchain
 

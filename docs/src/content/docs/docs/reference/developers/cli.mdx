@@ -3,15 +3,30 @@ title: CLI Reference
 description: A comprehensive reference for all @nxcc/cli commands for developer workflows.
 ---
 
+import { Tabs, TabItem } from "@astrojs/starlight/components";
+
 The nXCC Command Line Interface (`@nxcc/cli`) is the primary tool for developing and managing your nXCC projects, workers, and on-chain identities. This tool is designed for developers building applications on nXCC.
 
 ## Installation
 
-Install the CLI globally using npm:
+Install the CLI globally using your preferred package manager:
+
+<Tabs syncKey="cli-install">
+<TabItem label="npm">
 
 ```bash
 npm install -g @nxcc/cli
 ```
+
+</TabItem>
+<TabItem label="pnpm">
+
+```bash
+pnpm add -g @nxcc/cli
+```
+
+</TabItem>
+</Tabs>
 
 Verify the installation:
 

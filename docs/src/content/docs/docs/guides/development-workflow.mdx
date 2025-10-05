@@ -3,6 +3,8 @@ title: Local Development Workflow
 description: Master the development cycle with local testing, debugging, and iteration.
 ---
 
+import { Tabs, TabItem } from "@astrojs/starlight/components";
+
 This guide covers the complete local development workflow for nXCC workers, from setup through debugging and testing.
 
 ## Development Environment Setup
@@ -55,6 +57,9 @@ This creates nodes on ports:
 
 ### 1. Create a New Project
 
+<Tabs syncKey="dev-workflow-project">
+<TabItem label="npm">
+
 ```bash
 # Install the CLI
 npm install -g @nxcc/cli
@@ -64,6 +69,22 @@ nxcc init my-worker
 cd my-worker
 npm install
 ```
+
+</TabItem>
+<TabItem label="pnpm">
+
+```bash
+# Install the CLI
+pnpm add -g @nxcc/cli
+
+# Create a new project
+nxcc init my-worker
+cd my-worker
+pnpm install
+```
+
+</TabItem>
+</Tabs>
 
 ### 2. Develop Your Worker
 
@@ -120,13 +141,30 @@ Update `workers/manifest.template.json` to configure userdata:
 
 ### 3. Build and Deploy
 
+<Tabs syncKey="dev-workflow-build">
+<TabItem label="npm">
+
 ```bash
 # Compile TypeScript
 npm run build
 
 # Deploy to local node
-nxcc worker deploy workers/manifest.template.json --rpc-url http://localhost:6922
+nxcc worker deploy --bundle workers/manifest.template.json --rpc-url http://localhost:6922
 ```
+
+</TabItem>
+<TabItem label="pnpm">
+
+```bash
+# Compile TypeScript
+pnpm run build
+
+# Deploy to local node
+nxcc worker deploy --bundle workers/manifest.template.json --rpc-url http://localhost:6922
+```
+
+</TabItem>
+</Tabs>
 
 The CLI will output a worker ID for tracking and debugging.
 
@@ -246,7 +284,25 @@ export default worker({
 For fast development cycles:
 
 1. **Keep node running**: `./run.sh` in one terminal
-2. **Watch and rebuild**: `npm run build --watch` in another terminal
+2. **Watch and rebuild**:
+
+   <Tabs syncKey="dev-workflow-watch">
+<TabItem label="npm">
+
+   ```bash
+   npm run build --watch
+   ```
+
+   </TabItem>
+<TabItem label="pnpm">
+
+   ```bash
+   pnpm run build --watch
+   ```
+
+   </TabItem>
+</Tabs>
+
 3. **Redeploy on changes**: Re-run `nxcc worker deploy` after each build
 4. **Monitor logs**: Keep `nxcc worker logs` running for immediate feedback
 
@@ -284,7 +340,7 @@ nxcc identity create 31337 <contract-address> --signer 0xac0974bec39a17e36ba4a6b
 
 - Check that `./run.sh` is running
 - Verify the manifest file path
-- Ensure TypeScript compiled successfully (`npm run build`)
+- Ensure TypeScript compiled successfully (`npm run build` or `pnpm run build`)
 
 **No logs appearing**:
 
