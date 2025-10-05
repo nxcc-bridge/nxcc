@@ -22,7 +22,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GCP_LOCATION: europe
+  GCP_LOCATION: europe-west4
   AR_REPO_NAME: nxcc-images
   IMAGE_NAME: dev
   GHCR_REGISTRY: ghcr.io
