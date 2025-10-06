@@ -97,6 +97,37 @@ describe("worker function", () => {
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual([1, 2, 3]);
     });
+
+    it("should route POST requests without handler metadata to the fetch handler", async () => {
+      const testWorker = worker({
+        async fetch(request, context) {
+          const body = await request.json();
+          return {
+            method: request.method,
+            pathname: new URL(request.url).pathname,
+            body,
+            context,
+          };
+        },
+      });
+
+      const request = new Request("http://example.com/transfer", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ amount: "1" }),
+      });
+
+      const response = await testWorker.fetch(request, mockEnv, mockCtx);
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data).toEqual({
+        method: "POST",
+        pathname: "/transfer",
+        body: { amount: "1" },
+        context: { userdata: { test: "config" }, env: mockEnv },
+      });
+    });
   });
 
   describe("custom event handlers", () => {

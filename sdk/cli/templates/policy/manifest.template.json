@@ -1,6 +1,6 @@
 {
   "bundle": {
-    "source": "./dist/default-policy.js"
+    "source": "../dist/default-policy.js"
   },
   "userdata": {
     "description": "Default policy that accepts all authorization requests",

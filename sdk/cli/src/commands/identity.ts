@@ -1,8 +1,36 @@
-import * as fs from "fs/promises";
-import * as path from "path";
 import { Command } from "commander";
 import { Address, Hex } from "viem";
 import { createIdentity, getPolicy, setPolicy, deployIdentity } from "../utils/web3";
+import { bundleManifestFileToDataUrl } from "../utils/bundle";
+
+function shouldTreatAsRemote(url: string) {
+  return url.startsWith("http://") || url.startsWith("https://");
+}
+
+function hasProtocol(url: string) {
+  return /^[a-zA-Z]+:\/\//.test(url);
+}
+
+async function resolvePolicyUrl(urlOrPath: string): Promise<string> {
+  if (!urlOrPath) {
+    return urlOrPath;
+  }
+
+  if (urlOrPath.startsWith("data:")) {
+    return urlOrPath;
+  }
+
+  if (
+    shouldTreatAsRemote(urlOrPath) ||
+    (hasProtocol(urlOrPath) && !urlOrPath.startsWith("file://"))
+  ) {
+    return urlOrPath;
+  }
+
+  const { dataUrl } = await bundleManifestFileToDataUrl(urlOrPath);
+  console.log(`Bundled policy manifest into data URL: ${dataUrl.substring(0, 60)}...`);
+  return dataUrl;
+}
 
 async function create(
   address: Address,
@@ -12,19 +40,10 @@ async function create(
     let policyUrl = "";
 
     if (options.policy) {
-      if (!options.policy.startsWith("http") && !options.policy.startsWith("data:")) {
-        const bundlePath = path.resolve(process.cwd(), options.policy);
-        const bundleContent = await fs.readFile(bundlePath);
-        const bundleB64 = bundleContent.toString("base64");
-        policyUrl = `data:application/json;base64,${bundleB64}`;
-        console.log(`Using data URL for policy: ${policyUrl.substring(0, 50)}...`);
-      } else {
-        policyUrl = options.policy;
-      }
+      policyUrl = await resolvePolicyUrl(options.policy);
     }
 
     const result = await createIdentity(options.gatewayUrl, address, options.signer, policyUrl);
-    console.log("Identity created successfully:");
     console.log(JSON.stringify(result, null, 2));
   } catch (error) {
     console.error("Failed to create identity:", error);
@@ -39,14 +58,7 @@ async function setPolicyCmd(
   options: { gatewayUrl: string; signer: Hex },
 ) {
   try {
-    let policyUrl = urlOrPath;
-    if (!urlOrPath.startsWith("http") && !urlOrPath.startsWith("data:")) {
-      const bundlePath = path.resolve(process.cwd(), urlOrPath);
-      const bundleContent = await fs.readFile(bundlePath);
-      const bundleB64 = bundleContent.toString("base64");
-      policyUrl = `data:application/json;base64,${bundleB64}`;
-      console.log(`Using data URL for policy: ${policyUrl.substring(0, 50)}...`);
-    }
+    const policyUrl = await resolvePolicyUrl(urlOrPath);
 
     const txHash = await setPolicy(options.gatewayUrl, address, id, policyUrl, options.signer);
     console.log(`Policy set successfully. Transaction hash: ${txHash}`);
@@ -78,11 +90,6 @@ async function deployCmd(options: {
       salt: options.salt,
     });
 
-    if (result.txHash === "0x0000000000000000000000000000000000000000000000000000000000000000") {
-      console.log("Identity contract already exists:");
-    } else {
-      console.log("Identity contract deployed successfully:");
-    }
     console.log(`Address: ${result.address}`);
     if (result.txHash !== "0x0000000000000000000000000000000000000000000000000000000000000000") {
       console.log(`Transaction Hash: ${result.txHash}`);

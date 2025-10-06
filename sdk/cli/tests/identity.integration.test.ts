@@ -137,7 +137,7 @@ describe("Identity CLI Integration Tests", () => {
         `node "${cliPath}" identity create ${identityContractAddress} --gateway-url ${anvilRpcUrl} --signer ${testPrivateKey}`,
       );
 
-      // Extract JSON from stdout (skip the "Identity created successfully:" line)
+      // Extract JSON from stdout
       const jsonMatch = stdout.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
         throw new Error(`No JSON found in output: ${stdout}`);
@@ -278,7 +278,6 @@ describe("Identity CLI Integration Tests", () => {
         `node "${cliPath}" identity deploy --gateway-url ${anvilRpcUrl} --signer ${testPrivateKey}`,
       );
 
-      expect(stdout).toMatch(/Identity contract (deployed successfully|already exists):/);
       expect(stdout).toMatch(/Address: 0x[a-fA-F0-9]{40}/);
       expect(stdout).toMatch(/Deterministic: true/);
     }, 30000);
@@ -289,7 +288,6 @@ describe("Identity CLI Integration Tests", () => {
         `node "${cliPath}" identity deploy --gateway-url ${anvilRpcUrl} --signer ${testPrivateKey} --salt ${customSalt}`,
       );
 
-      expect(stdout).toMatch(/Identity contract (deployed successfully|already exists):/);
       expect(stdout).toMatch(/Address: 0x[a-fA-F0-9]{40}/);
     }, 30000);
   });

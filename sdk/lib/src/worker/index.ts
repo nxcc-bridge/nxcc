@@ -148,51 +148,48 @@ export function worker(config: WorkerConfig) {
         env,
       };
 
-      // Handle direct HTTP requests (via invoke_http)
-      const url = new URL(request.url);
-      if (request.method !== "POST") {
-        if (config.fetch) {
-          try {
-            const result = await config.fetch(request, context);
-            return convertToResponse(result);
-          } catch (error) {
-            return convertToResponse(error);
-          }
-        } else {
-          return new Response("HTTP handler not implemented", { status: 501 });
+      // Attempt to detect VM event invocations (invoke_worker).
+      if (request.method === "POST") {
+        let vmInvocationPayload: any;
+        try {
+          vmInvocationPayload = await request.clone().json();
+        } catch (error) {
+          // Not a JSON payload – treat as regular HTTP below.
         }
-      }
 
-      // Handle VM invocations (via invoke_worker)
-      try {
-        const vmInvocationPayload = await request.json();
-        const handler = handlers[vmInvocationPayload.handler];
+        if (
+          vmInvocationPayload &&
+          typeof vmInvocationPayload === "object" &&
+          typeof vmInvocationPayload.handler === "string"
+        ) {
+          const handler = handlers[vmInvocationPayload.handler];
 
-        if (handler) {
-          try {
-            const result = await handler(vmInvocationPayload.event_payload, context);
-            return convertToResponse(result);
-          } catch (error) {
-            return convertToResponse(error);
+          if (handler) {
+            try {
+              const result = await handler(vmInvocationPayload.event_payload, context);
+              return convertToResponse(result);
+            } catch (error) {
+              return convertToResponse(error);
+            }
           }
-        } else {
+
           return new Response(`No handler for ${vmInvocationPayload.handler}`, {
             status: 404,
           });
         }
-      } catch (error) {
-        // If JSON parsing fails, treat as regular HTTP request
-        if (config.fetch) {
-          try {
-            const result = await config.fetch(request, context);
-            return convertToResponse(result);
-          } catch (fetchError) {
-            return convertToResponse(fetchError);
-          }
-        } else {
-          return new Response("HTTP handler not implemented", { status: 501 });
+      }
+
+      // Handle direct HTTP requests (via invoke_http)
+      if (config.fetch) {
+        try {
+          const result = await config.fetch(request, context);
+          return convertToResponse(result);
+        } catch (error) {
+          return convertToResponse(error);
         }
       }
+
+      return new Response("HTTP handler not implemented", { status: 501 });
     },
   };
 }

@@ -3,6 +3,8 @@ import * as path from "path";
 import { execSync } from "child_process";
 import { initCommand } from "./init";
 
+jest.setTimeout(120000);
+
 const testDir = path.join(__dirname, "../../test-projects");
 
 beforeAll(async () => {

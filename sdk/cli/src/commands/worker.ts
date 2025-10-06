@@ -5,15 +5,9 @@ import { Command } from "commander";
 import { Hex } from "viem";
 import { LaunchWorkerEvent, WorkOrderPayload, WorkerManifest } from "../utils/types";
 import { createUnsignedDsse, signDsse } from "../utils/crypto";
+import { embedBundleSource } from "../utils/bundle";
 
 const DSSE_WORK_ORDER_PAYLOAD_TYPE = "application/vnd.nxcc.workorderpayload.v1+json";
-const DSSE_WORKER_BUNDLE_PAYLOAD_TYPE = "application/vnd.nxcc.workerbundlepayload.v1+json";
-
-interface WorkerBundlePayload {
-  vm: string;
-  executable: string;
-  metadata: Record<string, string>;
-}
 
 async function deploy(
   manifestPath: string,
@@ -32,27 +26,7 @@ async function deploy(
     const workerManifest: WorkerManifest = manifestJson;
 
     if (options.bundle) {
-      const bundlePath = workerManifest.bundle.source;
-      if (!bundlePath) {
-        throw new Error('Manifest for bundling must have a "bundle.source" file path.');
-      }
-      const bundleAbsPath = path.resolve(manifestDir, bundlePath);
-      const bundleContent = await fs.readFile(bundleAbsPath);
-
-      const workerBundlePayload: WorkerBundlePayload = {
-        vm: "nxcc/workerd",
-        executable: bundleContent.toString("base64"),
-        metadata: {},
-      };
-      const workerBundlePayloadJson = JSON.stringify(workerBundlePayload);
-
-      const bundleDsseEnvelope = createUnsignedDsse(
-        workerBundlePayloadJson,
-        DSSE_WORKER_BUNDLE_PAYLOAD_TYPE,
-      );
-      const bundleDsseEnvelopeJson = JSON.stringify(bundleDsseEnvelope);
-      const bundleB64 = Buffer.from(bundleDsseEnvelopeJson).toString("base64");
-      workerManifest.bundle.source = `data:application/json;base64,${bundleB64}`;
+      await embedBundleSource(workerManifest, manifestDir);
     }
 
     const workOrderPayload: WorkOrderPayload = {
@@ -83,7 +57,6 @@ async function deploy(
       );
     }
 
-    console.log("Worker deployed successfully:");
     console.log(responseMessage);
   } catch (error) {
     console.error("Failed to deploy worker:", error);
