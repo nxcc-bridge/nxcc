@@ -15,6 +15,14 @@ DAEMON_EXTRA_ARGS="${NXCC_DAEMON_EXTRA_ARGS:-}"
 DUMP_CONFIG="${NXCC_DAEMON_DUMP_CONFIG:-false}"
 
 # Export environment variables for the components to use
+# Ensure container defaults so the daemon listens on all interfaces unless overridden
+if [ -z "${NXCC_DAEMON_HTTP_LISTEN_ADDR:-}" ]; then
+	export NXCC_DAEMON_HTTP_LISTEN_ADDR="0.0.0.0:6922"
+fi
+if [ -z "${NXCC_DAEMON_LISTEN_ADDRESSES:-}" ]; then
+	export NXCC_DAEMON_LISTEN_ADDRESSES="/ip4/0.0.0.0/tcp/9000"
+fi
+
 # Daemon configuration (NXCC_DAEMON_ prefix)
 export NXCC_DAEMON_UDS_PATH="$DAEMON_UDS_PATH"
 export NXCC_DAEMON_ENCLAVE_UDS_PATH="$ENCLAVE_UDS_PATH"

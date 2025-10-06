@@ -18,18 +18,18 @@ Pick the runtime that matches your setup.
 
 <Steps>
 
-1. Run the container with matching ports and env vars so the HTTP API and libp2p are reachable:
+1. Run the container with host-only port mappings so the HTTP API and libp2p are reachable:
 
    ```bash
    docker run --rm \
-     -e NXCC_DAEMON_HTTP_LISTEN_ADDR=0.0.0.0:6922 \
-     -e NXCC_DAEMON_LISTEN_ADDRESSES=/ip4/0.0.0.0/tcp/9000 \
-     -p 6922:6922 \
-     -p 9000:9000 \
+     --add-host=host.docker.internal:host-gateway \
+     -p 127.0.0.1:6922:6922 \
+     -p 127.0.0.1:9000:9000 \
      ghcr.io/nxcc-bridge/node:latest
    ```
 
-2. Access the node at `http://localhost:6922` (HTTP API) while keeping port `9000` open for libp2p peers.
+2. Access the node at `http://localhost:6922` (HTTP API) while keeping port `9000` available for libp2p peers. Remove the leading `127.0.0.1:` to expose the node to the network.
+3. To reach services running on your host (for example an Anvil instance on `127.0.0.1:8545`), connect to `http://host.docker.internal:8545`
 
 </Steps>
 

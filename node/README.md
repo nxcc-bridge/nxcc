@@ -83,12 +83,10 @@ cargo test
 # Build production image
 docker build -t nxcc-node .
 
-# Run containerized node with matching ports
 docker run --rm \
-  -e NXCC_DAEMON_HTTP_LISTEN_ADDR=0.0.0.0:6922 \
-  -e NXCC_DAEMON_LISTEN_ADDRESSES=/ip4/0.0.0.0/tcp/9000 \
-  -p 6922:6922 \
-  -p 9000:9000 \
+  --add-host=host.docker.internal:host-gateway \
+  -p 127.0.0.1:6922:6922 \
+  -p 127.0.0.1:9000:9000 \
   nxcc-node
 ```
 
