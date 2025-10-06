@@ -263,7 +263,7 @@ Create `secure-manifest.json`:
 npx tsc secure-worker.ts --outDir dist --target es2022 --module es2022
 
 # Deploy worker
-nxcc worker deploy secure-manifest.json --rpc-url http://localhost:6922
+nxcc worker deploy --bundle secure-manifest.json --rpc-url http://localhost:6922
 ```
 
 Test the secure worker:

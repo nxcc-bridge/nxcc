@@ -56,14 +56,13 @@ Start a node with Docker:
 
 ```bash
 docker run --rm \
-  -e NXCC_DAEMON_HTTP_LISTEN_ADDR=0.0.0.0:6922 \
-  -e NXCC_DAEMON_LISTEN_ADDRESSES=/ip4/0.0.0.0/tcp/9000 \
-  -p 6922:6922 \
-  -p 9000:9000 \
+  --add-host=host.docker.internal:host-gateway \
+  -p 127.0.0.1:6922:6922 \
+  -p 127.0.0.1:9000:9000 \
   ghcr.io/nxcc-bridge/node:latest
 ```
 
-That exposes the HTTP API at `http://localhost:6922` and keeps port `9000` open for libp2p peers, so every CLI example in the docs works immediately.
+The image listens on `0.0.0.0` by default; these bindings expose the HTTP API at `http://localhost:6922`, keep port `9000` ready for libp2p peers, and still confine access to your machine unless you remove the `127.0.0.1` prefix.
 
 Prefer a native setup? Follow the full walkthrough in the [Getting Started guide](https://nxcc.org/docs/guides/getting-started/).
 
