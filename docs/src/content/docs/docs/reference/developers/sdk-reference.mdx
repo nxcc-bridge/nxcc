@@ -105,11 +105,7 @@ Configuration object for creating workers with the `worker()` function.
 interface WorkerConfig {
   launch?: WorkerLaunchHandler;
   fetch?: WorkerHttpHandler;
-  [handlerName: string]:
-    | CustomEventHandler
-    | WorkerLaunchHandler
-    | WorkerHttpHandler
-    | undefined;
+  [handlerName: string]: CustomEventHandler | WorkerLaunchHandler | WorkerHttpHandler | undefined;
 }
 ```
 
@@ -172,10 +168,7 @@ type WorkerLaunchHandler = (
 Handler for HTTP requests.
 
 ```typescript
-type WorkerHttpHandler<T = any> = (
-  request: Request,
-  context: WorkerContext,
-) => Promise<T> | T;
+type WorkerHttpHandler<T = any> = (request: Request, context: WorkerContext) => Promise<T> | T;
 ```
 
 **Parameters:**
@@ -201,9 +194,7 @@ type CustomEventHandler = (
 Main handler function for policy workers.
 
 ```typescript
-type PolicyHandler = (
-  requests: PolicyExecutionRequest[],
-) => boolean[] | Promise<boolean[]>;
+type PolicyHandler = (requests: PolicyExecutionRequest[]) => boolean[] | Promise<boolean[]>;
 ```
 
 **Parameters:**

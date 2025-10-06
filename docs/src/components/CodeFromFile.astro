@@ -12,13 +12,7 @@ interface CodeFromFileProps {
   [key: string]: unknown;
 }
 
-const {
-  file,
-  lang,
-  title,
-  trim = false,
-  ...rest
-} = Astro.props as CodeFromFileProps;
+const { file, lang, title, trim = false, ...rest } = Astro.props as CodeFromFileProps;
 
 if (!file || typeof file !== "string") {
   throw new Error("<CodeFromFile /> requires a string `file` prop");
@@ -28,8 +22,7 @@ const docsDir = fileURLToPath(new URL("../..", import.meta.url));
 const repoRoot = path.resolve(docsDir, "..");
 const resolvedPath = path.resolve(repoRoot, file);
 
-const maybeAddWatchFile = (Astro as { addWatchFile?: (path: string) => void })
-  .addWatchFile;
+const maybeAddWatchFile = (Astro as { addWatchFile?: (path: string) => void }).addWatchFile;
 if (typeof maybeAddWatchFile === "function") {
   maybeAddWatchFile(resolvedPath);
 }
@@ -40,8 +33,7 @@ if (trim) {
 }
 
 const inferredLang = path.extname(resolvedPath).slice(1) || "txt";
-const codeLang =
-  typeof lang === "string" && lang.length > 0 ? lang : inferredLang;
+const codeLang = typeof lang === "string" && lang.length > 0 ? lang : inferredLang;
 const codeTitle = typeof title === "string" && title.length > 0 ? title : file;
 ---
 

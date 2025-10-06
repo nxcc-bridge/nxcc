@@ -32,9 +32,9 @@
   --color-brand: #eeaa00; /* Default brand color */
 
   --font-family-sans:
-    "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji",
-    "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+    "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol",
+    "Noto Color Emoji";
 }
 
 /* Override Starlight's accent colors for both themes */
@@ -87,9 +87,7 @@
   --sl-color-gray-4: #7a6549; /* Lighter brown - muted text */
 
   /* Navigation specific overrides */
-  --sl-color-bg-nav: var(
-    --sl-color-gray-7
-  ); /* Use light navigation background */
+  --sl-color-bg-nav: var(--sl-color-gray-7); /* Use light navigation background */
   --sl-color-text: var(--sl-color-white); /* Use our darkest text color */
 }
 
@@ -181,10 +179,7 @@ a.site-title.sl-flex {
 
 @layer utilities {
   .bg-dot-pattern {
-    background-image: radial-gradient(
-      theme(colors.gray.200) 1px,
-      transparent 1px
-    );
+    background-image: radial-gradient(theme(colors.gray.200) 1px, transparent 1px);
     background-size: 1.5rem 1.5rem;
   }
 }

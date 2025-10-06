@@ -134,9 +134,7 @@ interface PolicyExecutionRequest {
 export default {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    const handler = url.pathname.startsWith("/")
-      ? url.pathname.substring(1)
-      : url.pathname;
+    const handler = url.pathname.startsWith("/") ? url.pathname.substring(1) : url.pathname;
 
     if (handler !== "_policy") {
       return new Response("Invalid endpoint", { status: 400 });
@@ -261,9 +259,7 @@ export default policy((requests) => {
     const bundleHash = consumer.bundle_hash;
     const isAllowed = allowedBundles.includes(bundleHash);
 
-    console.log(
-      `Consumer bundle ${bundleHash}: ${isAllowed ? "ALLOW" : "DENY"}`,
-    );
+    console.log(`Consumer bundle ${bundleHash}: ${isAllowed ? "ALLOW" : "DENY"}`);
     return isAllowed;
   });
 });
@@ -285,9 +281,7 @@ export default policy((requests) => {
     const businessHours = hour >= 9 && hour <= 17;
 
     if (!businessHours) {
-      console.log(
-        `Access denied outside business hours (current: ${hour}:00 UTC)`,
-      );
+      console.log(`Access denied outside business hours (current: ${hour}:00 UTC)`);
       return false;
     }
 
@@ -385,10 +379,7 @@ export default policy((requests) => {
 
     console.log(`[${requestId}] Policy evaluation started`);
     console.log(`[${requestId}] Secrets requested:`, request.secret_ids);
-    console.log(
-      `[${requestId}] Consumer bundle:`,
-      request.consumer?.bundle_hash,
-    );
+    console.log(`[${requestId}] Consumer bundle:`, request.consumer?.bundle_hash);
 
     const decision = evaluateRequest(request);
 

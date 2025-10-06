@@ -22,11 +22,7 @@ export default worker({
 
   // Fetch handlers: return objects are automatically JSON stringified with 200
   async fetch(request, { userdata }) {
-    console.log(
-      "HTTP request received:",
-      request.method,
-      new URL(request.url).pathname,
-    );
+    console.log("HTTP request received:", request.method, new URL(request.url).pathname);
 
     // Return object automatically becomes JSON response with 200 status
     return {

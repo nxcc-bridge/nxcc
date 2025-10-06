@@ -162,12 +162,7 @@ Now create a worker that requests access to the identity:
 ```typescript
 // secure-worker.ts
 import { worker } from "@nxcc/sdk";
-import {
-  createWalletClient,
-  http,
-  privateKeyToAccount,
-  formatEther,
-} from "viem";
+import { createWalletClient, http, privateKeyToAccount, formatEther } from "viem";
 import { anvil } from "viem/chains";
 
 export default worker({
@@ -335,9 +330,7 @@ export default policy((requests) => {
     // from multiple parties before approving access
 
     const signatures = request.multiSigApprovals || [];
-    const validSignatures = signatures.filter((sig) =>
-      approvedSigners.has(sig.signer),
-    );
+    const validSignatures = signatures.filter((sig) => approvedSigners.has(sig.signer));
 
     if (validSignatures.length < requiredSigners) {
       console.log("❌ Access denied: insufficient signatures");
