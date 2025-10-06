@@ -117,6 +117,15 @@ pub async fn start_web3_event_listener(
                                 Some(log) => {
                                     debug!("Received log for work_order_id: {}: {:?}", work_order_id, log);
                                     let rust_web3_log = RustWeb3Log::from(log);
+
+                                    if !log_matches_config(&rust_web3_log, &config) {
+                                        debug!(
+                                            "Skipping log for work_order_id: {} because it does not match manifest filters",
+                                            work_order_id
+                                        );
+                                        continue;
+                                    }
+
                                     let event_payload_proto = nxcc_interface::proto::interface::EventPayload {
                                         payload: Some(nxcc_interface::proto::interface::event_payload::Payload::Web3Log(rust_web3_log.into())),
                                     };
@@ -170,4 +179,76 @@ pub async fn start_web3_event_listener(
         "Web3 event listener stopped for work_order_id: {}, worker_id: {}",
         work_order_id, enclave_worker_id
     );
+}
+
+fn log_matches_config(log: &RustWeb3Log, config: &Web3EventConfig) -> bool {
+    if !config.address.is_empty() && !config.address.iter().any(|addr| addr == &log.address) {
+        return false;
+    }
+
+    for (idx, topic_filter) in config.topics.iter().enumerate() {
+        if topic_filter.is_empty() {
+            continue;
+        }
+
+        match log.topics.get(idx) {
+            Some(topic) if topic_filter.iter().any(|expected| expected == topic) => {}
+            _ => return false,
+        }
+    }
+
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use alloy_primitives::{Address, B256};
+
+    use super::*;
+
+    fn base_config() -> Web3EventConfig {
+        Web3EventConfig {
+            chain: nxcc_interface::types::secrets::ChainIdentifier::ChainId(1),
+            address: Vec::new(),
+            topics: Vec::new(),
+            gateways: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn log_matches_when_addresses_and_topics_align() {
+        let addr = Address::from([0x12; 20]);
+        let topic0 = B256::from([1u8; 32]);
+
+        let mut config = base_config();
+        config.address.push(addr);
+        config.topics.push(vec![topic0]);
+
+        let log = RustWeb3Log {
+            address: addr,
+            topics: vec![topic0],
+            ..Default::default()
+        };
+
+        assert!(log_matches_config(&log, &config));
+    }
+
+    #[test]
+    fn log_does_not_match_when_topic_differs() {
+        let addr = Address::from([0x12; 20]);
+        let topic0 = B256::from([1u8; 32]);
+        let other_topic = B256::from([2u8; 32]);
+
+        let mut config = base_config();
+        config.address.push(addr);
+        config.topics.push(vec![topic0]);
+
+        let log = RustWeb3Log {
+            address: addr,
+            topics: vec![other_topic],
+            ..Default::default()
+        };
+
+        assert!(!log_matches_config(&log, &config));
+    }
 }
