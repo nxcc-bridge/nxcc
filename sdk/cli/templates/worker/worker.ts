@@ -1,4 +1,9 @@
 import { worker, type WorkerContext } from "@nxcc/sdk";
+import { Hex, decodeEventLog, formatUnits, parseAbiItem } from "viem";
+
+const transferEvent = parseAbiItem(
+  "event Transfer(address indexed from, address indexed to, uint256 value)",
+);
 
 export default worker({
   async launch(eventPayload: Record<string, unknown>, { userdata }: WorkerContext) {
@@ -13,19 +18,26 @@ export default worker({
   },
 
   async handleTransfer(eventPayload: Record<string, unknown>, { userdata }: WorkerContext) {
-    const args = eventPayload.args as Record<string, unknown>;
-    const from = args?.from as string;
-    const to = args?.to as string;
-    const value = args?.value as string;
-    const transactionHash = eventPayload.transactionHash as string;
-    const blockNumber = eventPayload.blockNumber as number;
+    try {
+      const {
+        args: { from, to, value },
+      } = decodeEventLog({
+        abi: [transferEvent],
+        topics: eventPayload.topics as [signature: Hex, ...args: Hex[]],
+        data: eventPayload.data as Hex,
+      });
 
-    console.log(`USDC Transfer detected:`);
-    console.log(`  From: ${from}`);
-    console.log(`  To: ${to}`);
-    console.log(`  Amount: ${(Number(value) / 1e6).toFixed(2)} USDC`);
-    console.log(`  Tx: ${transactionHash}`);
-    console.log(`  Block: ${blockNumber}`);
+      const transactionHash = eventPayload.transaction_hash as Hex;
+      const blockNumber = eventPayload.block_number as number;
+
+      console.log(`➡️ Transfer detected in block ${blockNumber}:`);
+      console.log(`  From: ${from}`);
+      console.log(`  To: ${to}`);
+      console.log(`  Amount: ${formatUnits(value, 6)} USDC`);
+      console.log(`  Tx: ${transactionHash}`);
+    } catch (error) {
+      console.error("Failed to decode transfer event", error, eventPayload);
+    }
   },
 
   async tick(eventPayload: Record<string, unknown>, { userdata }: WorkerContext) {

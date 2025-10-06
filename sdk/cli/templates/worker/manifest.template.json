@@ -20,6 +20,13 @@
       "handler": "tick",
       "kind": "scheduled",
       "period_ms": 1000
+    },
+    {
+      "handler": "handleTransfer",
+      "kind": "web3_event",
+      "chain": 31337,
+      "address": ["0x5FbDB2315678afecb367f032d93F642f64180aa3"],
+      "topics": [["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"]]
     }
   ]
 }
