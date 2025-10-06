@@ -7,7 +7,6 @@
         "https://1rpc.io/eth",
         "https://eth-pokt.nodies.app/",
         "https://eth.blockrazor.xyz/",
-        "https://eth.drpc.org/",
         "https://eth.llamarpc.com/",
         "https://eth.meowrpc.com/",
         "https://eth.merkle.io/",
@@ -45,7 +44,6 @@
         "https://go.getblock.io/aefd01aa907c4805ba3c00a9e5b48c6b"
       ],
       "wss": [
-        "wss://eth.drpc.org/",
         "wss://eth.llamarpc.com/",
         "wss://eth.merkle.io/",
         "wss://ethereum-rpc.publicnode.com/",
@@ -149,7 +147,6 @@
         "https://1rpc.io/op",
         "https://op-pokt.nodies.app/",
         "https://optimism-rpc.publicnode.com/",
-        "https://optimism.drpc.org/",
         "https://0xrpc.io/op",
         "https://api.zan.top/opt-mainnet",
         "https://optimism-mainnet.public.blastapi.io/",
@@ -166,7 +163,6 @@
       ],
       "wss": [
         "wss://optimism-rpc.publicnode.com/",
-        "wss://optimism.drpc.org/",
         "wss://0xrpc.io/op",
         "wss://optimism-mainnet.public.blastapi.io/",
         "wss://optimism.api.onfinality.io/public",
@@ -1612,7 +1608,6 @@
         "https://1rpc.io/matic",
         "https://polygon-bor-rpc.publicnode.com/",
         "https://polygon-pokt.nodies.app/",
-        "https://polygon.drpc.org/",
         "https://api.zan.top/polygon-mainnet",
         "https://polygon-mainnet.public.blastapi.io/",
         "https://polygon.api.onfinality.io/public",
@@ -1627,7 +1622,6 @@
       ],
       "wss": [
         "wss://polygon-bor-rpc.publicnode.com/",
-        "wss://polygon.drpc.org/",
         "wss://polygon-mainnet.public.blastapi.io/",
         "wss://polygon.api.onfinality.io/public",
         "wss://rpc-mainnet.matic.quiknode.pro/",
@@ -12085,7 +12079,6 @@
         "https://1rpc.io/base",
         "https://base-pokt.nodies.app/",
         "https://base-rpc.publicnode.com/",
-        "https://base.drpc.org/",
         "https://base.llamarpc.com/",
         "https://base.meowrpc.com/",
         "https://0xrpc.io/base",
@@ -12103,7 +12096,6 @@
       ],
       "wss": [
         "wss://base-rpc.publicnode.com/",
-        "wss://base.drpc.org/",
         "wss://base.llamarpc.com/",
         "wss://0xrpc.io/base",
         "wss://base-mainnet.public.blastapi.io/",
@@ -15910,7 +15902,6 @@
       ],
       "wss": [
         "wss://arbitrum-one-rpc.publicnode.com/",
-        "wss://arbitrum.drpc.org/",
         "wss://arbitrum-one.public.blastapi.io/",
         "wss://arbitrum.api.onfinality.io/public",
         "wss://endpoints.omniatech.io/v1/arbitrum/one/public"
@@ -15925,7 +15916,6 @@
     "rpcs": {
       "https": [
         "https://arbitrum-nova-rpc.publicnode.com/",
-        "https://arbitrum-nova.drpc.org/",
         "https://arbitrum-nova.public.blastapi.io/",
         "https://nova.arbitrum.io/rpc",
         "https://arb-nova-mainnet.gateway.tatum.io/",
