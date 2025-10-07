@@ -90,7 +90,7 @@ Deployed to: 0x5FbDB2315678afecb367f032d93F642f64180aa3
 Transaction hash: 0x2f241f20b76090179012a16f9060a223d793fd97939a31d03bbfd19d144534fc
 ```
 
-Record the deployed contract address and replace `YOUR_TOKEN_CONTRACT_ADDRESS` in `workers/event-manifest.json`.
+Record the deployed contract address and replace `YOUR_TOKEN_CONTRACT_ADDRESS` in `workers/manifest.template.json`.
 
 ### 3. Configure the Event Subscription
 
@@ -111,12 +111,34 @@ Update `workers/manifest.template.json` to watch your local development chain. W
 
 ### 4. Build and Deploy Locally
 
-With Anvil running and the manifest pointing at your test token, build and deploy the worker:
+With Anvil running and the manifest pointing at your test token, build and deploy the worker. Choose whichever method you prefer to capture the worker ID so you can reference it later without copy/paste hunting:
+
+<Tabs>
+  <TabItem label="using jq">
 
 ```bash
 npm run build
-nxcc worker deploy --bundle workers/event-manifest.json
+export WORKER_ID=$(nxcc worker deploy --bundle workers/manifest.template.json | jq -r '.workOrderId')
+echo "Worker ID: $WORKER_ID"
 ```
+
+  </TabItem>
+  <TabItem label="without jq">
+
+```bash
+npm run build
+DEPLOY_OUTPUT=$(nxcc worker deploy --bundle workers/manifest.template.json)
+echo "$DEPLOY_OUTPUT"
+```
+
+After the command runs, copy the value from the `workOrderId` field and set it manually:
+
+```bash
+export WORKER_ID="paste-work-order-id-here"
+```
+
+  </TabItem>
+</Tabs>
 
 Trigger a transfer (swap in the address you recorded, if different from `0x5FbDB2315678afecb367f032d93F642f64180aa3`) to watch the worker run:
 
@@ -128,19 +150,24 @@ cast send 0x5FbDB2315678afecb367f032d93F642f64180aa3 \
   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 ```
 
-Watch your nXCC node logs to see the worker process the transfer!
+Then inspect the worker's logs directly from the CLI:
+
+```bash
+nxcc worker logs "$WORKER_ID" --tail 50
+```
+
+Tip: Use `--follow` to stream logs.
 
 ### 5. Try on Ethereum
 
 When you're ready to monitor mainnet activity, point the manifest at a contract such as USDC on Ethereum and redeploy your nXCC worker:
 
-```diff workers/event-manifest.json
-@@
+```diff workers/manifest.template.json
 -    "chain": 31337,
 -    "address": ["0x5FbDB2315678afecb367f032d93F642f64180aa3"],
 -    "gateways": ["ws://host.docker.internal:8545"],
 +    "chain": 1,
-+    "address": ["0xA0b86a33E6441B8066D18CE51C39194AEacAFB9B"],
++    "address": ["0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"],
 ```
 
 Rebuild and run the deploy command again and watch mainnet transfers stream into the same handler.

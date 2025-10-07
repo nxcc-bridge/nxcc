@@ -167,88 +167,6 @@ Build and deploy it:
 
 Your worker is now running!
 
-## What Just Happened?
-
-1. **Secure Execution**: Your JavaScript code runs inside a Trusted Execution Environment (TEE)
-2. **No Infrastructure**: No need to manage servers, containers, or VMs
-3. **Cross-Chain Ready**: Your worker can listen to events from 400+ blockchains
-
-## Next Steps
-
-### Build an Event-Driven Worker
-
-Create a worker that reacts to blockchain events:
-
-<Tabs syncKey="event-cli">
-  <TabItem label="npm">
-    ```bash
-    # Install the CLI for advanced features
-    npm install -g @nxcc/cli
-
-    # Initialize a new project with TypeScript
-    nxcc init my-event-worker
-    cd my-event-worker && npm install
-    ```
-
-  </TabItem>
-  <TabItem label="pnpm">
-    ```bash
-    # Install the CLI for advanced features
-    pnpm add -g @nxcc/cli
-
-    # Initialize a new project with TypeScript
-    nxcc init my-event-worker
-    cd my-event-worker && pnpm install
-    ```
-
-  </TabItem>
-
-</Tabs>
-
-Edit `workers/my-worker.ts`:
-
-```typescript
-import { worker } from "@nxcc/sdk";
-
-export default worker({
-  async fetch(event, { userdata }) {
-    console.log("Received blockchain event:", event);
-
-    // Your cross-chain logic here
-    // - Call APIs
-    // - Send transactions to other chains
-    // - Access secrets securely
-
-    return new Response("Event processed!");
-  },
-});
-```
-
-Build and deploy:
-
-<Tabs syncKey="event-build">
-  <TabItem label="npm">
-    ```bash
-    npm run build
-    nxcc worker deploy --bundle workers/manifest.template.json --rpc-url http://localhost:6922
-    ```
-
-  </TabItem>
-  <TabItem label="pnpm">
-    ```bash
-    pnpm run build
-    nxcc worker deploy --bundle workers/manifest.template.json --rpc-url http://localhost:6922
-    ```
-  </TabItem>
-
-</Tabs>
-
-### Connect to Real Blockchains
-
-Workers are event-driven. Create work orders with blockchain event triggers, and remember that events are specified in the work order, not the manifest itself.
-
-For production blockchain integration, you would typically use the work order API to create workers that listen to specific on-chain events.
-
 ## Core Concepts
 
 **Workers**: JavaScript/TypeScript code that runs in secure environments and can:
@@ -262,15 +180,13 @@ For production blockchain integration, you would typically use the work order AP
 
 **Multi-Chain Native**: Built-in support for Ethereum, Polygon, Arbitrum, and 400+ other EVM chains.
 
-## What's Next?
+## Next Steps
 
 Follow our progressive tutorial series:
 
-1. **[Blockchain Events](/docs/guides/blockchain-events/)** ← Start here next
-   Build workers that react to on-chain events across multiple blockchains
+1. **[Blockchain Events](/docs/guides/blockchain-events/)** - Build workers that react to on-chain events across multiple blockchains
 
-2. **[Identities & Policies](/docs/guides/identities-policies/)**  
-   Add secure credential management and access controls
+2. **[Identities & Policies](/docs/guides/identities-policies/)** - Add secure credential management and access controls
 
 ## Reference Docs
 

@@ -11,7 +11,7 @@ In this tutorial you'll connect the identity and policy system to a worker. You'
 
 If you still have the sample project from the previous tutorials, `cd` into it. Otherwise spin up a fresh scaffold:
 
-<Tabs syncKey="identity-project">
+<Tabs syncKey="package-manager">
 <TabItem label="npm">
 
 ```bash
@@ -36,7 +36,7 @@ pnpm install
 
 Install the nXCC CLI if it's not already on your PATH:
 
-<Tabs syncKey="cli-install">
+<Tabs syncKey="package-manager">
 <TabItem label="npm">
 
 ```bash
@@ -98,18 +98,31 @@ Its manifest (`policies/manifest.template.json`) just points at the built JavaSc
 
 Install dependencies (if you haven't yet) and compile both the policy and worker bundles:
 
+<Tabs syncKey="package-manager">
+<TabItem label="npm">
+
 ```bash
 npm install
 npm run build
 ```
 
+</TabItem>
+<TabItem label="pnpm">
+
+```bash
+pnpm install
+pnpm run build
+```
+
+</TabItem>
+</Tabs>
+
 Mint an identity NFT and capture its token ID. If you have `jq` installed, the command below plucks the JSON field automatically—otherwise, copy the `id` value from the CLI output and export it manually.
 
 ```bash
 export IDENTITY_ID=$(nxcc identity create "$IDENTITY_CONTRACT" \
-  --gateway-url "$ANVIL_RPC" \
   --signer "$ANVIL_SIGNER" \
-  | sed -n '2,$p' | jq -r '.id')
+  | jq -r '.id')
 
 echo "Identity ID: $IDENTITY_ID"
 ```
@@ -119,7 +132,6 @@ Finally, set the policy URL on the freshly minted identity. The CLI converts the
 ```bash
 nxcc identity set-policy "$IDENTITY_CONTRACT" "$IDENTITY_ID" \
   policies/manifest.template.json \
-  --gateway-url "$ANVIL_RPC" \
   --signer "$ANVIL_SIGNER"
 ```
 
@@ -269,7 +281,7 @@ With `cast` available, transfer test ETH from the default Anvil account to the w
 
 ```bash
 export WORKER_ADDRESS=$(curl -s http://localhost:6922/w/$WORK_ORDER_ID/wallet | jq -r '.address')
-cast send "$WORKER_ADDRESS" --value 1ether --rpc-url "$ANVIL_RPC" --private-key "$ANVIL_SIGNER"
+cast send "$WORKER_ADDRESS" --value 1ether --private-key "$ANVIL_SIGNER"
 ```
 
 Alternatively, copy the address manually from the previous `curl` output and use it in the `cast send` command.
