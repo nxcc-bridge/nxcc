@@ -38,18 +38,19 @@ if [ "$APP_VERBOSE" = "true" ]; then
 fi
 
 # VM configuration (NXCC_WORKERD_ prefix for workerd VM)
-export NXCC_WORKERD_SERVER_UDS_PATH="$WORKERD_VM_UDS_PATH"
-export NXCC_WORKERD_WORKERD_PATH="$WORKERD_BIN_PATH"
+workerd_vm_env="NXCC_VM_SERVER_MODE=uds NXCC_VM_SERVER_UDS_PATH=$WORKERD_VM_UDS_PATH NXCC_WORKERD_SERVER_UDS_PATH=$WORKERD_VM_UDS_PATH NXCC_WORKERD_WORKERD_PATH=$WORKERD_BIN_PATH"
 if [ "$APP_VERBOSE" = "true" ]; then
-	export NXCC_WORKERD_VERBOSE="true"
+	workerd_vm_env="$workerd_vm_env NXCC_VM_VERBOSE=true NXCC_WORKERD_VERBOSE=true"
 fi
 
 # If dump config mode, skip starting VM and enclave
 if [ "$DUMP_CONFIG" != "true" ]; then
 	# --- Start VM ---
-	# VM configuration is now handled via environment variables
+	# Pass base VM settings alongside the workerd-specific ones so additional VM binaries
+	# can be launched with their own bindings in the future.
 	echo "Starting nxcc-workerd-vm (configured via environment variables)"
-	nxcc-workerd-vm &
+	# shellcheck disable=SC2086
+	env $workerd_vm_env nxcc-workerd-vm &
 
 	# --- Start Enclave ---
 	# Enclave configuration is now handled via environment variables
