@@ -203,6 +203,8 @@ The helper derives a deterministic secp256k1 key for the worker using HKDF. Beca
 
 Trim the worker manifest to only request the identity and expose an HTTP endpoint. Insert the address and token ID captured earlier.
 
+Note that we also changed the chain specifier with a gateway URL so that the nXCC node container can pull the policy from the anvil instance running on the host. In production you can rely on auto-detection from chain id, or specify multiple gateways for redundancy.
+
 ```json
 {
   "bundle": {
@@ -211,7 +213,7 @@ Trim the worker manifest to only request the identity and expose an HTTP endpoin
   "identities": [
     [
       {
-        "chain": 31337,
+        "chain": "http://host.docker.internal:8545",
         "identity_address": "IDENTITY_CONTRACT",
         "identity_id": "IDENTITY_ID"
       },

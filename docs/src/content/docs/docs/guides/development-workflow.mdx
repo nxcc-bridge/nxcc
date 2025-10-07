@@ -283,28 +283,15 @@ export default worker({
 
 For fast development cycles:
 
-1. **Keep node running**: `./run.sh` in one terminal
-2. **Watch and rebuild**:
+1.  **Keep node running**: `./run.sh` in one terminal
+2.  **Watch and rebuild**:
 
-   <Tabs syncKey="dev-workflow-watch">
-     <TabItem label="npm">
+    ```bash
+    npm run build --watch
+    ```
 
-       ```bash
-       npm run build --watch
-       ```
-
-     </TabItem>
-     <TabItem label="pnpm">
-
-       ```bash
-       pnpm run build --watch
-       ```
-
-     </TabItem>
-   </Tabs>
-
-3. **Redeploy on changes**: Re-run `nxcc worker deploy` after each build
-4. **Monitor logs**: Keep `nxcc worker logs` running for immediate feedback
+3.  **Redeploy on changes**: Re-run `nxcc worker deploy` after each build
+4.  **Monitor logs**: Keep `nxcc worker logs` running for immediate feedback
 
 ## Testing with Local Blockchain
 
