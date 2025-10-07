@@ -91,21 +91,33 @@ async function logs(
       apiUrl.searchParams.set("follow", "true");
     }
 
-    console.log(`Fetching logs for worker: ${workerId}`);
-
     if (options.follow) {
-      console.log("Streaming logs (press Ctrl+C to stop)...");
       await streamLogs(apiUrl.toString());
     } else {
-      // For non-streaming, we'd make a regular HTTP request
-      // But for now, let's redirect users to use --follow
-      console.log("Note: Use --follow to stream logs in real-time");
-      apiUrl.searchParams.set("follow", "true");
-      await streamLogs(apiUrl.toString());
+      await fetchStaticLogs(apiUrl.toString());
     }
   } catch (error) {
     console.error("Error fetching logs:", error);
     process.exit(1);
+  }
+}
+
+async function fetchStaticLogs(url: string) {
+  const response = await fetch(url, {
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`HTTP ${response.status}: ${errorText}`);
+  }
+
+  const payload = await response.json();
+  const logs = Array.isArray(payload?.logs) ? payload.logs : [];
+  for (const entry of logs) {
+    console.log(entry);
   }
 }
 
@@ -186,6 +198,6 @@ export function workerSubcommand(program: Command) {
     .description("Stream logs from a worker")
     .requiredOption("--rpc-url <url>", "nXCC node HTTP RPC URL", "http://localhost:6922")
     .option("-f, --follow", "Follow log output (stream new logs)", false)
-    .option("-t, --tail <lines>", "Number of lines to tail", "10")
+    .option("-t, --tail <lines>", "Number of lines to tail (0 for all available logs)", "0")
     .action(logs);
 }
