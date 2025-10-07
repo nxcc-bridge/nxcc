@@ -19,7 +19,7 @@
     {
       "handler": "tick",
       "kind": "scheduled",
-      "period_ms": 1000
+      "period_ms": 10000
     },
     {
       "handler": "handleTransfer",
