@@ -44,6 +44,7 @@ message ChainIdentifier {
     uint64 chain_id = 1;
     string gateway_url = 2;
   }
+  repeated string gateway_urls = 3;
 }
 
 message SecretIdentifier {

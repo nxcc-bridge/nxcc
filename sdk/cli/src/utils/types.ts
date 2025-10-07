@@ -16,7 +16,7 @@ export interface WorkerBundlePointer {
   hash?: number[];
 }
 
-export type ChainIdentifier = number | string;
+export type ChainIdentifier = number | string | string[];
 
 export interface SecretId {
   chain: ChainIdentifier;

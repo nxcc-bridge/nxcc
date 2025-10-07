@@ -168,6 +168,13 @@ fn test_chain_identifier_serialization() {
     let gateway = ChainIdentifier::GatewayUrl("wss://custom.com".parse().unwrap());
     let json = serde_json::to_string(&gateway).unwrap();
     assert_eq!(json, "\"wss://custom.com/\"");
+
+    let gateways = ChainIdentifier::GatewayUrls(vec![
+        "wss://custom-a.com".parse().unwrap(),
+        "wss://custom-b.com".parse().unwrap(),
+    ]);
+    let json = serde_json::to_string(&gateways).unwrap();
+    assert_eq!(json, "[\"wss://custom-a.com/\",\"wss://custom-b.com/\"]");
 }
 
 #[test]
@@ -192,6 +199,12 @@ fn test_chain_identifier_display() {
 
     let gateway = ChainIdentifier::GatewayUrl("wss://test.com".parse().unwrap());
     assert_eq!(gateway.to_string(), "wss://test.com/");
+
+    let gateways = ChainIdentifier::GatewayUrls(vec![
+        "wss://a.example".parse().unwrap(),
+        "wss://b.example".parse().unwrap(),
+    ]);
+    assert_eq!(gateways.to_string(), "wss://a.example/, wss://b.example/");
 }
 
 #[test]
@@ -199,11 +212,22 @@ fn test_chain_identifier_helper_methods() {
     let chain_id = ChainIdentifier::ChainId(123);
     assert_eq!(chain_id.chain_id(), Some(123));
     assert_eq!(chain_id.gateway_url(), None);
+    assert_eq!(chain_id.gateway_urls(), None);
 
     let url: Url = "wss://example.com".parse().unwrap();
     let gateway = ChainIdentifier::GatewayUrl(url.clone());
     assert_eq!(gateway.chain_id(), None);
     assert_eq!(gateway.gateway_url(), Some(&url));
+    assert_eq!(gateway.gateway_urls(), Some(std::slice::from_ref(&url)));
+
+    let urls: Vec<Url> = vec![
+        "wss://example-a.com".parse().unwrap(),
+        "wss://example-b.com".parse().unwrap(),
+    ];
+    let gateways = ChainIdentifier::GatewayUrls(urls.clone());
+    assert_eq!(gateways.chain_id(), None);
+    assert_eq!(gateways.gateway_url(), Some(&urls[0]));
+    assert_eq!(gateways.gateway_urls(), Some(&urls[..]));
 }
 
 #[test]
@@ -219,12 +243,24 @@ fn test_chain_identifier_protobuf_conversion() {
     let proto: interface::ChainIdentifier = gateway.clone().into();
     let back: ChainIdentifier = proto.try_into().unwrap();
     assert_eq!(gateway, back);
+
+    // Test GatewayUrls conversion
+    let gateways = ChainIdentifier::GatewayUrls(vec![
+        "wss://test-a.com".parse().unwrap(),
+        "wss://test-b.com".parse().unwrap(),
+    ]);
+    let proto: interface::ChainIdentifier = gateways.clone().into();
+    let back: ChainIdentifier = proto.try_into().unwrap();
+    assert_eq!(gateways, back);
 }
 
 #[test]
 fn test_protobuf_conversion_errors() {
     // Test missing identifier field
-    let proto = interface::ChainIdentifier { identifier: None };
+    let proto = interface::ChainIdentifier {
+        identifier: None,
+        gateway_urls: vec![],
+    };
     let result: Result<ChainIdentifier, _> = proto.try_into();
     assert!(result.is_err());
 
@@ -233,6 +269,14 @@ fn test_protobuf_conversion_errors() {
         identifier: Some(interface::chain_identifier::Identifier::GatewayUrl(
             "not-a-valid-url".to_string(),
         )),
+        gateway_urls: vec![],
+    };
+    let result: Result<ChainIdentifier, _> = proto.try_into();
+    assert!(result.is_err());
+
+    let proto = interface::ChainIdentifier {
+        identifier: None,
+        gateway_urls: vec!["not-a-valid-url".to_string()],
     };
     let result: Result<ChainIdentifier, _> = proto.try_into();
     assert!(result.is_err());
@@ -251,6 +295,19 @@ fn test_secret_id_with_custom_gateway() {
     let json = serde_json::to_string(&secret_id).unwrap();
     let deserialized: SecretId = serde_json::from_str(&json).unwrap();
     assert_eq!(secret_id, deserialized);
+
+    let secret_id_multi = SecretId {
+        chain: ChainIdentifier::GatewayUrls(vec![
+            "wss://custom-a.chain.com".parse().unwrap(),
+            "wss://custom-b.chain.com".parse().unwrap(),
+        ]),
+        identity_address: Address::from([2u8; 20]),
+        identity_id: U256::from(789),
+    };
+
+    let json = serde_json::to_string(&secret_id_multi).unwrap();
+    let deserialized: SecretId = serde_json::from_str(&json).unwrap();
+    assert_eq!(secret_id_multi, deserialized);
 }
 
 #[test]
@@ -267,4 +324,18 @@ fn test_web3_event_with_custom_gateway() {
     let json = serde_json::to_string(&event).unwrap();
     let deserialized: Web3Event = serde_json::from_str(&json).unwrap();
     assert_eq!(event, deserialized);
+
+    let event_multi = Web3Event {
+        chain: ChainIdentifier::GatewayUrls(vec![
+            "wss://custom-a.chain.com".parse().unwrap(),
+            "wss://custom-b.chain.com".parse().unwrap(),
+        ]),
+        address: vec![],
+        topics: vec![],
+        gateways: vec![],
+    };
+
+    let json = serde_json::to_string(&event_multi).unwrap();
+    let deserialized: Web3Event = serde_json::from_str(&json).unwrap();
+    assert_eq!(event_multi, deserialized);
 }

@@ -17,6 +17,8 @@ pub enum ChainIdentifier {
     ChainId(u64),
     /// Custom chain identified by a gateway URL
     GatewayUrl(Url),
+    /// Custom chain identified by an ordered list of redundant gateway URLs
+    GatewayUrls(Vec<Url>),
 }
 
 impl ChainIdentifier {
@@ -24,16 +26,22 @@ impl ChainIdentifier {
     pub fn chain_id(&self) -> Option<u64> {
         match self {
             ChainIdentifier::ChainId(id) => Some(*id),
-            ChainIdentifier::GatewayUrl(_) => None,
+            ChainIdentifier::GatewayUrl(_) | ChainIdentifier::GatewayUrls(_) => None,
         }
     }
 
-    /// Returns the gateway URL if this is a GatewayUrl variant, otherwise returns None
-    pub fn gateway_url(&self) -> Option<&Url> {
+    /// Returns all gateway URLs if this is a custom gateway variant, otherwise returns None
+    pub fn gateway_urls(&self) -> Option<&[Url]> {
         match self {
             ChainIdentifier::ChainId(_) => None,
-            ChainIdentifier::GatewayUrl(url) => Some(url),
+            ChainIdentifier::GatewayUrl(url) => Some(std::slice::from_ref(url)),
+            ChainIdentifier::GatewayUrls(urls) => Some(urls),
         }
+    }
+
+    /// Returns the first gateway URL if present.
+    pub fn gateway_url(&self) -> Option<&Url> {
+        self.gateway_urls().and_then(|urls| urls.first())
     }
 }
 
@@ -48,6 +56,16 @@ impl fmt::Display for ChainIdentifier {
         match self {
             ChainIdentifier::ChainId(id) => write!(f, "{}", id),
             ChainIdentifier::GatewayUrl(url) => write!(f, "{}", url),
+            ChainIdentifier::GatewayUrls(urls) => {
+                let mut iter = urls.iter();
+                if let Some(first) = iter.next() {
+                    write!(f, "{}", first)?;
+                }
+                for url in iter {
+                    write!(f, ", {}", url)?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -55,6 +73,18 @@ impl fmt::Display for ChainIdentifier {
 impl TryFrom<interface::ChainIdentifier> for ChainIdentifier {
     type Error = ConversionError;
     fn try_from(p: interface::ChainIdentifier) -> Result<Self, Self::Error> {
+        if !p.gateway_urls.is_empty() {
+            let mut urls = Vec::with_capacity(p.gateway_urls.len());
+            for url in p.gateway_urls {
+                let parsed_url = Url::parse(&url).map_err(|e| ConversionError::InvalidValue {
+                    field: "gateway_urls".to_string(),
+                    message: e.to_string(),
+                })?;
+                urls.push(parsed_url);
+            }
+            return Ok(ChainIdentifier::GatewayUrls(urls));
+        }
+
         match p.identifier {
             Some(interface::chain_identifier::Identifier::ChainId(id)) => {
                 Ok(ChainIdentifier::ChainId(id))
@@ -73,28 +103,42 @@ impl TryFrom<interface::ChainIdentifier> for ChainIdentifier {
 
 impl From<ChainIdentifier> for interface::ChainIdentifier {
     fn from(value: ChainIdentifier) -> Self {
-        let identifier = match value {
-            ChainIdentifier::ChainId(id) => interface::chain_identifier::Identifier::ChainId(id),
-            ChainIdentifier::GatewayUrl(url) => {
-                interface::chain_identifier::Identifier::GatewayUrl(url.to_string())
-            }
-        };
-        interface::ChainIdentifier {
-            identifier: Some(identifier),
+        match value {
+            ChainIdentifier::ChainId(id) => interface::ChainIdentifier {
+                identifier: Some(interface::chain_identifier::Identifier::ChainId(id)),
+                gateway_urls: Vec::new(),
+            },
+            ChainIdentifier::GatewayUrl(url) => interface::ChainIdentifier {
+                identifier: Some(interface::chain_identifier::Identifier::GatewayUrl(
+                    url.to_string(),
+                )),
+                gateway_urls: Vec::new(),
+            },
+            ChainIdentifier::GatewayUrls(urls) => interface::ChainIdentifier {
+                identifier: None,
+                gateway_urls: urls.into_iter().map(|url| url.to_string()).collect(),
+            },
         }
     }
 }
 
 impl From<&ChainIdentifier> for interface::ChainIdentifier {
     fn from(value: &ChainIdentifier) -> Self {
-        let identifier = match value {
-            ChainIdentifier::ChainId(id) => interface::chain_identifier::Identifier::ChainId(*id),
-            ChainIdentifier::GatewayUrl(url) => {
-                interface::chain_identifier::Identifier::GatewayUrl(url.to_string())
-            }
-        };
-        interface::ChainIdentifier {
-            identifier: Some(identifier),
+        match value {
+            ChainIdentifier::ChainId(id) => interface::ChainIdentifier {
+                identifier: Some(interface::chain_identifier::Identifier::ChainId(*id)),
+                gateway_urls: Vec::new(),
+            },
+            ChainIdentifier::GatewayUrl(url) => interface::ChainIdentifier {
+                identifier: Some(interface::chain_identifier::Identifier::GatewayUrl(
+                    url.to_string(),
+                )),
+                gateway_urls: Vec::new(),
+            },
+            ChainIdentifier::GatewayUrls(urls) => interface::ChainIdentifier {
+                identifier: None,
+                gateway_urls: urls.iter().map(|url| url.to_string()).collect(),
+            },
         }
     }
 }

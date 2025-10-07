@@ -92,6 +92,10 @@ impl GatewayManager {
                 let rpc_urls = vec![url.to_string()];
                 Ok(Arc::new(EventGateway::new(rpc_urls)))
             }
+            ChainIdentifier::GatewayUrls(urls) => {
+                let rpc_urls = urls.iter().map(|url| url.to_string()).collect();
+                Ok(Arc::new(EventGateway::new(rpc_urls)))
+            }
             ChainIdentifier::ChainId(chain_id) => {
                 {
                     let gateways = self.gateways.read().await;
@@ -150,6 +154,7 @@ impl GatewayManager {
     ) -> Result<String, AppError> {
         let rpc_urls = match chain {
             ChainIdentifier::GatewayUrl(url) => vec![url.to_string()],
+            ChainIdentifier::GatewayUrls(urls) => urls.iter().map(|url| url.to_string()).collect(),
             ChainIdentifier::ChainId(chain_id) => self.get_rpc_urls_for_chain_id(*chain_id)?,
         };
 
@@ -225,6 +230,19 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn custom_gateway_urls() {
+        let manager = GatewayManager::new();
+        let urls = vec![
+            Url::parse("ws://custom-a.gateway.com").unwrap(),
+            Url::parse("ws://custom-b.gateway.com").unwrap(),
+        ];
+        let chain = ChainIdentifier::GatewayUrls(urls.clone());
+        let gw = manager.get_gateway(&chain).await.unwrap();
+        let expected: Vec<String> = urls.iter().map(|u| u.to_string()).collect();
+        assert_eq!(gw.urls(), expected);
+    }
+
+    #[tokio::test]
     async fn test_custom_gateway_not_cached() {
         let manager = GatewayManager::new();
         let url1 = "wss://custom1.com".parse().unwrap();
@@ -232,6 +250,28 @@ mod tests {
 
         let chain1 = ChainIdentifier::GatewayUrl(url1);
         let chain2 = ChainIdentifier::GatewayUrl(url2);
+
+        let gw1 = manager.get_gateway(&chain1).await.unwrap();
+        let gw2 = manager.get_gateway(&chain2).await.unwrap();
+
+        // Should be different instances (not cached)
+        assert!(!Arc::ptr_eq(&gw1, &gw2));
+    }
+
+    #[tokio::test]
+    async fn test_custom_gateway_urls_not_cached() {
+        let manager = GatewayManager::new();
+        let urls_a = vec![
+            Url::parse("wss://custom1-a.com").unwrap(),
+            Url::parse("wss://custom1-b.com").unwrap(),
+        ];
+        let urls_b = vec![
+            Url::parse("wss://custom2-a.com").unwrap(),
+            Url::parse("wss://custom2-b.com").unwrap(),
+        ];
+
+        let chain1 = ChainIdentifier::GatewayUrls(urls_a);
+        let chain2 = ChainIdentifier::GatewayUrls(urls_b);
 
         let gw1 = manager.get_gateway(&chain1).await.unwrap();
         let gw2 = manager.get_gateway(&chain2).await.unwrap();
@@ -308,6 +348,18 @@ mod tests {
         let chain_gateway = ChainIdentifier::GatewayUrl(gateway_url);
 
         let result = manager.get_policy_url(&chain_gateway, address, id).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "mock://policy.example.com");
+
+        // Test with multiple custom gateway URLs (mock)
+        let chain_gateway_multi = ChainIdentifier::GatewayUrls(vec![
+            "mock://custom-a.gateway.com".parse().unwrap(),
+            "mock://custom-b.gateway.com".parse().unwrap(),
+        ]);
+
+        let result = manager
+            .get_policy_url(&chain_gateway_multi, address, id)
+            .await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "mock://policy.example.com");
     }
