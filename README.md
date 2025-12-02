@@ -161,7 +161,7 @@ nXCC is open source and welcomes contributions! We follow modern development pra
 
 <img src="https://trustchain.ngi.eu/wp-content/uploads/2023/01/NGI-trustchain.png" width="400" alt="NGI TrustChain">
 
-This project is supported by the [**Next Generation Internet (NGI) TrustChain**](https://www.ngi.eu/ngi-projects/ngi-trustchain/) initiative, part of the European Union's commitment to building a more open, trustworthy, and human-centric internet with a focus on digital sovereignty and privacy by design.
+This project has received funding from the European Union's Horizon 2020 research and innovation program through the [NGI TRUSTCHAIN](https://www.ngi.eu/ngi-projects/ngi-trustchain/) program under cascade funding agreement No. 101093274.
 
 </div>
 
