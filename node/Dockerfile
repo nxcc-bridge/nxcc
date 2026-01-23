@@ -54,10 +54,11 @@ COPY daemon/Cargo.toml ./daemon/Cargo.toml
 COPY enclave/Cargo.toml ./enclave/Cargo.toml
 COPY vm/base/Cargo.toml ./vm/base/Cargo.toml
 COPY vm/workerd/Cargo.toml ./vm/workerd/Cargo.toml
+COPY vm/zenroom/Cargo.toml ./vm/zenroom/Cargo.toml
 COPY chainlist/Cargo.toml ./chainlist/Cargo.toml
 COPY attestation/Cargo.toml ./attestation/Cargo.toml
-RUN mkdir -p interface/src daemon/src enclave/src vm/base/src vm/workerd/src chainlist/src chainlist/src/bin attestation/src && \
-    touch interface/src/lib.rs daemon/src/main.rs enclave/src/main.rs vm/base/src/lib.rs vm/workerd/src/main.rs chainlist/src/lib.rs chainlist/src/bin/main.rs attestation/src/lib.rs
+RUN mkdir -p interface/src daemon/src enclave/src vm/base/src vm/workerd/src vm/zenroom/src chainlist/src chainlist/src/bin attestation/src && \
+    touch interface/src/lib.rs daemon/src/main.rs enclave/src/main.rs vm/base/src/lib.rs vm/workerd/src/main.rs vm/zenroom/src/main.rs chainlist/src/lib.rs chainlist/src/bin/main.rs attestation/src/lib.rs
 
 # Cache the crates
 RUN cargo metadata --format-version 1 > /dev/null
@@ -72,6 +73,7 @@ RUN cargo build --locked ${BUILD_FLAG} -p nxcc-interface
 # Build crates in separate layers to improve cacheability
 COPY vm ./vm
 RUN cargo build --locked ${BUILD_FLAG} -p nxcc-workerd-vm --no-default-features --features uds
+RUN cargo build --locked ${BUILD_FLAG} -p nxcc-zenroom-vm --no-default-features --features uds
 
 COPY attestation ./attestation
 COPY enclave ./enclave
@@ -89,6 +91,8 @@ FROM debian:12-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tini \
     ca-certificates \
+    curl \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
 ARG USERNAME=nxcc
@@ -101,6 +105,21 @@ RUN groupadd --gid ${USER_GID} ${USERNAME} && \
 
 # Create directory for Unix Domain Sockets.
 RUN mkdir -p /run/nxcc && chown ${USERNAME}:${USERNAME} /run/nxcc
+
+ARG ZENROOM_VERSION=v5.29.0
+ARG ZENROOM_BASE_URL=https://github.com/dyne/Zenroom/releases/download
+ARG ZENROOM_SHA256_ARM_64=84722e4284e17cbe861cd09cdd39c8e93e4ca84a983c30326393d13fe41b4938
+ARG ZENROOM_SHA256_X86_64=8d7a60ec8d381a1945f33188c077270d92ef4c02acfed8fe223cc50322918652
+ARG TARGETARCH
+
+ENV ZENROOM_VERSION=${ZENROOM_VERSION}
+ENV ZENROOM_BASE_URL=${ZENROOM_BASE_URL}
+ENV ZENROOM_SHA256_ARM_64=${ZENROOM_SHA256_ARM_64}
+ENV ZENROOM_SHA256_X86_64=${ZENROOM_SHA256_X86_64}
+ENV ZENROOM_TARGETARCH=${TARGETARCH}
+ENV ZENROOM_CACHE_DIR=/var/cache/nxcc/zenroom
+
+RUN mkdir -p "${ZENROOM_CACHE_DIR}" && chown -R ${USERNAME}:${USERNAME} /var/cache/nxcc
 
 WORKDIR /home/${USERNAME}/app
 # TODO: Run as nxcc user when TSM configfs permissions are resolved
@@ -115,6 +134,13 @@ ARG BUILD_MODE=release
 COPY --from=builder --chown=${USERNAME}:${USERNAME} /app/target/${BUILD_MODE:-debug}/nxcc-daemon /usr/local/bin/nxcc-daemon
 COPY --from=builder --chown=${USERNAME}:${USERNAME} /app/target/${BUILD_MODE:-debug}/nxcc-platform-enclave /usr/local/bin/nxcc-platform-enclave
 COPY --from=builder --chown=${USERNAME}:${USERNAME} /app/target/${BUILD_MODE:-debug}/nxcc-workerd-vm /usr/local/bin/nxcc-workerd-vm
+COPY --from=builder --chown=${USERNAME}:${USERNAME} /app/target/${BUILD_MODE:-debug}/nxcc-zenroom-vm /usr/local/bin/nxcc-zenroom-vm
+
+# Copy the VM runtime shim and expose it under expected names.
+COPY --chown=${USERNAME}:${USERNAME} vm/zenroom/zenroom-downloader.sh /usr/local/bin/zenroom
+RUN chmod +x /usr/local/bin/zenroom && \
+    ln -s /usr/local/bin/zenroom /usr/local/bin/zencode-exec && \
+    ln -s /usr/local/bin/zenroom /usr/local/bin/lua-exec
 
 # Copy the entrypoint script.
 COPY --chown=${USERNAME}:${USERNAME} entrypoint.sh /usr/local/bin/entrypoint.sh

@@ -130,11 +130,11 @@ async fn main() -> anyhow::Result<()> {
     // Create scheduler handle
     let scheduler_handle = Arc::new(SchedulerHandle::new(config.scheduler.clone()));
 
-    // Attach the default VM to the enclave's runner service
+    // Attach configured VMs (or default VM if none provided) to the enclave's runner service
     runner_service
-        .attach_default_vm()
+        .attach_configured_vms()
         .await
-        .expect("Failed to attach default VM to enclave runner");
+        .expect("Failed to attach configured VMs to enclave runner");
 
     let secrets_service = SecretsService::new(
         secrets_tx.clone(),

@@ -20,16 +20,20 @@ use crate::{config::Config, error::AppError, web3::gateways::GatewayManager};
 #[derive(Clone)]
 pub struct PolicyManager {
     gateway_manager: Arc<GatewayManager>,
+    default_vm_id: String,
 }
 
 impl PolicyManager {
     pub async fn new(
         gateway_manager: Arc<GatewayManager>,
-        _config: &Config,
+        config: &Config,
     ) -> Result<Self, AppError> {
         info!("Policy caching disabled for development");
 
-        Ok(Self { gateway_manager })
+        Ok(Self {
+            gateway_manager,
+            default_vm_id: config.enclave.default_vm_id.clone(),
+        })
     }
 
     /// Fetches a policy, which consists of a `WorkerManifest` and its corresponding `WorkerBundle`.
@@ -104,39 +108,7 @@ impl PolicyManager {
                 "Using local mock worker manifest for policy {:?}",
                 secret_id_for_log
             );
-            // Load from a fixed local path relative to the Cargo manifest dir
-            let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| {
-                // When CARGO_MANIFEST_DIR is not set (e.g., when running built binary),
-                // try to find the tests directory relative to the current executable
-                std::env::current_exe()
-                    .ok()
-                    .and_then(|exe_path| {
-                        // Look for node directory in the path hierarchy
-                        exe_path
-                            .ancestors()
-                            .find(|ancestor| {
-                                ancestor.file_name() == Some(std::ffi::OsStr::new("node"))
-                                    && ancestor.join("tests/policy/mock_policy.json").exists()
-                            })
-                            .map(|p| p.to_path_buf())
-                    })
-                    .map(|node_dir| node_dir.to_string_lossy().to_string())
-                    .unwrap_or_else(|| ".".to_string())
-            });
-
-            // Handle case where CARGO_MANIFEST_DIR points to daemon subdirectory during tests
-            let base_path = Path::new(&manifest_dir);
-            let mock_manifest_path =
-                if base_path.file_name() == Some(std::ffi::OsStr::new("daemon")) {
-                    // If we're in the daemon directory, go up one level to find the tests directory
-                    base_path
-                        .parent()
-                        .unwrap()
-                        .join("tests/policy/mock_policy.json")
-                } else {
-                    // If we're in the root node directory, use the direct path
-                    base_path.join("tests/policy/mock_policy.json")
-                };
+            let mock_manifest_path = resolve_mock_policy_manifest_path()?;
 
             debug!(
                 "Loading mock worker manifest from: {}",
@@ -281,18 +253,25 @@ impl PolicyManager {
             // If it's a local file (likely for mocking/testing), and it looks like raw executable (e.g. .js)
             // wrap it in a mock DSSE envelope.
             // In a production scenario, file:// URLs should point to complete DSSE envelopes.
-            if absolute_path
-                .extension()
-                .map_or(false, |ext| ext == "js" || ext == "wasm")
-            {
+            if absolute_path.extension().map_or(false, |ext| {
+                matches!(
+                    ext.to_str().unwrap_or(""),
+                    "js" | "mjs" | "cjs" | "wasm" | "zen" | "zencode" | "lua"
+                )
+            }) {
                 warn!(
                     "Local file bundle source {} appears to be raw executable; wrapping in mock \
                      DSSE envelope",
                     absolute_path.display(),
                 );
 
+                let vm_hint = self
+                    .manifest_vm_hint(manifest_url_for_context)
+                    .await
+                    .or_else(|| infer_vm_from_extension(&absolute_path))
+                    .unwrap_or_else(|| self.default_vm_id.clone());
                 let payload_struct = WorkerBundlePayload {
-                    vm: "nxcc/workerd".to_string(), // TODO: Get from manifest or bundle itself?
+                    vm: vm_hint,
                     executable: file_content_bytes,
                     metadata: HashMap::new(),
                 };
@@ -376,6 +355,29 @@ impl PolicyManager {
 
         Ok(bundle)
     }
+
+    async fn manifest_vm_hint(&self, manifest_url_for_context: &str) -> Option<String> {
+        if manifest_url_for_context.starts_with("mock://") {
+            let mock_manifest_path = resolve_mock_policy_manifest_path().ok()?;
+            let bytes = tokio::fs::read(&mock_manifest_path).await.ok()?;
+            return extract_vm_from_manifest_bytes(&bytes);
+        }
+
+        if manifest_url_for_context.starts_with("data:") {
+            let bytes = decode_data_url(manifest_url_for_context).ok()?;
+            return extract_vm_from_manifest_bytes(&bytes);
+        }
+
+        if manifest_url_for_context.starts_with("file:") {
+            let manifest_url = url::Url::parse(manifest_url_for_context).ok()?;
+            let path_str = manifest_url.path();
+            let path = PathBuf::from(path_str.strip_prefix('/').unwrap_or(path_str));
+            let bytes = tokio::fs::read(path).await.ok()?;
+            return extract_vm_from_manifest_bytes(&bytes);
+        }
+
+        None
+    }
 }
 
 fn decode_data_url(url: &str) -> Result<Vec<u8>, AppError> {
@@ -393,6 +395,56 @@ fn decode_data_url(url: &str) -> Result<Vec<u8>, AppError> {
     } else {
         Ok(percent_decode_str(data).collect::<Vec<u8>>())
     }
+}
+
+fn extract_vm_from_manifest_bytes(bytes: &[u8]) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    value.get("vm")?.as_str().map(|vm| vm.to_string())
+}
+
+fn infer_vm_from_extension(path: &Path) -> Option<String> {
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    match ext.as_str() {
+        "zen" | "zencode" | "lua" => Some("nxcc/zenroom".to_string()),
+        "js" | "mjs" | "cjs" | "wasm" => Some("nxcc/workerd".to_string()),
+        _ => None,
+    }
+}
+
+fn resolve_mock_policy_manifest_path() -> Result<PathBuf, AppError> {
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| {
+        // When CARGO_MANIFEST_DIR is not set (e.g., when running built binary),
+        // try to find the tests directory relative to the current executable
+        std::env::current_exe()
+            .ok()
+            .and_then(|exe_path| {
+                // Look for node directory in the path hierarchy
+                exe_path
+                    .ancestors()
+                    .find(|ancestor| {
+                        ancestor.file_name() == Some(std::ffi::OsStr::new("node"))
+                            && ancestor.join("tests/policy/mock_policy.json").exists()
+                    })
+                    .map(|p| p.to_path_buf())
+            })
+            .map(|node_dir| node_dir.to_string_lossy().to_string())
+            .unwrap_or_else(|| ".".to_string())
+    });
+
+    // Handle case where CARGO_MANIFEST_DIR points to daemon subdirectory during tests
+    let base_path = Path::new(&manifest_dir);
+    let mock_manifest_path = if base_path.file_name() == Some(std::ffi::OsStr::new("daemon")) {
+        // If we're in the daemon directory, go up one level to find the tests directory
+        base_path
+            .parent()
+            .unwrap()
+            .join("tests/policy/mock_policy.json")
+    } else {
+        // If we're in the root node directory, use the direct path
+        base_path.join("tests/policy/mock_policy.json")
+    };
+
+    Ok(mock_manifest_path)
 }
 
 #[cfg(test)]

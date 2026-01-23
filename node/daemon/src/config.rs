@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, str::FromStr};
 
 use clap::Parser;
 use serde::{Deserialize, Serialize};
@@ -166,6 +166,41 @@ pub struct EnclaveConfig {
         env = "NXCC_DAEMON_DEFAULT_VM_UDS_PATH"
     )]
     pub default_vm_uds_path: String,
+
+    /// Comma-separated list of VM attachments in the form "vm_id=uds_path".
+    /// When provided, all entries will be attached on startup.
+    #[clap(
+        long,
+        value_delimiter = ',',
+        env = "NXCC_DAEMON_VM_ATTACHMENTS",
+        value_name = "VM_ID=UDS_PATH"
+    )]
+    pub vm_attachments: Vec<VmAttachment>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VmAttachment {
+    pub vm_id: String,
+    pub uds_path: String,
+}
+
+impl FromStr for VmAttachment {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let (vm_id, uds_path) = value
+            .split_once('=')
+            .ok_or_else(|| "expected format vm_id=uds_path".to_string())?;
+        let vm_id = vm_id.trim();
+        let uds_path = uds_path.trim();
+        if vm_id.is_empty() || uds_path.is_empty() {
+            return Err("vm_id and uds_path must be non-empty".to_string());
+        }
+        Ok(Self {
+            vm_id: vm_id.to_string(),
+            uds_path: uds_path.to_string(),
+        })
+    }
 }
 
 impl Default for EnclaveConfig {

@@ -5,6 +5,7 @@ members = [
     "enclave",
     "vm/base",
     "vm/workerd",
+    "vm/zenroom",
     "chainlist",
     "attestation",
 ]

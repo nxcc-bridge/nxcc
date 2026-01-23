@@ -51,6 +51,10 @@ export default defineConfig({
               label: "Identities & Policies",
               slug: "docs/guides/identities-policies",
             },
+            {
+              label: "Zenroom Interop",
+              slug: "docs/guides/zenroom-vm",
+            },
           ],
         },
         {
@@ -104,6 +108,10 @@ export default defineConfig({
                 {
                   label: "Identities & Policies",
                   slug: "docs/reference/developers/identities-and-policies",
+                },
+                {
+                  label: "Zenroom VM",
+                  slug: "docs/reference/developers/zenroom-vm",
                 },
               ],
             },

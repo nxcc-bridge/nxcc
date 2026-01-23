@@ -14,6 +14,7 @@ export interface DsseEnvelope {
 export interface WorkerBundlePointer {
   source: string;
   hash?: number[];
+  vm?: string;
 }
 
 export type ChainIdentifier = number | string | string[];
@@ -25,6 +26,7 @@ export interface SecretId {
 }
 
 export interface WorkerManifest {
+  vm?: string;
   bundle: WorkerBundlePointer;
   identities: [SecretId, string][];
   userdata: Record<string, any>;

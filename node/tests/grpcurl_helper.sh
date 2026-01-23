@@ -2,10 +2,10 @@
 
 # Common grpcurl helper functions for the integration test
 
-# Absolute path to the proto directory relative to this script's location
-# Use pwd for better sh compatibility than realpath
-SCRIPT_DIR=$(dirname "$0")
-PROTO_DIR=$(cd "$SCRIPT_DIR/../interface/proto" && pwd)
+# Absolute path to the proto directory relative to this script's location.
+# Use BASH_SOURCE so this works when sourced from another script.
+GRPCURL_HELPER_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+PROTO_DIR=$(cd "$GRPCURL_HELPER_DIR/../interface/proto" && pwd)
 DAEMON_PROTO="daemon.proto"
 ENCLAVE_PROTO="enclave.proto" # Needed for CheckSecrets on enclave
 

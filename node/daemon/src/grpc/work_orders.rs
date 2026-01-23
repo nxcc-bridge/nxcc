@@ -79,7 +79,7 @@ impl WorkOrder for WorkOrderGrpcService {
         };
 
         let enclave_worker_id = active_order.enclave_worker_id.clone();
-        let vm_id = self.orchestrator.config.enclave.default_vm_id.clone();
+        let vm_id = active_order.vm_id.clone();
 
         drop(active_orders);
 

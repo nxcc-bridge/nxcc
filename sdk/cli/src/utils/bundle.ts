@@ -5,6 +5,19 @@ import { WorkerBundlePayload, WorkerManifest } from "./types";
 import { createUnsignedDsse } from "./crypto";
 
 export const DSSE_WORKER_BUNDLE_PAYLOAD_TYPE = "application/vnd.nxcc.workerbundlepayload.v1+json";
+export const DEFAULT_BUNDLE_VM = "nxcc/workerd";
+
+export function resolveBundleVm(manifest: Partial<WorkerManifest>): string {
+  if (typeof manifest.vm === "string") {
+    return manifest.vm;
+  }
+
+  if (typeof manifest.bundle?.vm === "string") {
+    return manifest.bundle.vm;
+  }
+
+  return DEFAULT_BUNDLE_VM;
+}
 
 function resolveLocalPath(target: string, baseDir: string): string {
   if (target.startsWith("file://")) {
@@ -39,7 +52,7 @@ export async function embedBundleSource(
   const bundleContent = await fs.readFile(bundlePath);
 
   const workerBundlePayload: WorkerBundlePayload = {
-    vm: "nxcc/workerd",
+    vm: resolveBundleVm(manifest),
     executable: bundleContent.toString("base64"),
     metadata: {},
   };

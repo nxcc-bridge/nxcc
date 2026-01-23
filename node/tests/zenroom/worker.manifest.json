@@ -1,0 +1,45 @@
+{
+  "vm": "nxcc/zenroom",
+  "bundle": {
+    "source": "./hello_world.zen"
+  },
+  "identities": [],
+  "userdata": {
+    "zenroom": {
+      "mode": "zencode",
+      "conf": "debug=0",
+      "inputs": {
+        "data": {},
+        "keys": {},
+        "extra": {},
+        "context": {},
+        "merge_strategy": "merge"
+      },
+      "output": {
+        "format": "json",
+        "json_pointer": "/output/0"
+      },
+      "http": {
+        "response_mode": "envelope"
+      }
+    },
+    "postback": {
+      "enabled": true,
+      "required": true,
+      "targets": [
+        {
+          "kind": "http",
+          "url": "http://127.0.0.1:9911/ingest",
+          "method": "POST",
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body": {
+            "from": "stdout",
+            "json_pointer": "/output/0"
+          }
+        }
+      ]
+    }
+  }
+}

@@ -2,6 +2,7 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import { Hex } from "viem";
 import { WorkerBundlePayload, WorkerManifest } from "../utils/types";
+import { resolveBundleVm } from "../utils/bundle";
 import { createUnsignedDsse, signDsse } from "../utils/crypto";
 
 const DSSE_WORKER_BUNDLE_PAYLOAD_TYPE = "application/vnd.nxcc.workerbundlepayload.v1+json";
@@ -27,7 +28,7 @@ export async function bundleCommand(
     const code = await fs.readFile(codeAbsPath);
 
     const bundlePayload: WorkerBundlePayload = {
-      vm: "nxcc/workerd",
+      vm: resolveBundleVm(manifestTemplate),
       executable: code.toString("base64"),
       metadata: manifestTemplate.userdata?.name ? { name: manifestTemplate.userdata.name } : {},
     };

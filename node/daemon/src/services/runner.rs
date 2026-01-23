@@ -13,7 +13,11 @@ use nxcc_interface::{
 use tonic::transport::Channel;
 use tracing::{debug, info, warn};
 
-use crate::{config::EnclaveConfig, error::AppError, http_server::VmRegistry};
+use crate::{
+    config::{EnclaveConfig, VmAttachment},
+    error::AppError,
+    http_server::VmRegistry,
+};
 
 /// Service responsible for managing worker execution via the enclave's Runner service.
 #[derive(Clone)]
@@ -36,23 +40,21 @@ impl RunnerService {
         }
     }
 
-    /// Attaches the configured default VM to the enclave runner.
-    pub async fn attach_default_vm(&self) -> Result<bool, AppError> {
+    /// Attaches a VM to the enclave runner and registers it locally on success.
+    pub async fn attach_vm(&self, vm_id: String, uds_path: String) -> Result<bool, AppError> {
         info!(
-            "Attaching default VM ({}) to enclave runner at UDS path {}...",
-            self.enclave_config.default_vm_id, self.enclave_config.default_vm_uds_path
+            "Attaching VM ({}) to enclave runner at UDS path {}...",
+            vm_id, uds_path
         );
         let address = nxcc_interface::proto::enclave::VmAddress {
             address_type: Some(
                 nxcc_interface::proto::enclave::vm_address::AddressType::Uds(
-                    nxcc_interface::proto::enclave::UdsAddress {
-                        path: self.enclave_config.default_vm_uds_path.clone(),
-                    },
+                    nxcc_interface::proto::enclave::UdsAddress { path: uds_path },
                 ),
             ),
         };
         let req = nxcc_interface::proto::enclave::AttachVmRequest {
-            vm_id: self.enclave_config.default_vm_id.clone(),
+            vm_id: vm_id.clone(),
             address: Some(address),
         };
         let mut client = self.client.clone();
@@ -62,15 +64,65 @@ impl RunnerService {
             .map_err(|e| AppError::Service(format!("Failed to attach VM: {}", e)))?;
         let attached = resp.into_inner().attached;
         if attached {
-            info!("Successfully attached default VM.");
-            // Register the VM in our local registry
-            self.vm_registry
-                .add_vm(self.enclave_config.default_vm_id.clone())
-                .await;
+            info!("Successfully attached VM '{}'.", vm_id);
+            self.vm_registry.add_vm(vm_id).await;
         } else {
-            warn!("Failed to attach default VM (enclave reported not attached).");
+            warn!(
+                "Failed to attach VM '{}' (enclave reported not attached).",
+                vm_id
+            );
         }
         Ok(attached)
+    }
+
+    /// Attaches the configured default VM to the enclave runner.
+    pub async fn attach_default_vm(&self) -> Result<bool, AppError> {
+        self.attach_vm(
+            self.enclave_config.default_vm_id.clone(),
+            self.enclave_config.default_vm_uds_path.clone(),
+        )
+        .await
+    }
+
+    /// Attaches all configured VMs on startup, falling back to the default VM if none are set.
+    pub async fn attach_configured_vms(&self) -> Result<Vec<String>, AppError> {
+        let mut attachments = if self.enclave_config.vm_attachments.is_empty() {
+            vec![VmAttachment {
+                vm_id: self.enclave_config.default_vm_id.clone(),
+                uds_path: self.enclave_config.default_vm_uds_path.clone(),
+            }]
+        } else {
+            self.enclave_config.vm_attachments.clone()
+        };
+
+        if !attachments
+            .iter()
+            .any(|attachment| attachment.vm_id == self.enclave_config.default_vm_id)
+        {
+            warn!(
+                "Default VM '{}' not included in attachments; attaching it for policy execution.",
+                self.enclave_config.default_vm_id
+            );
+            attachments.push(VmAttachment {
+                vm_id: self.enclave_config.default_vm_id.clone(),
+                uds_path: self.enclave_config.default_vm_uds_path.clone(),
+            });
+        }
+
+        let mut attached = Vec::new();
+        for attachment in attachments {
+            if self
+                .attach_vm(attachment.vm_id.clone(), attachment.uds_path.clone())
+                .await?
+            {
+                attached.push(attachment.vm_id);
+            }
+        }
+        Ok(attached)
+    }
+
+    pub async fn is_vm_attached(&self, vm_id: &str) -> bool {
+        self.vm_registry.has_vm(vm_id).await
     }
 
     /// Runs a worker (typically a policy worker) in the pre-configured default VM.

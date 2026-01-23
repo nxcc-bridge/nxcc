@@ -11,6 +11,8 @@ DAEMON_UDS_PATH="/run/nxcc/daemon.sock"
 ENCLAVE_UDS_PATH="${NXCC_ENCLAVE_GRPC_UDS_PATH:-/run/nxcc/enclave.sock}"
 WORKERD_VM_UDS_PATH="${NXCC_WORKERD_SERVER_UDS_PATH:-/run/nxcc/workerd.sock}"
 WORKERD_BIN_PATH="${WORKERD_BIN_PATH_ABS:-/usr/local/bin/workerd}"
+ZENROOM_VM_UDS_PATH="${NXCC_ZENROOM_VM_UDS_PATH:-/run/nxcc/zenroom.sock}"
+ZENROOM_VM_ENABLED="${NXCC_ZENROOM_VM_ENABLED:-false}"
 DAEMON_EXTRA_ARGS="${NXCC_DAEMON_EXTRA_ARGS:-}"
 DUMP_CONFIG="${NXCC_DAEMON_DUMP_CONFIG:-false}"
 
@@ -31,6 +33,14 @@ if [ "$APP_VERBOSE" = "true" ]; then
 	export NXCC_DAEMON_VERBOSE="true"
 fi
 
+if [ -z "${NXCC_DAEMON_VM_ATTACHMENTS:-}" ]; then
+	attachments="nxcc/workerd=$WORKERD_VM_UDS_PATH"
+	if [ "$ZENROOM_VM_ENABLED" = "true" ]; then
+		attachments="$attachments,nxcc/zenroom=$ZENROOM_VM_UDS_PATH"
+	fi
+	export NXCC_DAEMON_VM_ATTACHMENTS="$attachments"
+fi
+
 # Enclave configuration (NXCC_ENCLAVE_ prefix)
 export NXCC_ENCLAVE_GRPC_UDS_PATH="$ENCLAVE_UDS_PATH"
 if [ "$APP_VERBOSE" = "true" ]; then
@@ -43,6 +53,11 @@ if [ "$APP_VERBOSE" = "true" ]; then
 	workerd_vm_env="$workerd_vm_env NXCC_VM_VERBOSE=true NXCC_WORKERD_VERBOSE=true"
 fi
 
+zenroom_vm_env="NXCC_VM_SERVER_MODE=uds NXCC_VM_SERVER_UDS_PATH=$ZENROOM_VM_UDS_PATH"
+if [ "$APP_VERBOSE" = "true" ]; then
+	zenroom_vm_env="$zenroom_vm_env NXCC_VM_VERBOSE=true"
+fi
+
 # If dump config mode, skip starting VM and enclave
 if [ "$DUMP_CONFIG" != "true" ]; then
 	# --- Start VM ---
@@ -52,6 +67,12 @@ if [ "$DUMP_CONFIG" != "true" ]; then
 	# shellcheck disable=SC2086
 	env $workerd_vm_env nxcc-workerd-vm &
 
+	if [ "$ZENROOM_VM_ENABLED" = "true" ]; then
+		echo "Starting nxcc-zenroom-vm (configured via environment variables)"
+		# shellcheck disable=SC2086
+		env $zenroom_vm_env nxcc-zenroom-vm &
+	fi
+
 	# --- Start Enclave ---
 	# Enclave configuration is now handled via environment variables
 	echo "Starting nxcc-platform-enclave (configured via environment variables)"
@@ -60,6 +81,10 @@ if [ "$DUMP_CONFIG" != "true" ]; then
 	# Wait for dependent services to be ready before starting the daemon.
 	echo "Waiting for VM and enclave sockets..."
 	while ! [ -S "$WORKERD_VM_UDS_PATH" ] || ! [ -S "$ENCLAVE_UDS_PATH" ]; do
+		if [ "$ZENROOM_VM_ENABLED" = "true" ] && ! [ -S "$ZENROOM_VM_UDS_PATH" ]; then
+			sleep 0.1
+			continue
+		fi
 		sleep 0.1
 	done
 	echo "VM and enclave are ready."

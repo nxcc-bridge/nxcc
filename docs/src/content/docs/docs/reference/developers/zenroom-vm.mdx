@@ -1,0 +1,174 @@
+---
+title: Zenroom VM Reference
+description: Configuration, manifests, and security controls for the nxcc/zenroom VM.
+---
+
+Zenroom is a deterministic crypto VM that runs Zencode (and optional Lua) scripts. nXCC exposes it as the `nxcc/zenroom` VM and runs it in a dedicated service process (`nxcc-zenroom-vm`) so the enclave can execute Zencode safely and (optionally) perform postbacks on your behalf.
+
+This page documents how the VM is run, attached, and configured.
+
+## Requirements and packaging
+
+- `zencode-exec` must be on your `PATH`, or set `NXCC_ZENROOM_VM_ZENCODE_EXEC_PATH=/path/to/zencode-exec`.
+- For Lua mode, `lua-exec` must be on your `PATH`, or set `NXCC_ZENROOM_VM_LUA_EXEC_PATH=/path/to/lua-exec`.
+
+Docker note: the image does not ship Zenroom binaries. The wrapper `node/vm/zenroom/zenroom-downloader.sh` downloads the Zenroom release at runtime (with SHA-256 verification) and caches it under `/var/cache/nxcc/zenroom` to avoid redistributing the AGPL binary. You can override the download source with `ZENROOM_*` environment variables.
+
+## Run the VM service
+
+`nxcc-zenroom-vm` accepts the base VM server flags plus Zenroom-specific configuration.
+
+Example (UDS socket):
+
+```bash
+NXCC_VM_SERVER_MODE=uds \
+NXCC_VM_SERVER_UDS_PATH=/tmp/nxcc/zenroom-vmm.sock \
+NXCC_ZENROOM_VM_ZENCODE_EXEC_PATH=/usr/local/bin/zencode-exec \
+NXCC_ZENROOM_VM_POSTBACK_ENABLED=true \
+NXCC_ZENROOM_VM_POSTBACK_ALLOWED_HOST_SUFFIXES=localhost,127.0.0.1 \
+NXCC_ZENROOM_VM_POSTBACK_ALLOWED_SCHEMES=http \
+NXCC_ZENROOM_VM_POSTBACK_ALLOWED_PORTS=9911 \
+NXCC_ZENROOM_VM_POSTBACK_BLOCK_PRIVATE_IPS=false \
+nxcc-zenroom-vm --server-mode uds --server-uds-path /tmp/nxcc/zenroom-vmm.sock --verbose
+```
+
+## Attach the VM to the daemon
+
+The daemon attaches VMs via UDS sockets. The default VM is still used for policy execution unless you explicitly move policies.
+
+Environment-based attachment:
+
+```bash
+NXCC_DAEMON_VM_ATTACHMENTS="nxcc/workerd=/tmp/nxcc/workerd-vmm.sock,nxcc/zenroom=/tmp/nxcc/zenroom-vmm.sock"
+```
+
+Runtime attachment via debug gRPC:
+
+```bash
+grpcurl \
+  -proto node/interface/proto/daemon.proto \
+  -import-path node/interface/proto \
+  -plaintext -unix \
+  -d '{"vm_id":"nxcc/zenroom","uds_path":"/tmp/nxcc/zenroom-vmm.sock"}' \
+  unix:///tmp/nxcc/daemon.sock \
+  daemon.Debug/AttachVm
+```
+
+Tip: `node/tests/grpcurl_helper.sh` includes a `grpcurl_attach_vm` helper.
+
+## Manifest configuration
+
+A Zenroom worker is just a worker bundle with `vm: "nxcc/zenroom"` and a Zencode (or Lua) script as the bundle source.
+
+```json
+{
+  "vm": "nxcc/zenroom",
+  "bundle": { "source": "./my_script.zen" },
+  "identities": [],
+  "userdata": {
+    "zenroom": { "...": "..." },
+    "postback": { "...": "..." }
+  }
+}
+```
+
+The CLI sets the bundle VM based on `manifest.vm` or `manifest.bundle.vm` when it builds the work order.
+
+## `userdata.zenroom`
+
+Configuration for Zenroom execution:
+
+- `mode`: `zencode` (default) or `lua`.
+- `conf`: Zenroom config string. `debug=0` is enforced unless `NXCC_ZENROOM_VM_ALLOW_DEBUG_CONF=true`.
+- `inputs`:
+  - `data`, `keys`, `extra`, `context`: JSON values serialized and passed to Zenroom.
+  - `merge_strategy`: `merge` (default) or `wrap`.
+    - `merge`: if `data` is an object and does not contain `nxcc`, the VM merges in `nxcc`.
+    - `wrap`: always produces `{ "input": <data>, "nxcc": <metadata> }`.
+- `output`:
+  - `format`: `json` (default) or `raw`.
+  - `json_pointer`: optional JSON Pointer (for `selected_output` and postback selection).
+- `http`:
+  - `response_mode`: `envelope` (default), `stdout`, or `selected_output`.
+
+`nxcc` metadata injected into `inputs.data` includes:
+
+- `nxcc.worker` (worker id, instance id, vm id)
+- `nxcc.invocation` (type, handler, received time)
+- `nxcc.event` (kind and payload) for event-driven invocations
+- `nxcc.http` (method, url, headers, body_base64) for HTTP invocations
+
+## `userdata.postback`
+
+Postbacks are the only network egress path for Zenroom scripts.
+
+- `enabled`: enable or disable postback execution for this worker.
+- `required`: if true, any postback failure fails the invocation.
+- `retries`: `{ max, backoff_ms }` (defaults to `{0, 250}`).
+- `targets`: list of postback targets:
+  - `kind: "http"` with `url`, optional `method`, `headers`, and `body`.
+  - `kind: "evm_jsonrpc"` with `url`, `method`, and `params` (each param is a body selector).
+- `body` selector:
+  - `from: "stdout"` (default) or `from: "selected_output"`.
+  - `json_pointer`: optional pointer into parsed stdout JSON.
+
+Postbacks run only if:
+1. `userdata.postback.enabled` is true,
+2. `NXCC_ZENROOM_VM_POSTBACK_ENABLED=true`, and
+3. the URL passes the allowlist checks.
+
+## Responses and envelopes
+
+When `http.response_mode` is `envelope`, the VM returns a JSON envelope containing `stdout`, `stderr`, parsed JSON output, postback results, and timing info. `stdout` and `stderr` are truncated when they exceed configured limits.
+
+When `response_mode` is `selected_output`, the response is the JSON value at `output.json_pointer` (or the full stdout JSON if no pointer is set).
+
+## Secret injection
+
+Secrets are injected into `inputs.keys` by replacing objects of the form:
+
+```json
+{
+  "$secret": "SECRET_NAME",
+  "encoding": "base64",
+  "kdf": { "info": "context", "len": 32, "salt": "" }
+}
+```
+
+- The placeholder can appear anywhere inside `inputs.keys`.
+- `encoding` can be `base64` (default) or `hex`.
+- If `NXCC_ZENROOM_VM_REQUIRE_KDF=true`, the VM enforces HKDF and rejects raw secrets.
+
+Do not place raw secrets in `inputs.data` or `inputs.extra`.
+
+## Limits and operator controls
+
+Operator-side limits are enforced by the Zenroom VM:
+
+- `NXCC_ZENROOM_VM_EXEC_TIMEOUT_MS` (default `10000`)
+- `NXCC_ZENROOM_VM_POSTBACK_TIMEOUT_MS` (default `5000`)
+- `NXCC_ZENROOM_VM_MAX_STDOUT_BYTES` (default `262144`)
+- `NXCC_ZENROOM_VM_MAX_STDERR_BYTES` (default `262144`)
+- `NXCC_ZENROOM_VM_MAX_SCRIPT_BYTES` (default `524288`)
+- `NXCC_ZENROOM_VM_MAX_TOTAL_SECRETS_BYTES` (default `65536`)
+- `NXCC_ZENROOM_VM_MAX_DERIVED_KEY_LEN` (default `64`)
+- `NXCC_ZENROOM_VM_MAX_CONF_BYTES` (default `4096`)
+- `NXCC_ZENROOM_VM_ALLOW_DEBUG_CONF` (default `false`)
+- `NXCC_ZENROOM_VM_REQUIRE_KDF` (default `false`)
+
+Postback allowlists are controlled by:
+
+- `NXCC_ZENROOM_VM_POSTBACK_ALLOWED_HOST_SUFFIXES` (required; empty denies all)
+- `NXCC_ZENROOM_VM_POSTBACK_ALLOWED_SCHEMES` (default `https`)
+- `NXCC_ZENROOM_VM_POSTBACK_ALLOWED_PORTS` (default `443`)
+- `NXCC_ZENROOM_VM_POSTBACK_BLOCK_PRIVATE_IPS` (default `true`)
+
+## Local example
+
+A runnable end-to-end example lives in `node/tests/zenroom/`:
+
+```bash
+./node/tests/zenroom/zenroom_vm_e2e.sh
+```
+
+It builds the node, starts a local postback server, launches both the workerd and Zenroom VMs, then submits a work order that runs `hello_world.zen`.

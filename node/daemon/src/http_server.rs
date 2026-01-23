@@ -104,6 +104,12 @@ impl VmRegistry {
         let vms = self.attached_vms.read().await;
         vms.iter().cloned().collect()
     }
+
+    /// Check if a VM ID is attached.
+    pub async fn has_vm(&self, vm_id: &str) -> bool {
+        let vms = self.attached_vms.read().await;
+        vms.contains(vm_id)
+    }
 }
 
 /// Shared application state available to all handlers.

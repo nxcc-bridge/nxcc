@@ -1,0 +1,298 @@
+---
+title: Zenroom Interop Tutorial
+description: Verify an issuer credential and produce a cross-chain consent ticket with the Zenroom VM.
+---
+
+Zenroom is a deterministic crypto VM that runs Zencode scripts. nXCC integrates Zenroom as the `nxcc/zenroom` VM so you can execute Zencode inside the enclave and safely post results out to other systems.
+
+This tutorial picks up after the [Blockchain Events](/docs/guides/blockchain-events/) and [Identities & Policies](/docs/guides/identities-policies/) guides. We will not re-cover worker scaffolding or policy basics. Instead, you'll build a focused Zenroom workflow:
+
+- verify an issuer-signed credential
+- derive a bridge signing key from an identity-governed secret
+- trigger the worker from an on-chain event
+- post a signed consent ticket to a relay (or Chain B)
+
+For full configuration details, keep the [Zenroom VM Reference](/docs/reference/developers/zenroom-vm/) handy.
+
+## Scenario: cross-chain consent ticket
+
+An issuer (think: a credential authority in an EUDI/eIDAS-inspired ecosystem) signs a lightweight credential for a wallet holder. When a contract on Chain A emits an event (we will reuse the Transfer event from the blockchain guide), the Zenroom worker:
+
+1. verifies the issuer signature on the credential
+2. signs a consent ticket with a bridge key derived inside the enclave
+3. posts the signed ticket to a relay that can submit it to Chain B
+
+We keep the cryptography simple (EdDSA signatures) so the focus stays on the nXCC integration. This is **not** an EUDI-compliant credential flow; it is a simplified pattern that maps to similar concepts. In a production setup, you would swap in your real credential format (SD-JWT, BBS+, etc.) and use a dedicated event.
+
+## Prerequisites
+
+- Completed [Blockchain Events](/docs/guides/blockchain-events/) and [Identities & Policies](/docs/guides/identities-policies/).
+- Local nXCC node running.
+- An identity contract address and token id from the previous guide.
+- Zenroom VM running and attached to the daemon (see the [Zenroom VM Reference](/docs/reference/developers/zenroom-vm/)).
+
+## 1. Write the Zencode worker
+
+Create `workers/consent_ticket.zen`:
+
+```gherkin
+Rule check version 2.0.0
+Scenario 'consent-ticket': Verify credential and sign a ticket
+Given that I am known as 'Bridge'
+and I have a 'base64' named 'bridge_secret'
+and I have a 'base64' named 'credential'
+and I have a 'eddsa signature'
+and I have a 'base64' named 'ticket'
+and I have a 'eddsa public key' from 'Issuer'
+When I create the eddsa key with secret key 'bridge_secret'
+and I verify the 'credential' has a eddsa signature in 'eddsa signature' by 'Issuer'
+and I create the eddsa signature of 'ticket'
+and I rename the 'eddsa signature' to 'ticket_signature'
+Then print the 'ticket'
+and print the 'ticket_signature'
+```
+
+Notes:
+
+- The input key for `eddsa signature` is `eddsa_signature` in JSON.
+- `bridge_secret` will be injected from an identity secret (next section).
+- `ticket` and `credential` are base64 strings so the script stays deterministic and easy to sign.
+
+## 2. Prepare a credential and consent ticket
+
+Create a small credential payload and a ticket payload, then base64-encode both.
+
+```bash
+mkdir -p zenroom
+
+cat > zenroom/credential.json <<'JSON'
+{
+  "issuer": "Credential Authority",
+  "subject": "did:example:alice",
+  "claims": {
+    "age_over_18": true,
+    "residency": "EU"
+  },
+  "issued_at": "2026-01-23",
+  "expires_at": "2027-01-23"
+}
+JSON
+
+cat > zenroom/ticket.json <<'JSON'
+{
+  "request_id": "demo-consent-001",
+  "subject": "did:example:alice",
+  "scope": "wallet:age_over_18",
+  "chain": "eip155:31337",
+  "requester": "0xYourContractAddress",
+  "tx_hash": "0xYourEventTxHash"
+}
+JSON
+
+python3 - <<'PY' > zenroom/credential.b64.json
+import base64, json
+data = open("zenroom/credential.json", "rb").read()
+print(json.dumps({"credential": base64.b64encode(data).decode()}))
+PY
+
+python3 - <<'PY' > zenroom/ticket.b64.json
+import base64, json
+data = open("zenroom/ticket.json", "rb").read()
+print(json.dumps({"ticket": base64.b64encode(data).decode()}))
+PY
+```
+
+In a production workflow, the `ticket` values would be populated from the event payload or a policy decision. For the tutorial, placeholders are fine.
+
+## 3. Generate issuer keys and a credential signature
+
+Use Zenroom locally to create an issuer keypair and sign the credential. The `zenroom` binary ships alongside `zencode-exec` in Zenroom releases.
+
+Create the helper scripts:
+
+```gherkin
+# zenroom/issuer_keygen.zen
+Rule check version 2.0.0
+Scenario 'eddsa': Issuer keygen
+Given I am known as 'Issuer'
+When I create the eddsa key
+Then print my 'keyring'
+```
+
+```gherkin
+# zenroom/issuer_pubkey.zen
+Rule check version 2.0.0
+Scenario 'eddsa': Issuer public key
+Given I am known as 'Issuer'
+Given I have my 'keyring'
+When I create the eddsa public key
+Then print my 'eddsa public key'
+```
+
+```gherkin
+# zenroom/issuer_sign.zen
+Rule check version 2.0.0
+Scenario 'eddsa': Sign credential
+Given I am known as 'Issuer'
+and I have my 'keyring'
+and I have a 'base64' named 'credential'
+When I create the eddsa signature of 'credential'
+Then print the 'eddsa signature'
+```
+
+Run them:
+
+```bash
+zenroom -z zenroom/issuer_keygen.zen > zenroom/issuer_keyring.json
+zenroom -z zenroom/issuer_pubkey.zen -k zenroom/issuer_keyring.json > zenroom/issuer_pubkey.json
+zenroom -z zenroom/issuer_sign.zen \
+  -a zenroom/credential.b64.json \
+  -k zenroom/issuer_keyring.json \
+  > zenroom/credential_signature.json
+```
+
+Keep these three values handy:
+
+- `zenroom/issuer_pubkey.json` -> `eddsa_public_key`
+- `zenroom/credential_signature.json` -> `eddsa_signature`
+- `zenroom/credential.b64.json` -> `credential`
+
+## 4. Create the Zenroom worker manifest
+
+Create `workers/manifest.zenroom.json` (replace the placeholders):
+
+```json
+{
+  "vm": "nxcc/zenroom",
+  "bundle": {
+    "source": "./consent_ticket.zen"
+  },
+  "identities": [
+    [
+      {
+        "chain": "http://host.docker.internal:8545",
+        "identity_address": "IDENTITY_CONTRACT",
+        "identity_id": "IDENTITY_ID"
+      },
+      "BRIDGE_SIGNING_SEED"
+    ]
+  ],
+  "userdata": {
+    "zenroom": {
+      "mode": "zencode",
+      "conf": "debug=0",
+      "inputs": {
+        "data": {
+          "credential": "CREDENTIAL_BASE64",
+          "eddsa_signature": "ISSUER_SIGNATURE",
+          "ticket": "TICKET_BASE64"
+        },
+        "keys": {
+          "Issuer": {
+            "eddsa_public_key": "ISSUER_PUBLIC_KEY"
+          },
+          "bridge_secret": {
+            "$secret": "BRIDGE_SIGNING_SEED",
+            "encoding": "base64",
+            "kdf": {
+              "info": "nxcc-eudi-bridge",
+              "len": 32
+            }
+          }
+        }
+      }
+    },
+    "postback": {
+      "enabled": true,
+      "required": true,
+      "targets": [
+        {
+          "kind": "http",
+          "url": "http://127.0.0.1:9911/ingest",
+          "method": "POST",
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body": {
+            "from": "stdout"
+          }
+        }
+      ]
+    }
+  },
+  "events": [
+    {
+      "handler": "handleTransfer",
+      "kind": "web3_event",
+      "chain": 31337,
+      "address": ["0x5FbDB2315678afecb367f032d93F642f64180aa3"],
+      "topics": [
+        ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"]
+      ]
+    }
+  ]
+}
+```
+
+What to substitute:
+
+- `IDENTITY_CONTRACT` and `IDENTITY_ID` from the identities guide.
+- `CREDENTIAL_BASE64` from `zenroom/credential.b64.json`.
+- `ISSUER_SIGNATURE` from `zenroom/credential_signature.json`.
+- `ISSUER_PUBLIC_KEY` from `zenroom/issuer_pubkey.json`.
+- `TICKET_BASE64` from `zenroom/ticket.b64.json`.
+
+The manifest requests a new identity-governed secret named `BRIDGE_SIGNING_SEED`. With the allow-all policy from the previous guide, the request will be approved and the VM will derive a 32-byte EdDSA seed inside the enclave.
+
+## 5. Run the workflow
+
+1. Start a local postback receiver (for the demo):
+
+```bash
+python3 node/tests/zenroom/postback_server.py
+```
+
+2. Make sure the Zenroom VM is running and postbacks are allowlisted for `localhost` (see the [Zenroom VM Reference](/docs/reference/developers/zenroom-vm/)).
+
+3. Deploy the worker:
+
+```bash
+export WORKER_ID=$(nxcc worker deploy --bundle workers/manifest.zenroom.json | jq -r '.workOrderId')
+echo "Worker ID: $WORKER_ID"
+```
+
+If you do not have `jq`, run the deploy command without the pipe and copy the `workOrderId` value from the output.
+
+4. Trigger a transfer on your local chain (reuse the contract from the blockchain events guide):
+
+```bash
+cast send 0x5FbDB2315678afecb367f032d93F642f64180aa3 \
+  "transfer(address,uint256)" \
+  0x70997970C51812dc3A010C7d01b50e0d17dc79C8 \
+  1000000000000000000 \
+  --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+```
+
+5. Inspect the postback output (or check the worker logs):
+
+```bash
+nxcc worker logs "$WORKER_ID" --tail 50
+```
+
+You should see the postback server print a JSON payload containing `ticket` and `ticket_signature`. That payload is what you would forward to Chain B or a cross-chain relay.
+
+## Recap and next steps
+
+You now have a Zenroom worker that:
+
+- verifies an issuer-signed credential,
+- derives a signing key from an identity-managed secret,
+- produces a consent ticket when a chain event fires, and
+- ships the signed result out through a controlled postback.
+
+Next steps:
+
+- Tighten the policy to gate when `BRIDGE_SIGNING_SEED` is exposed.
+- Replace the demo `ticket` with data derived from `nxcc.event` metadata.
+- Use the `evm_jsonrpc` postback target to call a Chain B contract directly.
+- Explore the full schema in the [Zenroom VM Reference](/docs/reference/developers/zenroom-vm/).

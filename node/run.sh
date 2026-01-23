@@ -18,7 +18,7 @@ DAEMON_PROTO="daemon.proto"
 build_binaries() {
 	echo "Building nxcc binaries feature..."
 	cargo build --manifest-path "$SCRIPT_DIR/Cargo.toml" --target-dir "$SCRIPT_DIR/target" \
-		-p nxcc-daemon -p nxcc-platform-enclave -p nxcc-workerd-vm >/dev/null
+		-p nxcc-daemon -p nxcc-platform-enclave -p nxcc-workerd-vm -p nxcc-zenroom-vm >/dev/null
 }
 
 grpcurl_attach_vm() {

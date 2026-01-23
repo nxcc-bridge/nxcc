@@ -30,6 +30,7 @@ pub struct ActiveWorkOrder {
     payload: WorkOrderPayload,
     pub enclave_worker_id: String, // Should be set once worker is running
     dsse_hash_b64url: String,      // The unique ID for this work order instance
+    pub vm_id: String,             // VM selected for this work order
                                    // status: WorkOrderStatus, // Future enhancement
 }
 
@@ -165,11 +166,16 @@ impl WorkOrderOrchestrator {
             AppError::Validation(format!("Failed to parse worker bundle payload: {}", e))
         })?;
 
-        // 6. Check VM ID
-        if actual_bundle_payload.vm != self.config.enclave.default_vm_id {
+        // 6. Select VM ID from bundle payload
+        let vm_id = actual_bundle_payload.vm.clone();
+        info!(
+            "Work order (hash: {}) requests VM '{}'",
+            work_order_hash_b64url, vm_id
+        );
+        if !self.runner_service.is_vm_attached(&vm_id).await {
             let msg = format!(
-                "Work order (hash: {}) requests VM '{}', but only default VM '{}' is supported.",
-                work_order_hash_b64url, actual_bundle_payload.vm, self.config.enclave.default_vm_id
+                "Work order (hash: {}) requests VM '{}', but it is not attached.",
+                work_order_hash_b64url, vm_id
             );
             error!("{}", msg);
             return Err(AppError::Validation(msg));
@@ -352,7 +358,7 @@ impl WorkOrderOrchestrator {
             .enclave_client
             .run_worker(
                 work_order_hash_b64url.clone(),
-                self.config.enclave.default_vm_id.clone(),
+                vm_id.clone(),
                 manifest_bytes,
                 bundle_bytes,
             )
@@ -373,6 +379,7 @@ impl WorkOrderOrchestrator {
             payload: wo_payload.clone(), // Keep original payload for reference
             enclave_worker_id: enclave_worker_id.clone(),
             dsse_hash_b64url: work_order_hash_b64url.clone(),
+            vm_id,
         };
         self.active_work_orders // Keyed by the unique hash
             .write()
