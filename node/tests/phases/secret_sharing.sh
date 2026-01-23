@@ -7,6 +7,11 @@ phase_secret_sharing() {
 	echo ""
 	echo "🔐 === PHASE 2: Attestation-Based Secret Sharing and Access Control ==="
 
+	P2P_TIMEOUT_SECS="${NXCC_DAEMON_P2P_RESPONSE_TIMEOUT_SECS:-15}"
+	ALICE_WAIT_SECS=$((P2P_TIMEOUT_SECS + 5))
+	BOB_WAIT_SECS=$((P2P_TIMEOUT_SECS + 10))
+	CHARLIE_WAIT_SECS=$((P2P_TIMEOUT_SECS + 5))
+
 	# --- Prepare Test Worker and Work Order ---
 	echo "--- Preparing Attestation-Aware Work Order for Secret Sharing Test ---"
 
@@ -88,8 +93,8 @@ phase_secret_sharing() {
 	echo "  • Waiting for Alice to derive secret..."
 	ALICE_DERIVED_BITS=""
 	# shellcheck disable=SC2034,SC2154  # i is unused, alice_* vars set by setup_node
-	for i in $( # Poll for up to 10 seconds
-		seq 1 10
+	for i in $( # Poll for up to $ALICE_WAIT_SECS seconds
+		seq 1 "$ALICE_WAIT_SECS"
 	); do
 		# Check both VM log and Daemon log for the derived bits output
 		if [ -f "$alice_VM_LOG" ]; then
@@ -124,8 +129,8 @@ phase_secret_sharing() {
 	echo "  • Waiting for Bob to derive secret..."
 	BOB_DERIVED_BITS=""
 	# shellcheck disable=SC2034,SC2154  # i is unused, bob_* vars set by setup_node
-	for i in $( # Poll for up to 20 seconds (longer for P2P)
-		seq 1 20
+	for i in $( # Poll for up to $BOB_WAIT_SECS seconds (longer for P2P)
+		seq 1 "$BOB_WAIT_SECS"
 	); do
 		# Check both VM log and Daemon log for the derived bits output
 		if [ -f "$bob_VM_LOG" ]; then
@@ -177,8 +182,8 @@ phase_secret_sharing() {
 	CHARLIE_BLOCKED=false
 
 	# shellcheck disable=SC2034  # i is used for timing loop iterations
-	for i in $( # Poll for up to 15 seconds
-		seq 1 15
+	for i in $( # Poll for up to $CHARLIE_WAIT_SECS seconds
+		seq 1 "$CHARLIE_WAIT_SECS"
 	); do
 		# Check for secret derivation (should not happen) in both VM and Daemon logs
 		# shellcheck disable=SC2154  # charlie_VM_LOG is set by setup_node function
@@ -194,7 +199,7 @@ phase_secret_sharing() {
 
 		# Check daemon logs for policy blocking
 		# shellcheck disable=SC2154  # charlie_DAEMON_LOG is set by setup_node
-		if [ -f "$charlie_DAEMON_LOG" ] && (grep -q "DENIED" "$chlie_DAEMON_LOG" || grep -q "not in trusted whitelist" "$charlie_DAEMON_LOG"); then
+		if [ -f "$charlie_DAEMON_LOG" ] && (grep -q "DENIED" "$charlie_DAEMON_LOG" || grep -q "not in trusted whitelist" "$charlie_DAEMON_LOG"); then
 			CHARLIE_BLOCKED=true
 			echo "  🔍 Found policy denial in Charlie's logs"
 			break

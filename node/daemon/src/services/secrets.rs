@@ -28,11 +28,6 @@ use crate::{
     policy::PolicyManager, services::runner::RunnerService,
 };
 
-// Timeout for waiting for P2P responses
-#[cfg(not(debug_assertions))]
-const P2P_RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
-#[cfg(debug_assertions)]
-const P2P_RESPONSE_TIMEOUT: Duration = Duration::from_secs(3);
 // Threshold for number of valid responses needed per secret (currently request-level)
 const RESPONSE_THRESHOLD: usize = 1;
 
@@ -210,8 +205,10 @@ impl SecretsService {
 
         // Spawn timeout task
         let self_clone = self.clone();
+        let p2p_response_timeout =
+            Duration::from_secs(self.config.network.p2p_response_timeout_secs);
         tokio::spawn(async move {
-            tokio::time::sleep(P2P_RESPONSE_TIMEOUT).await;
+            tokio::time::sleep(p2p_response_timeout).await;
             info!("Timeout reached for request {}", request_id);
             let mut lock = self_clone.pending.lock().await; // Acquire lock here
             if let Some(p) = lock.get_mut(&request_id) {

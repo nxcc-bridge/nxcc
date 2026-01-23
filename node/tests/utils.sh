@@ -337,7 +337,8 @@ setup_node() {
 
 	# Use eval to properly handle quoted arguments
 	# shellcheck disable=SC2086  # We want word splitting here for the eval
-	eval "RUST_LOG=info,nxcc_daemon=debug,nxcc_lib=debug '$DAEMON_BIN' $DAEMON_ARGS" 2>&1 | tee "$NODE_DAEMON_LOG" &
+	RUST_LOG="${NXCC_TEST_RUST_LOG:-info,nxcc_daemon=debug,nxcc_lib=debug,libp2p_mdns=off}"
+	eval "RUST_LOG=$RUST_LOG '$DAEMON_BIN' $DAEMON_ARGS" 2>&1 | tee "$NODE_DAEMON_LOG" &
 	NODE_DAEMON_PID=$!
 	sleep 1
 
@@ -371,15 +372,13 @@ deploy_http_echo_worker() {
 	local suffix="$2"
 
 	echo "Preparing HTTP echo work order with suffix '$suffix'..." >&2
-	local HTTP_ECHO_WORKER_JS_CONTENT
-	HTTP_ECHO_WORKER_JS_CONTENT=$(cat "$HTTP_ECHO_WORKER_JS_BUNDLE_PATH")
-	local HTTP_ECHO_WORKER_JS_B64
-	HTTP_ECHO_WORKER_JS_B64=$(printf "%s" "$HTTP_ECHO_WORKER_JS_CONTENT" | base64 | tr -d '\n')
+	local HTTP_ECHO_WORKER_JS_B64_FILE="$TEST_DIR/http_echo_worker_js_b64_${suffix}.txt"
+	base64 <"$HTTP_ECHO_WORKER_JS_BUNDLE_PATH" | tr -d '\n' >"$HTTP_ECHO_WORKER_JS_B64_FILE"
 
 	local HTTP_ECHO_WORKER_BUNDLE_PAYLOAD_FILE="$TEST_DIR/http_echo_worker_bundle_payload_${suffix}.json"
 	jq -n \
 		--arg vm "nxcc/workerd" \
-		--arg executable_b64 "$HTTP_ECHO_WORKER_JS_B64" \
+		--rawfile executable_b64 "$HTTP_ECHO_WORKER_JS_B64_FILE" \
 		'{vm: $vm, executable: $executable_b64, metadata: {}}' >"$HTTP_ECHO_WORKER_BUNDLE_PAYLOAD_FILE"
 
 	local HTTP_ECHO_WORKER_BUNDLE_PAYLOAD_B64_FILE="$TEST_DIR/http_echo_worker_bundle_payload_b64_${suffix}.txt"

@@ -180,13 +180,13 @@ phase_advanced_features() {
 
 	# 7a. Prepare Work Order for scheduled events worker
 	echo "Preparing scheduled events work order..."
-	SCHEDULED_WORKER_JS_CONTENT=$(cat "$HTTP_ECHO_WORKER_JS_BUNDLE_PATH") # Reuse the echo worker for simplicity
-	SCHEDULED_WORKER_JS_B64=$(printf "%s" "$SCHEDULED_WORKER_JS_CONTENT" | base64 | tr -d '\n')
+	SCHEDULED_WORKER_JS_B64_FILE="$TEST_DIR/scheduled_worker_js_b64.txt"
+	base64 <"$HTTP_ECHO_WORKER_JS_BUNDLE_PATH" | tr -d '\n' >"$SCHEDULED_WORKER_JS_B64_FILE"
 
 	SCHEDULED_WORKER_BUNDLE_PAYLOAD_FILE="$TEST_DIR/scheduled_worker_bundle_payload.json"
 	jq -n \
 		--arg vm "nxcc/workerd" \
-		--arg executable_b64 "$SCHEDULED_WORKER_JS_B64" \
+		--rawfile executable_b64 "$SCHEDULED_WORKER_JS_B64_FILE" \
 		'{vm: $vm, executable: $executable_b64, metadata: {}}' >"$SCHEDULED_WORKER_BUNDLE_PAYLOAD_FILE"
 
 	SCHEDULED_WORKER_BUNDLE_PAYLOAD_B64_FILE="$TEST_DIR/scheduled_worker_bundle_payload_b64.txt"

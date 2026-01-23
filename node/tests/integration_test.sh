@@ -49,6 +49,8 @@ PHASE_DEPS_SETUP="nodes_3" # The setup phase itself requires 3 nodes
 
 # --- Global Test Parameters ---
 TEST_DIR=""
+P2P_RESPONSE_TIMEOUT_SECS="${NXCC_DAEMON_P2P_RESPONSE_TIMEOUT_SECS:-15}"
+export NXCC_DAEMON_P2P_RESPONSE_TIMEOUT_SECS="$P2P_RESPONSE_TIMEOUT_SECS"
 JS_WORKER_DIR="$SCRIPT_DIR/js_workers"
 # shellcheck disable=SC2034  # Used by phase files (phases/setup.sh)
 CONTRACTS_DIR="$SCRIPT_DIR/contracts"

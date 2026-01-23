@@ -48,6 +48,10 @@ pub struct Config {
     pub attestation: AttestationConfig,
 }
 
+fn default_p2p_response_timeout_secs() -> u64 {
+    if cfg!(debug_assertions) { 15 } else { 30 }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, clap::Args)]
 pub struct NetworkConfig {
     /// Comma-separated list of listen addresses.
@@ -69,6 +73,15 @@ pub struct NetworkConfig {
         help = "Bootstrap peers for the network (comma-separated)"
     )]
     pub bootstrap_peers: Vec<String>,
+
+    /// Timeout in seconds to wait for P2P secrets responses before generating locally.
+    #[clap(
+        long,
+        default_value_t = default_p2p_response_timeout_secs(),
+        env = "NXCC_DAEMON_P2P_RESPONSE_TIMEOUT_SECS",
+        help = "Seconds to wait for P2P secrets responses before generating locally"
+    )]
+    pub p2p_response_timeout_secs: u64,
 }
 
 impl Default for NetworkConfig {

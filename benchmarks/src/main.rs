@@ -8,7 +8,7 @@ use futures::future;
 use indicatif::{ProgressBar, ProgressStyle};
 use nxcc_interface::{
     proto::daemon::{work_order_client::WorkOrderClient, CheckWorkerStatusRequest},
-    types::{WorkerEvent, WorkerEventKind},
+    types::worker::events::{WorkerEvent, WorkerEventKind},
 };
 use tonic::transport::Channel;
 

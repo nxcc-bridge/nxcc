@@ -44,6 +44,8 @@ WORKDIR /app
 
 # Copy toolchain file first to ensure it's used.
 COPY rust-toolchain.toml ./rust-toolchain.toml
+RUN RUST_TOOLCHAIN=$(awk -F'"' '/channel/ {print $2; exit}' rust-toolchain.toml) && \
+    rustup toolchain install --profile minimal "$RUST_TOOLCHAIN"
 
 # Copy Cargo.toml and Cargo.lock for workspace and members to cache dependency resolution/downloads.
 COPY Cargo.toml Cargo.lock ./

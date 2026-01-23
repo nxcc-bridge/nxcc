@@ -60,7 +60,7 @@ impl MockTdxProvider {
             .expect("Failed to load real TDX quote from test_data/real_tdx_quote.bin");
 
         let mut mock_quote = base_quote;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // Randomize QE Vendor ID in quote header (bytes 28-44, 16 bytes)
         rng.fill(&mut mock_quote[28..44]);

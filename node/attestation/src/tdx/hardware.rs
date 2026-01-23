@@ -331,7 +331,7 @@ impl TdxSimulator {
         use rand::Rng;
 
         let mut q = Vec::new();
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // Quote header (48 bytes)
         q.extend_from_slice(&self.cfg.quote_version.to_le_bytes()); // version (2 bytes)
@@ -444,7 +444,7 @@ impl TdxSimulator {
         q.extend_from_slice(&body);
 
         // Randomize signature data length + signature bytes
-        let mut sig_data = vec![0u8; 64 + rng.gen_range(0..128)]; // Random signature size
+        let mut sig_data = vec![0u8; 64 + rng.random_range(0..128)]; // Random signature size
         rng.fill(&mut sig_data[..]);
         q.extend_from_slice(&(sig_data.len() as u32).to_le_bytes());
         q.extend_from_slice(&sig_data);

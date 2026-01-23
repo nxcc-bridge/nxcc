@@ -9,13 +9,13 @@ phase_cross_chain_events() {
 	# Setup (nodes, anvil, contracts) is handled by the main script's dependency system.
 
 	# Prepare Work Order for the event handling worker (using files to avoid argument list too long)
-	EVENT_HANDLER_WORKER_JS_CONTENT=$(cat "$EVENT_HANDLER_WORKER_JS_BUNDLE_PATH")
-	EVENT_HANDLER_WORKER_JS_B64=$(printf "%s" "$EVENT_HANDLER_WORKER_JS_CONTENT" | base64 | tr -d '\n')
+	EVENT_HANDLER_WORKER_JS_B64_FILE="$TEST_DIR/event_worker_js_b64.txt"
+	base64 <"$EVENT_HANDLER_WORKER_JS_BUNDLE_PATH" | tr -d '\n' >"$EVENT_HANDLER_WORKER_JS_B64_FILE"
 
 	EVENT_WORKER_BUNDLE_PAYLOAD_FILE="$TEST_DIR/event_worker_bundle_payload.json"
 	jq -n \
 		--arg vm "nxcc/workerd" \
-		--arg executable_b64 "$EVENT_HANDLER_WORKER_JS_B64" \
+		--rawfile executable_b64 "$EVENT_HANDLER_WORKER_JS_B64_FILE" \
 		'{vm: $vm, executable: $executable_b64, metadata: {}}' >"$EVENT_WORKER_BUNDLE_PAYLOAD_FILE"
 
 	EVENT_WORKER_BUNDLE_PAYLOAD_B64_FILE="$TEST_DIR/event_worker_bundle_payload_b64.txt"
@@ -38,14 +38,14 @@ phase_cross_chain_events() {
 		--arg rpc_url_2 "$ANVIL_RPC_URL_2" \
 		--arg contract_addr_2 "$CONTRACT_ADDRESS_2" \
 		--arg pk "$WORKER_SENDER_PK" \
-		--arg abi_string "$TEST_EVENTS_ABI_STRING" \
+		--slurpfile abi_json "$TEST_EVENTS_ABI_FILE" \
 		"{
         bundle: {source: (\"data:application/json;base64,\" + \$bundle_source_b64), hash: null},
         identities: [],
         userdata: {
 						chain1: { rpcUrl: \$rpc_url_1, contractAddress: \$contract_addr_1 },
 						chain2: { rpcUrl: \$rpc_url_2, contractAddress: \$contract_addr_2 },
-						contractAbi: \$abi_string,
+						contractAbi: (\$abi_json[0].abi | tojson),
 						ethereumPrivateKey: \$pk
         }
     }" >"$EVENT_WORKER_MANIFEST_FILE"

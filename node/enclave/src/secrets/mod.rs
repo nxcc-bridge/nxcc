@@ -14,6 +14,7 @@ use nxcc_interface::types::{
     policy::PolicyExecutionReport,
     secrets::{ConsumerInfo, SecretId, SecretsBox},
 };
+use rand::TryRngCore;
 use sha2::{Digest, Sha256};
 use tracing::{debug, error, info, warn};
 use x25519_dalek::PublicKey;
@@ -336,7 +337,9 @@ impl Secrets {
 
             // 3. Generate secret data (e.g., 32 bytes)
             let mut secret_data = vec![0u8; 32];
-            rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut secret_data);
+            let mut rng = rand::rngs::OsRng;
+            rng.try_fill_bytes(&mut secret_data)
+                .map_err(|err| anyhow::anyhow!("Failed to generate secret: {err}"))?;
 
             // 4. Store the secret (no expiry by default for generated secrets)
             let expiry = 0; // Or derive from policy/request? Defaulting to no expiry.

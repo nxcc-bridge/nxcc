@@ -223,46 +223,36 @@ var require_worker = __commonJS({
             userdata: env.USER_CONFIG || {},
             env
           };
-          const url = new URL(request.url);
-          if (request.method !== "POST") {
-            if (config.fetch) {
-              try {
-                const result = await config.fetch(request, context);
-                return convertToResponse(result);
-              } catch (error) {
-                return convertToResponse(error);
-              }
-            } else {
-              return new Response("HTTP handler not implemented", { status: 501 });
+          if (request.method === "POST") {
+            let vmInvocationPayload;
+            try {
+              vmInvocationPayload = await request.clone().json();
+            } catch (error) {
             }
-          }
-          try {
-            const vmInvocationPayload = await request.json();
-            const handler = handlers[vmInvocationPayload.handler];
-            if (handler) {
-              try {
-                const result = await handler(vmInvocationPayload.event_payload, context);
-                return convertToResponse(result);
-              } catch (error) {
-                return convertToResponse(error);
+            if (vmInvocationPayload && typeof vmInvocationPayload === "object" && typeof vmInvocationPayload.handler === "string") {
+              const handler = handlers[vmInvocationPayload.handler];
+              if (handler) {
+                try {
+                  const result = await handler(vmInvocationPayload.event_payload, context);
+                  return convertToResponse(result);
+                } catch (error) {
+                  return convertToResponse(error);
+                }
               }
-            } else {
               return new Response(`No handler for ${vmInvocationPayload.handler}`, {
                 status: 404
               });
             }
-          } catch (error) {
-            if (config.fetch) {
-              try {
-                const result = await config.fetch(request, context);
-                return convertToResponse(result);
-              } catch (fetchError) {
-                return convertToResponse(fetchError);
-              }
-            } else {
-              return new Response("HTTP handler not implemented", { status: 501 });
+          }
+          if (config.fetch) {
+            try {
+              const result = await config.fetch(request, context);
+              return convertToResponse(result);
+            } catch (error) {
+              return convertToResponse(error);
             }
           }
+          return new Response("HTTP handler not implemented", { status: 501 });
         }
       };
     }
@@ -273,7 +263,7 @@ var require_worker = __commonJS({
 var require_dist = __commonJS({
   "node_modules/.pnpm/@nxcc+sdk@file+..+..+sdk+lib/node_modules/@nxcc/sdk/dist/index.js"(exports) {
     "use strict";
-    var __createBinding = exports && exports.__createBinding || (Object.create ? function(o, m, k, k2) {
+    var __createBinding = exports && exports.__createBinding || (Object.create ? (function(o, m, k, k2) {
       if (k2 === void 0) k2 = k;
       var desc = Object.getOwnPropertyDescriptor(m, k);
       if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
@@ -282,16 +272,16 @@ var require_dist = __commonJS({
         } };
       }
       Object.defineProperty(o, k2, desc);
-    } : function(o, m, k, k2) {
+    }) : (function(o, m, k, k2) {
       if (k2 === void 0) k2 = k;
       o[k2] = m[k];
-    });
-    var __setModuleDefault = exports && exports.__setModuleDefault || (Object.create ? function(o, v) {
+    }));
+    var __setModuleDefault = exports && exports.__setModuleDefault || (Object.create ? (function(o, v) {
       Object.defineProperty(o, "default", { enumerable: true, value: v });
-    } : function(o, v) {
+    }) : function(o, v) {
       o["default"] = v;
     });
-    var __importStar = exports && exports.__importStar || /* @__PURE__ */ function() {
+    var __importStar = exports && exports.__importStar || /* @__PURE__ */ (function() {
       var ownKeys = function(o) {
         ownKeys = Object.getOwnPropertyNames || function(o2) {
           var ar = [];
@@ -309,7 +299,7 @@ var require_dist = __commonJS({
         __setModuleDefault(result, mod);
         return result;
       };
-    }();
+    })();
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.worker = exports.policy = exports.crypto = void 0;
     exports.crypto = __importStar(require_crypto());

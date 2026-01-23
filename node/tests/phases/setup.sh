@@ -74,8 +74,8 @@ setup_contracts() {
 	TEST_EVENTS_BYTECODE=$(jq -r .bytecode.object <"$SCRIPT_DIR/out/TestEvents.sol/TestEvents.json")
 	# shellcheck disable=SC2034  # TEST_EVENTS_ABI is extracted but may be used later in tests
 	TEST_EVENTS_ABI=$(jq .abi <"$SCRIPT_DIR/out/TestEvents.sol/TestEvents.json")
-	# shellcheck disable=SC2034  # Variable may be used by other test functions
-	TEST_EVENTS_ABI_STRING=$(jq -c .abi <"$SCRIPT_DIR/out/TestEvents.sol/TestEvents.json")
+	# shellcheck disable=SC2034  # Variable used by cross_chain_events for ABI file input
+	TEST_EVENTS_ABI_FILE="$SCRIPT_DIR/out/TestEvents.sol/TestEvents.json"
 	echo "Deploying contract to chain 1 ($ANVIL_CHAIN_ID_1)..."
 	DEPLOY_OUTPUT_1=$(cast send --json --rpc-url "$ANVIL_RPC_URL_1" --private-key "$DEPLOYER_PK" \
 		--create "$TEST_EVENTS_BYTECODE")

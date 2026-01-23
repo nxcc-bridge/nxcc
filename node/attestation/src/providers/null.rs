@@ -24,7 +24,7 @@ impl NullAttestationEvidence {
     pub fn new(userdata_hash: Vec<u8>, ephemeral_key: Vec<u8>) -> Self {
         use rand::Rng;
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let mut random_nonce = vec![0u8; 32];
         rng.fill(&mut random_nonce[..]);
 
@@ -91,7 +91,7 @@ impl NullAttestationProvider {
             .unwrap()
             .as_secs();
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // Randomize platform measurement to expose determinism bugs
         let mut platform_measurement = vec![0u8; 32];

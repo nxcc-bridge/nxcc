@@ -54,7 +54,7 @@ impl EventGateway {
                     AppError::Service(format!("Invalid RPC URL {}: {}", rpc_url, e))
                 })?;
                 let provider = ProviderBuilder::new()
-                    .on_ws(alloy_provider::WsConnect::new(url))
+                    .connect_ws(alloy_provider::WsConnect::new(url))
                     .await
                     .map_err(|_| {
                         AppError::Service(format!("Failed to connect provider to {rpc_url}"))
@@ -170,7 +170,7 @@ impl GatewayManager {
         let url = rpc_url
             .parse::<Url>()
             .map_err(|e| AppError::Service(format!("Invalid RPC URL {}: {}", rpc_url, e)))?;
-        let provider = ProviderBuilder::new().on_http(url);
+        let provider = ProviderBuilder::new().connect_http(url);
 
         let identity_contract = Identity::new(identity_address, provider.clone());
         let policy_url: String = identity_contract
