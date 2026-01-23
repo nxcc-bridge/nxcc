@@ -24,7 +24,17 @@ env:
 jobs:
   build-and-push:
     name: Build and Push to Registries
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
 
     permissions:
       contents: read
@@ -55,9 +65,6 @@ jobs:
       - name: Configure Docker for Google Artifact Registry
         run: gcloud auth configure-docker ${{ env.GCP_LOCATION }}-docker.pkg.dev
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -76,10 +83,11 @@ jobs:
 
       # Step 4: Build once, and push to all tags from the metadata step
       - name: Build and push Docker image
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: ./node
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platform }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -87,3 +95,88 @@ jobs:
             BUILD_MODE=release
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Export digest
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p /tmp/digests
+          echo "${{ steps.build.outputs.digest }}" > /tmp/digests/${{ matrix.arch }}
+
+      - name: Upload digest
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.arch }}
+          path: /tmp/digests/${{ matrix.arch }}
+
+  create-manifest:
+    name: Create and Push Multi-Arch Manifest
+    runs-on: ubuntu-24.04
+    needs: build-and-push
+    if: github.event_name != 'pull_request'
+
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
+    steps:
+      - name: Authenticate with Google Cloud
+        id: auth
+        uses: 'google-github-actions/auth@v2'
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Docker for Google Artifact Registry
+        run: gcloud auth configure-docker ${{ env.GCP_LOCATION }}-docker.pkg.dev
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ env.GCP_LOCATION }}-docker.pkg.dev/${{ steps.auth.outputs.project_id }}/${{ env.AR_REPO_NAME }}/${{ env.IMAGE_NAME }}
+            ${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=semver,pattern={{version}}
+            type=sha,prefix=,format=short
+
+      - name: Download amd64 digest
+        uses: actions/download-artifact@v4
+        with:
+          name: digests-amd64
+          path: /tmp/digests
+
+      - name: Download arm64 digest
+        uses: actions/download-artifact@v4
+        with:
+          name: digests-arm64
+          path: /tmp/digests
+
+      - name: Create and push manifest list
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          digest_amd64=$(cat /tmp/digests/amd64)
+          digest_arm64=$(cat /tmp/digests/arm64)
+
+          for tag in $TAGS; do
+            image="${tag%:*}"
+            docker buildx imagetools create \
+              -t "$tag" \
+              "${image}@${digest_amd64}" \
+              "${image}@${digest_arm64}"
+          done
