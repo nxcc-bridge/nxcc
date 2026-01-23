@@ -4,10 +4,10 @@
       "pattern": "^https://via.placeholder.com"
     },
     {
-      "pattern": "^localhost"
+      "pattern": "^(https?://)?localhost"
     },
     {
-      "pattern": "^127.0.0.1"
+      "pattern": "^(https?://)?127\\.0\\.0\\.1"
     }
   ],
   "httpHeaders": [
