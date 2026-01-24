@@ -32,6 +32,8 @@ NXCC_ZENROOM_VM_POSTBACK_BLOCK_PRIVATE_IPS=false \
 nxcc-zenroom-vm --server-mode uds --server-uds-path /tmp/nxcc/zenroom-vmm.sock --verbose
 ```
 
+Docker note: if the VM (or full node) runs in Docker and your postback receiver runs on the host, add `--add-host=host.docker.internal:host-gateway` when starting the container, bind the receiver to `0.0.0.0`, and include `host.docker.internal` in `NXCC_ZENROOM_VM_POSTBACK_ALLOWED_HOST_SUFFIXES` (plus the receiver port in `NXCC_ZENROOM_VM_POSTBACK_ALLOWED_PORTS`).
+
 ## Attach the VM to the daemon
 
 The daemon attaches VMs via UDS sockets. The default VM is still used for policy execution unless you explicitly move policies.
@@ -113,6 +115,7 @@ Postbacks are the only network egress path for Zenroom scripts.
   - `json_pointer`: optional pointer into parsed stdout JSON.
 
 Postbacks run only if:
+
 1. `userdata.postback.enabled` is true,
 2. `NXCC_ZENROOM_VM_POSTBACK_ENABLED=true`, and
 3. the URL passes the allowlist checks.

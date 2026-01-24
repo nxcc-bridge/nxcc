@@ -65,6 +65,8 @@ Start (or restart) a local Anvil chain in one terminal:
 anvil --disable-block-gas-limit
 ```
 
+Note: restarting Anvil resets the chain and wipes previous contracts. If you completed the blockchain events guide and want to reuse that token later, redeploy it after this restart (or start Anvil with `--disable-block-gas-limit` in the earlier guide and keep it running).
+
 We disable the block gas limit to store the policy entirely on-chain for development convenience. In production, one would store the policy in IPFS or a cloud storage bucket.
 
 Then deploy the deterministic `Identity.sol` contract using the CLI. The default Anvil signer `0xac0974…` works well for tutorials:

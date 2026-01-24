@@ -31,6 +31,22 @@ We keep the cryptography simple (EdDSA signatures) so the focus stays on the nXC
 - An identity contract address and token id from the previous guide.
 - Zenroom VM running and attached to the daemon (see the [Zenroom VM Reference](/docs/reference/developers/zenroom-vm/)).
 
+If you're running the node in Docker, restart it with the Zenroom VM enabled and postbacks allowlisted:
+
+```bash
+docker run --rm \
+  --add-host=host.docker.internal:host-gateway \
+  -p 127.0.0.1:6922:6922 \
+  -p 127.0.0.1:9000:9000 \
+  -e NXCC_ZENROOM_VM_ENABLED=true \
+  -e NXCC_ZENROOM_VM_POSTBACK_ENABLED=true \
+  -e NXCC_ZENROOM_VM_POSTBACK_ALLOWED_HOST_SUFFIXES=host.docker.internal,localhost,127.0.0.1 \
+  -e NXCC_ZENROOM_VM_POSTBACK_ALLOWED_SCHEMES=http \
+  -e NXCC_ZENROOM_VM_POSTBACK_ALLOWED_PORTS=9911 \
+  -e NXCC_ZENROOM_VM_POSTBACK_BLOCK_PRIVATE_IPS=false \
+  ghcr.io/nxcc-bridge/node:latest
+```
+
 ## 1. Write the Zencode worker
 
 Create `workers/consent_ticket.zen`:
@@ -46,6 +62,7 @@ and I have a 'base64' named 'ticket'
 and I have a 'eddsa public key' from 'Issuer'
 When I create the eddsa key with secret key 'bridge_secret'
 and I verify the 'credential' has a eddsa signature in 'eddsa signature' by 'Issuer'
+and I rename the 'eddsa signature' to 'credential_signature'
 and I create the eddsa signature of 'ticket'
 and I rename the 'eddsa signature' to 'ticket_signature'
 Then print the 'ticket'
@@ -144,11 +161,9 @@ Run them:
 
 ```bash
 zenroom -z zenroom/issuer_keygen.zen > zenroom/issuer_keyring.json
-zenroom -z zenroom/issuer_pubkey.zen -k zenroom/issuer_keyring.json > zenroom/issuer_pubkey.json
-zenroom -z zenroom/issuer_sign.zen \
-  -a zenroom/credential.b64.json \
-  -k zenroom/issuer_keyring.json \
-  > zenroom/credential_signature.json
+zenroom -z -k zenroom/issuer_keyring.json zenroom/issuer_pubkey.zen > zenroom/issuer_pubkey.json
+zenroom -z -a zenroom/credential.b64.json -k zenroom/issuer_keyring.json \
+  zenroom/issuer_sign.zen > zenroom/credential_signature.json
 ```
 
 Keep these three values handy:
@@ -208,7 +223,7 @@ Create `workers/manifest.zenroom.json` (replace the placeholders):
       "targets": [
         {
           "kind": "http",
-          "url": "http://127.0.0.1:9911/ingest",
+          "url": "http://host.docker.internal:9911/ingest",
           "method": "POST",
           "headers": {
             "content-type": "application/json"
@@ -225,14 +240,15 @@ Create `workers/manifest.zenroom.json` (replace the placeholders):
       "handler": "handleTransfer",
       "kind": "web3_event",
       "chain": 31337,
-      "address": ["0x5FbDB2315678afecb367f032d93F642f64180aa3"],
-      "topics": [
-        ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"]
-      ]
+      "address": ["TOKEN_CONTRACT_ADDRESS"],
+      "gateways": ["ws://host.docker.internal:8545"],
+      "topics": [["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"]]
     }
   ]
 }
 ```
+
+Tip: if you generate the file with a heredoc, use a _single-quoted_ delimiter (for example `<<'JSON'`) so `$secret` is not expanded by your shell.
 
 What to substitute:
 
@@ -241,6 +257,9 @@ What to substitute:
 - `ISSUER_SIGNATURE` from `zenroom/credential_signature.json`.
 - `ISSUER_PUBLIC_KEY` from `zenroom/issuer_pubkey.json`.
 - `TICKET_BASE64` from `zenroom/ticket.b64.json`.
+- `TOKEN_CONTRACT_ADDRESS` from the blockchain events guide. If you restarted Anvil in the identities guide, redeploy the token contract and use the new address.
+
+If you're running the nXCC node natively (not in Docker), replace `host.docker.internal` with `127.0.0.1` in the `chain`, `gateways`, and `postback` URL fields.
 
 The manifest requests a new identity-governed secret named `BRIDGE_SIGNING_SEED`. With the allow-all policy from the previous guide, the request will be approved and the VM will derive a 32-byte EdDSA seed inside the enclave.
 
@@ -249,10 +268,13 @@ The manifest requests a new identity-governed secret named `BRIDGE_SIGNING_SEED`
 1. Start a local postback receiver (for the demo):
 
 ```bash
-python3 node/tests/zenroom/postback_server.py
+python3 node/tests/zenroom/postback_server.py \
+  --host 0.0.0.0 \
+  --port 9911 \
+  --output zenroom/postback.json
 ```
 
-2. Make sure the Zenroom VM is running and postbacks are allowlisted for `localhost` (see the [Zenroom VM Reference](/docs/reference/developers/zenroom-vm/)).
+2. Make sure the Zenroom VM is running and postbacks are allowlisted for `host.docker.internal` (or `127.0.0.1` if running natively) on port `9911` (see the [Zenroom VM Reference](/docs/reference/developers/zenroom-vm/)).
 
 3. Deploy the worker:
 
@@ -266,20 +288,20 @@ If you do not have `jq`, run the deploy command without the pipe and copy the `w
 4. Trigger a transfer on your local chain (reuse the contract from the blockchain events guide):
 
 ```bash
-cast send 0x5FbDB2315678afecb367f032d93F642f64180aa3 \
+cast send TOKEN_CONTRACT_ADDRESS \
   "transfer(address,uint256)" \
   0x70997970C51812dc3A010C7d01b50e0d17dc79C8 \
   1000000000000000000 \
   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 ```
 
-5. Inspect the postback output (or check the worker logs):
+5. Inspect the postback output:
 
 ```bash
-nxcc worker logs "$WORKER_ID" --tail 50
+cat zenroom/postback.json
 ```
 
-You should see the postback server print a JSON payload containing `ticket` and `ticket_signature`. That payload is what you would forward to Chain B or a cross-chain relay.
+You should see a JSON payload containing `ticket` and `ticket_signature` in `zenroom/postback.json`. That payload is what you would forward to Chain B or a cross-chain relay.
 
 ## Recap and next steps
 
@@ -292,7 +314,8 @@ You now have a Zenroom worker that:
 
 Next steps:
 
-- Tighten the policy to gate when `BRIDGE_SIGNING_SEED` is exposed.
-- Replace the demo `ticket` with data derived from `nxcc.event` metadata.
-- Use the `evm_jsonrpc` postback target to call a Chain B contract directly.
+<!-- - Tighten the policy to gate when `BRIDGE_SIGNING_SEED` is exposed. -->
+<!-- - Replace the demo `ticket` with data derived from `nxcc.event` metadata. -->
+<!-- - Use the `evm_jsonrpc` postback target to call a Chain B contract directly. -->
+
 - Explore the full schema in the [Zenroom VM Reference](/docs/reference/developers/zenroom-vm/).

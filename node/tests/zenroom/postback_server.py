@@ -21,11 +21,12 @@ class PostbackHandler(BaseHTTPRequestHandler):
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=9911)
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
 
-    server = HTTPServer(("127.0.0.1", args.port), PostbackHandler)
+    server = HTTPServer((args.host, args.port), PostbackHandler)
     server.output_path = args.output
     server.serve_forever()
 

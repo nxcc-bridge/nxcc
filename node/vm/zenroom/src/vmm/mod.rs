@@ -120,9 +120,10 @@ impl ZenroomVmm {
 
         let mut timeout_ms = self.config.exec_timeout_ms;
         if let Some(limits) = worker.limits.as_ref()
-            && limits.max_runtime_seconds > 0 {
-                timeout_ms = timeout_ms.min(limits.max_runtime_seconds.saturating_mul(1000));
-            }
+            && limits.max_runtime_seconds > 0
+        {
+            timeout_ms = timeout_ms.min(limits.max_runtime_seconds.saturating_mul(1000));
+        }
 
         let exec_outcome = execute_zenroom(
             &exec_path,
@@ -1062,25 +1063,24 @@ impl VmRuntime for ZenroomVmm {
             return Err(ZenroomVmError::WorkerNotFound(id).into());
         }
 
-        if follow
-            && let Some(mut streamer) = self.log_manager.create_log_streamer(&id) {
-                tokio::spawn(async move {
-                    while let Some(entry) = streamer.next_log().await {
-                        let timestamp_ms = SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_millis() as u64;
-                        let response = StreamWorkerLogsResponse {
-                            log_line: entry.line,
-                            timestamp_ms,
-                            is_historical: false,
-                        };
-                        if tx.send(Ok(response)).await.is_err() {
-                            break;
-                        }
+        if follow && let Some(mut streamer) = self.log_manager.create_log_streamer(&id) {
+            tokio::spawn(async move {
+                while let Some(entry) = streamer.next_log().await {
+                    let timestamp_ms = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64;
+                    let response = StreamWorkerLogsResponse {
+                        log_line: entry.line,
+                        timestamp_ms,
+                        is_historical: false,
+                    };
+                    if tx.send(Ok(response)).await.is_err() {
+                        break;
                     }
-                });
-            }
+                }
+            });
+        }
 
         Ok(ReceiverStream::new(rx))
     }
@@ -1490,11 +1490,12 @@ async fn execute_zenroom(
     };
 
     if let Some(mut stdin) = child.stdin.take()
-        && let Err(err) = stdin.write_all(input.as_bytes()).await {
-            error = Some(ErrorInfo::new("exec_failed", err.to_string()));
-            let _ = child.kill().await;
-            return ExecOutcome { output, error };
-        }
+        && let Err(err) = stdin.write_all(input.as_bytes()).await
+    {
+        error = Some(ErrorInfo::new("exec_failed", err.to_string()));
+        let _ = child.kill().await;
+        return ExecOutcome { output, error };
+    }
 
     let stdout = match child.stdout.take() {
         Some(stdout) => stdout,

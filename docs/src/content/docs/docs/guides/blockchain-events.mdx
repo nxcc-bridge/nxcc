@@ -49,8 +49,10 @@ curl -L https://foundry.paradigm.xyz | bash && foundryup
 Run a local Ethereum chain in a separate terminal:
 
 ```bash
-anvil
+anvil --disable-block-gas-limit
 ```
+
+Keep this Anvil instance running for the next guides; restarting Anvil resets the chain and wipes deployed contracts.
 
 Then create and deploy a simple ERC-20 token that emits `Transfer` events:
 
@@ -77,8 +79,9 @@ contract TestToken {
 }
 EOF
 
-forge create TestToken.sol:TestToken \
+forge create --root . TestToken.sol:TestToken \
   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+  --rpc-url http://localhost:8545 \
   --broadcast
 ```
 
