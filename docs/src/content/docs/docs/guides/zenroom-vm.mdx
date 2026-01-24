@@ -303,6 +303,14 @@ cat zenroom/postback.json
 
 You should see a JSON payload containing `ticket` and `ticket_signature` in `zenroom/postback.json`. That payload is what you would forward to Chain B or a cross-chain relay.
 
+Optionally, confirm the worker logs:
+
+```bash
+nxcc worker logs "$WORKER_ID" --tail 50
+```
+
+The log output includes Zenroom stdout plus a summary of each postback target.
+
 ## Recap and next steps
 
 You now have a Zenroom worker that:

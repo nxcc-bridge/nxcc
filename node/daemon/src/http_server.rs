@@ -418,14 +418,36 @@ async fn worker_logs_handler(
         worker_id, params.tail_lines, params.follow
     );
 
+    let resolved_worker_id = {
+        let active_orders = state
+            .work_order_orchestrator
+            .active_work_orders
+            .read()
+            .await;
+        active_orders
+            .get(&worker_id)
+            .map(|order| order.enclave_worker_id.clone())
+            .unwrap_or_else(|| worker_id.clone())
+    };
+
+    if resolved_worker_id != worker_id {
+        info!(
+            "Resolved work order id {} to enclave worker id {} for log retrieval",
+            worker_id, resolved_worker_id
+        );
+    }
+
     // If follow is false, return static logs as JSON
     if !params.follow {
-        info!("Retrieving static logs for worker_id: {}", worker_id);
+        info!(
+            "Retrieving static logs for worker_id: {} (resolved_id: {})",
+            worker_id, resolved_worker_id
+        );
 
         // Get static logs from the enclave
         match state
             .enclave_client
-            .get_worker_logs(worker_id.clone())
+            .get_worker_logs(resolved_worker_id.clone())
             .await
         {
             Ok(logs) => {
@@ -462,7 +484,7 @@ async fn worker_logs_handler(
     let log_stream = match state
         .enclave_client
         .stream_worker_logs(
-            worker_id.clone(),
+            resolved_worker_id.clone(),
             params.tail_lines.unwrap_or(0),
             params.follow,
         )

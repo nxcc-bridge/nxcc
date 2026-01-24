@@ -225,6 +225,11 @@ if [ "$submit_success" != "true" ]; then
   echo "Error: work order submission failed: $submit_response" >&2
   exit 1
 fi
+WORK_ORDER_ID=$(echo "$submit_response" | jq -r .work_order_id)
+if [ -z "$WORK_ORDER_ID" ] || [ "$WORK_ORDER_ID" = "null" ]; then
+  echo "Error: work order submission did not return a work_order_id: $submit_response" >&2
+  exit 1
+fi
 
 printf "Waiting for postback...\n"
 for _i in $(seq 1 50); do
@@ -250,6 +255,42 @@ if [ "$POSTBACK_VALUE" != "Hello_World" ]; then
 fi
 
 printf "SUCCESS: Zenroom postback received: %s\n" "$POSTBACK_VALUE"
+
+printf "Testing Zenroom worker logs for work order: %s\n" "$WORK_ORDER_ID"
+LOGS_URL="http://127.0.0.1:6922/api/workers/${WORK_ORDER_ID}/logs"
+STATIC_LOGS_FILE="$TEST_DIR/zenroom_worker_logs.json"
+LOGS_HTTP_STATUS=$(curl -s -w "%{http_code}" -o "$STATIC_LOGS_FILE" "$LOGS_URL?follow=false" || echo "000")
+if [ "$LOGS_HTTP_STATUS" != "200" ]; then
+  echo "Error: expected 200 from logs endpoint, got $LOGS_HTTP_STATUS" >&2
+  echo "Logs response:" >&2
+  cat "$STATIC_LOGS_FILE" >&2 || true
+  exit 1
+fi
+if ! jq -e '.logs and .worker_id and .total_lines != null and .is_streaming == false' "$STATIC_LOGS_FILE" >/dev/null 2>&1; then
+  echo "Error: logs response JSON structure invalid" >&2
+  cat "$STATIC_LOGS_FILE" >&2 || true
+  exit 1
+fi
+if ! jq -e '.logs[] | strings | test("Hello_World")' "$STATIC_LOGS_FILE" >/dev/null 2>&1; then
+  echo "Error: logs did not include expected Hello_World output" >&2
+  cat "$STATIC_LOGS_FILE" >&2 || true
+  exit 1
+fi
+
+STREAM_LOGS_FILE="$TEST_DIR/zenroom_worker_logs_stream.txt"
+timeout 5s curl -s -H "Accept: text/event-stream" \
+  "$LOGS_URL?follow=true&tail=5" >"$STREAM_LOGS_FILE" 2>/dev/null || true
+if [ ! -s "$STREAM_LOGS_FILE" ]; then
+  echo "Error: streaming logs output was empty" >&2
+  exit 1
+fi
+if ! grep -q "Hello_World" "$STREAM_LOGS_FILE"; then
+  echo "Error: streaming logs did not include expected Hello_World output" >&2
+  echo "Stream output:" >&2
+  head -20 "$STREAM_LOGS_FILE" >&2 || true
+  exit 1
+fi
+printf "SUCCESS: Zenroom logs available via HTTP (static + streaming)\n"
 
 base64_len() {
   python3 - "$1" <<'PY'
