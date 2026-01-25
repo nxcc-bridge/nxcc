@@ -53,11 +53,36 @@ export interface HttpRequestWorkerEvent extends BaseWorkerEvent {
 export interface Web3WorkerEvent extends BaseWorkerEvent {
   kind: "web3_event";
   chain: ChainIdentifier;
-  address: Address[];
-  topics: Hex[][];
+  address?: Address[];
+  topics?: Hex[][];
+  gateways?: string[];
 }
 
-export type WorkerEvent = LaunchWorkerEvent | HttpRequestWorkerEvent | Web3WorkerEvent;
+export type ScheduleMode = "rate";
+export type ScheduleCatchUp = "skip" | "coalesce" | "queue";
+
+export interface ScheduledEventPolicy {
+  catch_up?: ScheduleCatchUp;
+  max_lateness_ms?: number;
+  jitter_budget_ms?: number;
+}
+
+export interface ScheduledWorkerEvent extends BaseWorkerEvent {
+  kind: "scheduled";
+  period_ms: number;
+  mode?: ScheduleMode;
+  phase_ms?: number;
+  start_at?: string;
+  end_at?: string;
+  max_occurrences?: number;
+  policy?: ScheduledEventPolicy;
+}
+
+export type WorkerEvent =
+  | LaunchWorkerEvent
+  | HttpRequestWorkerEvent
+  | Web3WorkerEvent
+  | ScheduledWorkerEvent;
 
 export interface WorkOrderPayload {
   id: string;
