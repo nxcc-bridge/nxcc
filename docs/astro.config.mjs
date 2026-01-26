@@ -118,6 +118,10 @@ export default defineConfig({
           ],
         },
       ],
+      components: {
+        ThemeProvider: "./src/components/ThemeProvider.astro",
+        ThemeSelect: "./src/components/ThemeSelect.astro",
+      },
       customCss: ["./src/styles/global.css"],
     }),
     vue(),
