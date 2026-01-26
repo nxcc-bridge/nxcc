@@ -177,6 +177,39 @@ a.site-title.sl-flex {
   border: none !important;
 }
 
+.nxcc-diagram-wrap {
+  margin: 1.5rem 0;
+}
+
+.nxcc-diagram {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+:root {
+  --nxcc-diagram-ink: var(--sl-color-white);
+}
+
+.nxcc-diagram text {
+  fill: var(--nxcc-diagram-ink);
+}
+
+.nxcc-diagram [stroke="black"],
+.nxcc-diagram [stroke="#000000"] {
+  stroke: var(--nxcc-diagram-ink);
+}
+
+.nxcc-diagram [fill="black"],
+.nxcc-diagram [fill="#000000"] {
+  fill: var(--nxcc-diagram-ink);
+}
+
+.nxcc-diagram [fill="white"] {
+  fill: transparent;
+}
+
 @layer utilities {
   .bg-dot-pattern {
     background-image: radial-gradient(theme(colors.gray.200) 1px, transparent 1px);

@@ -80,14 +80,14 @@ cargo test
 ### Docker Deployment
 
 ```bash
-# Build production image
-docker build -t nxcc-node .
+# Build debug image (recommended for local testing)
+./infra/infra.sh image build --debug
 
 docker run --rm \
   --add-host=host.docker.internal:host-gateway \
   -p 127.0.0.1:6922:6922 \
   -p 127.0.0.1:9000:9000 \
-  nxcc-node
+  nxcc-node:debug
 ```
 
 ## Development Workflow
@@ -218,8 +218,8 @@ For detailed performance metrics and benchmarking, see [benchmark results](../be
 ### Docker
 
 ```bash
-docker build -t nxcc-node .
-docker run -p 9000:9000 -p 50051:50051 nxcc-node
+./infra/infra.sh image build --debug
+docker run -p 9000:9000 -p 50051:50051 nxcc-node:debug
 ```
 
 ### Kubernetes

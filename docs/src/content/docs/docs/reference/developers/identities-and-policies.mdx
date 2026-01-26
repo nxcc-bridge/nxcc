@@ -3,6 +3,8 @@ title: Identities & Policies
 description: A deep dive into nXCC's on-chain identity and programmable policy system.
 ---
 
+import SecretSharingDiagram from "../../../../../assets/diagrams/secret-sharing.svg";
+
 Identities and Policies are the foundation of nXCC's security model. They provide a verifiable, on-chain root of trust for all off-chain operations, ensuring that only authorized workers can access sensitive data and perform actions.
 
 ## Identities: On-Chain Root of Trust
@@ -93,5 +95,19 @@ export default {
   },
 };
 ```
+
+## Secret Acquisition and Sharing
+
+When a worker is deployed, the daemon inspects its manifest for requested identities and performs a self-authorization step. For each requested secret, it executes the policy inside the runner enclave using the node's own `EnvReport` (attestation plus any configured operator signature). If any policy denies the request, the work order is rejected before the worker starts.
+
+If a required secret is missing or expired, the daemon's secrets service requests it from peers over P2P. Peers validate the request by running the policy against the requester's `EnvReport`, then ask their secrets enclave to package approved secrets into an encrypted `SecretsBox`. The requester validates each response against the policy again and stores accepted bundles into its own secrets enclave via `put_secrets`. If no peer responds before the timeout, the secrets enclave can generate a new secret locally (when configured) and proceed.
+
+<div class="nxcc-diagram-wrap">
+  <SecretSharingDiagram
+    class="nxcc-diagram"
+    role="img"
+    aria-label="Secret acquisition and sharing flow between nXCC nodes, policies, and enclaves."
+  />
+</div>
 
 By combining on-chain identity NFTs with off-chain, TEE-executed policy workers, nXCC provides a flexible and powerful framework for building secure, decentralized applications.

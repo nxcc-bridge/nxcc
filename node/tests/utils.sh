@@ -63,7 +63,7 @@ Error: Cloudflare's workerd runtime is required but was not found on PATH.
 
 Install options:
   - $os_hint
-  - Prefer containers? Use the packaged image: docker build -t nxcc-node node && docker run --rm nxcc-node
+  - Prefer containers? From repo root run: ./infra/infra.sh image build --debug, then docker run --rm nxcc-node:debug
 
 To use a custom workerd binary, set NXCC_WORKERD_BINARY_PATH=/path/to/workerd (or WORKERD_BIN_PATH) before running this script.
 EOF

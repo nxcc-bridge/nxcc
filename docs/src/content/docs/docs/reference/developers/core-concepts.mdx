@@ -3,6 +3,8 @@ title: Core Concepts
 description: Understand the fundamental building blocks of the nXCC platform.
 ---
 
+import SystemDiagram from "../../../../../assets/diagrams/system-diagram.svg";
+
 The nXCC platform is built on a few core concepts that work together to provide a secure, programmable, and decentralized environment for off-chain computation. Understanding these concepts is key to building powerful cross-chain applications.
 
 ## The nXCC Architecture
@@ -15,7 +17,13 @@ At a high level, an nXCC node is composed of three main components:
 
 These components interact based on the following core concepts.
 
-![nXCC System Diagram](/assets/system-diagram.svg)
+<div class="nxcc-diagram-wrap">
+  <SystemDiagram
+    class="nxcc-diagram"
+    role="img"
+    aria-label="nXCC system diagram showing the daemon, platform services enclave, and execution environment."
+  />
+</div>
 
 ### 1. Identities
 
