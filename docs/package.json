@@ -18,7 +18,7 @@
     "@fontsource/inter": "^5.2.8",
     "@lucide/astro": "^0.562.0",
     "@tailwindcss/vite": "^4.1.18",
-    "astro": "^5.16.14",
+    "astro": "^5.18.1",
     "lucide-vue-next": "^0.562.0",
     "shiki": "^3.21.0",
     "tailwindcss": "^4.1.18",
