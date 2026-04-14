@@ -32,6 +32,6 @@ test = ["nxcc-attestation"] # enables mock client
 http = "1.4.0"
 nxcc-attestation = { path = "../../attestation" }
 pem = "3.0.6"
-rand = "0.9.2"
+rand = "0.9.3"
 rustls = { version = "0.23", features = ["aws-lc-rs"] }
 x509-parser = "0.18.0"
