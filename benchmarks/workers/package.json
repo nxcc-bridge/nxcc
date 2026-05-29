@@ -6,7 +6,7 @@
     "build": "esbuild *.js --bundle --outdir=dist --format=esm"
   },
   "dependencies": {
-    "viem": "^2.44.4"
+    "viem": "^2.51.3"
   },
   "devDependencies": {
     "esbuild": "^0.27.2"
